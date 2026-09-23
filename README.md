@@ -1,0 +1,65 @@
+# hermes-tameru-plugin
+
+[Tameru](https://github.com/0xWhiteMage/tameru-compaction-system) deterministic
+context compaction for [Hermes Agent](https://github.com/NousResearch/hermes-agent) —
+installed as a standalone plugin, no Hermes source tree changes.
+
+Tameru is an extractive compactor: it keeps the exact bytes that matter and
+drops provably redundant context. No model calls, no generated summaries in
+the deterministic path, byte-identical output across runs, fail-open on
+anything ambiguous. Dropped tool payloads go to a local CCR store and are
+recoverable via the `[CC-Retrieve:]` pointer.
+
+## Install
+
+### Option A — user plugin directory (no pip)
+
+```bash
+git clone https://github.com/0xWhiteMage/hermes-tameru-plugin
+cp -r hermes-tameru-plugin/hermes_tameru_plugin ~/.hermes/plugins/tameru
+```
+
+### Option B — pip (entry-point discovery)
+
+```bash
+pip install git+https://github.com/0xWhiteMage/hermes-tameru-plugin
+```
+
+The package exposes the `hermes_agent.plugins` entry point; Hermes discovers
+it automatically.
+
+## Enable
+
+In `~/.hermes/config.yaml`:
+
+```yaml
+context:
+  engine: tameru
+```
+
+Restart Hermes. The engine wraps the built-in summariser: Tameru prunes tool
+payloads deterministically first, the stock compressor still handles
+conversational compaction, and a post-check returns the pruned transcript
+untouched if summarisation would lose query facts or bulky tool content.
+
+## Uninstall
+
+Remove `~/.hermes/plugins/tameru/` (or `pip uninstall hermes-tameru-plugin`)
+and set `context.engine: compressor`.
+
+## How it stays in sync
+
+`hermes_tameru_plugin/tameru/` is vendored from
+`tameru-compaction-system/src/tameru/` and updated with:
+
+```bash
+python scripts/sync_to_harness.py <this_repo>/hermes_tameru_plugin/tameru \
+    --manifest <this_repo>/hermes_tameru_plugin/plugin.yaml
+```
+
+`plugin.yaml` and both `__init__.py` files are owned by this repo; everything
+else under `tameru/` is upstream-owned.
+
+## License
+
+MIT — same as upstream Tameru.
