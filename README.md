@@ -5,10 +5,18 @@ context compaction for [Hermes Agent](https://github.com/NousResearch/hermes-age
 installed as a standalone plugin, no Hermes source tree changes.
 
 Tameru is an extractive compactor: it keeps the exact bytes that matter and
-drops provably redundant context. No model calls, no generated summaries in
-the deterministic path, byte-identical output across runs, fail-open on
-anything ambiguous. Dropped tool payloads go to a local CCR store and are
-recoverable via the `[CC-Retrieve:]` pointer.
+drops provably redundant context. Its pruning pass makes **no model calls**,
+generates no summaries, is byte-identical across runs, and fails open on
+anything ambiguous.
+
+Two scoping notes for this integration:
+
+- The engine wraps Hermes' built-in summariser, which remains an LLM call —
+  Tameru adds none. Its timing gate suppresses only the Tameru prune step;
+  the parent's subsequent compaction is unaffected.
+- Dropped tool payloads are **not** persisted or recoverable here: the
+  adapter runs with CCR and citations off, since a live tool-prune has no
+  retrieval path. (CCR reversibility exists in the standalone API.)
 
 ## Install
 
