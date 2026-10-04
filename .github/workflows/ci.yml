@@ -1,0 +1,125 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+  schedule:
+    - cron: "17 4 * * *"   # nightly: the plugin hooks private Hermes seams, so watch Hermes main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+env:
+  # Hermes Agent revision the plugin is verified against. Bump deliberately, together with
+  # tests/test_seam_contract.py if a seam moved.
+  HERMES_PINNED_SHA: 1298c8e74baa73e1a2b90124228d017261ac6bc4
+
+jobs:
+  # Stub-mode unit tests: tests/hermes_stub stands in for Hermes' ``agent`` package.
+  unit:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          allow-prereleases: true
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e .[dev]
+      - run: python -m pytest -m "not perf"
+
+  # Real Hermes at the pinned SHA (required). Hermes' dependencies only resolve on Python 3.14.
+  real-hermes:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: ${{ env.HERMES_PINNED_SHA }}
+          path: hermes-agent
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ./hermes-agent pytest
+      - run: python -m pytest -m "not perf"
+        env:
+          HERMES_REPO_ROOT: ${{ github.workspace }}/hermes-agent
+
+  # Same suite against Hermes main: an early warning that a private seam moved. Never blocks.
+  hermes-main-nightly:
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4
+        with:
+          repository: NousResearch/hermes-agent
+          ref: main
+          path: hermes-agent
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.14"
+          allow-prereleases: true
+      - run: python -m pip install --upgrade pip
+      - run: pip install -e ./hermes-agent pytest
+      - run: python -m pytest -m "not perf"
+        env:
+          HERMES_REPO_ROOT: ${{ github.workspace }}/hermes-agent
+
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install "ruff>=0.5"
+      - run: ruff check .
+      - run: python -m compileall -q hermes_tameru_plugin
+
+  # The wheel must contain every plugin module, plugin.yaml and the Hermes entry point.
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install build
+      - run: python -m build
+      - name: Assert the wheel contains every module, plugin.yaml and the entry point (and the sdist no tests)
+        run: |
+          python - <<'PY'
+          import glob
+          import pathlib
+          import tarfile
+          import zipfile
+
+          (wheel,) = glob.glob("dist/*.whl")
+          with zipfile.ZipFile(wheel) as zf:
+              names = set(zf.namelist())
+              entry_points = next(zf.read(n).decode() for n in names if n.endswith("entry_points.txt"))
+          expected = {
+              p.as_posix()
+              for p in pathlib.Path("hermes_tameru_plugin").rglob("*.py")
+              if "__pycache__" not in p.parts
+          } | {"hermes_tameru_plugin/plugin.yaml"}
+          missing = sorted(expected - names)
+          assert not missing, f"missing from wheel: {missing}"
+          assert not [n for n in names if n.startswith(("tests/", "docs/"))], "tests/docs must not ship"
+          assert "[hermes_agent.plugins]" in entry_points and "tameru = hermes_tameru_plugin" in entry_points, entry_points
+          (sdist,) = glob.glob("dist/*.tar.gz")
+          with tarfile.open(sdist) as tf:
+              stray = [n for n in tf.getnames() if "/tests/" in n or "/docs/" in n]
+          assert not stray, f"sdist must not ship tests/docs (see MANIFEST.in): {stray}"
+          print(f"{wheel}: {len(expected)} expected files present; {sdist} has no tests/docs")
+          PY

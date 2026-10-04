@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77"]
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,15 +7,38 @@ name = "hermes-tameru-plugin"
 version = "1.3.0"
 description = "Tameru deterministic extractive context compaction engine for Hermes Agent"
 readme = "README.md"
-license = { text = "MIT" }
-requires-python = ">=3.10"
+license = "MIT"
+license-files = ["LICENSE"]
+requires-python = ">=3.11"
 dependencies = []
+
+[project.optional-dependencies]
+dev = ["pytest>=7", "ruff>=0.5"]
 
 [project.entry-points."hermes_agent.plugins"]
 tameru = "hermes_tameru_plugin"
 
+# tests/ is deliberately not packaged. New plugin modules live directly in hermes_tameru_plugin/
+# (covered by the first entry); the vendored engine is the second.
 [tool.setuptools]
 packages = ["hermes_tameru_plugin", "hermes_tameru_plugin.tameru"]
 
 [tool.setuptools.package-data]
 hermes_tameru_plugin = ["plugin.yaml"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+markers = [
+    "real_hermes: needs a real Hermes checkout (HERMES_REPO_ROOT); skipped otherwise",
+    "stub_only: only meaningful against tests/hermes_stub; skipped on real Hermes",
+    "perf: scaling/performance assertion; CI runs the suite with -m 'not perf'",
+]
+
+[tool.ruff]
+line-length = 100
+extend-exclude = ["hermes_tameru_plugin/tameru", "tests/hermes_stub"]
+
+[tool.ruff.lint.per-file-ignores]
+# Test code: imports after a sys.path edit (E402), terse generator lambdas (E731), `l` for "line" (E741).
+"tests/**" = ["E402", "E731", "E741"]

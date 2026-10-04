@@ -1,0 +1,3 @@
+# tests/ (conftest, the Hermes stub, the eval harness) lives in the repo only. Without this line
+# distutils' default file list ships tests/test*.py by themselves: orphan tests that cannot run.
+prune tests
