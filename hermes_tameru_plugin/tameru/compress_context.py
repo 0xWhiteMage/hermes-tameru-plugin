@@ -423,10 +423,13 @@ _ERR_LEVEL_RE = re.compile(r"\b(?:ERROR|FATAL|CRITICAL|PANIC|FAIL(?:ED|URE)?)\b"
 _ERR_EXC_RE = re.compile(r"^\s*(?:\w+\.)*\w*(?:Error|Exception):")
 _ERR_PANIC_RE = re.compile(r"\bpanic:")
 _ERR_TRACEBACK = "Traceback (most recent call last)"
-# "0 errors", "errors: 0", "failed=0" report success; they are not errors.
+# "0 errors", "errors: 0", "failed=0" report success; they are not errors. Only
+# a literal zero count negates: "no error body" / "no error handler" are the
+# TEXT of a real ERROR line, and a decimal ("ERROR: 0.5 exceeds ...") is not a
+# count.
 _ERR_NEGATED_RE = re.compile(
-    r"\b(?:0|no|zero)\s+(?:errors?|failures?|failed|fatals?)\b"
-    r"|\b(?:errors?|failures?|failed|fatals?|critical)\s*[=:]\s*0\b",
+    r"\b0\s+(?:errors?|failures?|failed|fatals?)\b"
+    r"|\b(?:errors?|failures?|failed|fatals?|critical)\s*[=:]\s*0(?!\w|\.\d)",
     re.IGNORECASE,
 )
 _COUNT_PREFIX_RE = re.compile(r"^\s*\[\u00d7\d+\]\s*")
@@ -448,9 +451,15 @@ def _is_error_line(line: str) -> bool:
     """Level-tagged error, ``XxxError:``/``Exception:`` head, traceback head or
     Go panic — the lines :func:`error_fingerprints` keys on."""
     s = line[:_RX_LINE_CAP]
+    # The exception head is anchored at the line start: look past a "[×N] "
+    # collapse prefix so the same failure keeps its key after a fold.
+    head = s
+    prefix = _COUNT_PREFIX_RE.match(s)
+    if prefix:
+        head = s[prefix.end():]
     if not (
         _ERR_LEVEL_RE.search(s)
-        or _ERR_EXC_RE.match(s)
+        or _ERR_EXC_RE.match(head)
         or _ERR_TRACEBACK in s
         or _ERR_PANIC_RE.search(s)
     ):
@@ -766,7 +775,7 @@ def preprocess_json(text: str, query: str) -> str:
     needles = _json_query_needles(query)
     try:
         parsed = json.loads(stripped)
-    except (json.JSONDecodeError, RecursionError):
+    except (ValueError, RecursionError):  # JSONDecodeError + the 4300-digit int limit
         return text
     try:
         crushed = _crush_value(parsed, 0, needles)
@@ -971,7 +980,7 @@ def unwrap_tool_payload(text: str) -> ToolPayload:
         return unwrapped
     try:
         parsed = json.loads(stripped)
-    except (json.JSONDecodeError, RecursionError):
+    except (ValueError, RecursionError):  # JSONDecodeError + the 4300-digit int limit
         return unwrapped
     if not isinstance(parsed, dict):
         return unwrapped
@@ -2681,6 +2690,7 @@ def _render(
     reorder_best: bool = False,
     gap_marker: Callable[[int, int], str] | None = None,
     total_chars: int | None = None,
+    content_lines: list[str] | None = None,
 ) -> str:
     chronological_blocks = sorted(blocks, key=lambda block: block["start"])
     block_starts = [block["start"] for block in chronological_blocks]
@@ -2704,11 +2714,16 @@ def _render(
     # gap_marker=None keeps the historical "[…]" behaviour byte for byte.
     marker_fn = gap_marker if (gap_marker is not None and not citations) else None
     total = total_chars if total_chars is not None else _span_chars(lines, 0, len(lines))
+    # "Is this span blank?" is judged on the lines the scorer read: a
+    # numbered-code gutter ("75|", "    75\t") makes an empty source line
+    # non-empty in `lines`, and would earn a bogus marker between two
+    # adjacent kept blocks.
+    probe_lines = content_lines if content_lines is not None else lines
 
     def _gap(lo: int, hi: int) -> str | None:
         if marker_fn is None:
             return None
-        if not any(ln.strip() for ln in lines[lo:hi]):
+        if not any(ln.strip() for ln in probe_lines[lo:hi]):
             return None
         text = marker_fn(_span_chars(lines, lo, hi), total)
         return str(text) if text else None
@@ -2798,6 +2813,7 @@ def _gap_marker_reserve(
     kept: set[int],
     gap_marker: Callable[[int, int], str],
     total_chars: int,
+    content_lines: list[str] | None = None,
 ) -> int:
     """Tokens the caller's gap markers will take for this keep-set: the number
     of dropped spans that hold content (leading, internal, trailing) times the
@@ -2806,9 +2822,10 @@ def _gap_marker_reserve(
     if not spans:
         return 0
     n = len(lines)
+    probe_lines = content_lines if content_lines is not None else lines
 
     def content(lo: int, hi: int) -> bool:
-        return any(ln.strip() for ln in lines[lo:hi])
+        return any(ln.strip() for ln in probe_lines[lo:hi])
 
     gaps = 1 if spans[0][0] > 0 and content(0, spans[0][0]) else 0
     prev_end = spans[0][1]
@@ -3608,7 +3625,7 @@ def _crush_json_items(payload: str, query: str, max_keep: int = 50) -> str | Non
     """
     try:
         data = json.loads(payload)
-    except (json.JSONDecodeError, RecursionError):
+    except (ValueError, RecursionError):  # JSONDecodeError + the 4300-digit int limit
         return None
 
     # Find arrays to crush: top-level list, or dicts with list values
@@ -4626,7 +4643,9 @@ def compress_context(
             # Marker text costs tokens too: reserve them out of the budget and
             # select once more (gap count may shift slightly; one pass is
             # enough to keep the rendered output near the requested ratio).
-            reserve = _gap_marker_reserve(lines, scored, kept, gap_marker, len(caller_text))
+            reserve = _gap_marker_reserve(
+                lines, scored, kept, gap_marker, len(caller_text), content_lines=score_lines
+            )
             if reserve:
                 kept, fail_open, risk = select_fixed(
                     scored, ratio, out=selection, reserve_tokens=reserve
@@ -4646,7 +4665,13 @@ def compress_context(
         # Temporal supersession: a later kept block that explicitly marks an
         # earlier kept block stale (now/obsolete/override/newer date) prunes
         # it after cache replay, so a frozen keep cannot revive stale data.
-        kept = apply_supersession(scored, kept)
+        # v1.4.0: not for content the caller says is source code. The markers
+        # are prose ("override", "deprecated", " disabled" are ordinary code
+        # words) and two functions share identifiers by construction, so a
+        # comment in a LATER function would evict the very function asked
+        # about — and the hint exists so function bodies survive.
+        if not code_hint:
+            kept = apply_supersession(scored, kept)
         # v1.4.0 (E3) safety net: neither a frozen drop nor supersession may
         # evict the one exemplar block of a level-tagged log error.
         kept |= {
@@ -4701,6 +4726,7 @@ def compress_context(
             compressed = _render(
                 lines, scored, kept, citations=citations, reorder_best=_reorder,
                 gap_marker=gap_marker, total_chars=len(caller_text),
+                content_lines=score_lines,
             )
             fail_open = False
             risk = "high"
@@ -4726,6 +4752,7 @@ def compress_context(
         compressed = _render(
             lines, scored, kept, citations=citations, reorder_best=_reorder,
             gap_marker=gap_marker, total_chars=len(caller_text),
+            content_lines=score_lines,
         )
 
     recall = _entity_recall(text, compressed, query or "")
@@ -4742,6 +4769,7 @@ def compress_context(
         compressed = _render(
             lines, scored, kept, citations=citations, reorder_best=_reorder,
             gap_marker=gap_marker, total_chars=len(caller_text),
+            content_lines=score_lines,
         )
         recall = _entity_recall(text, compressed, query or "")
         trust_risks = {
@@ -4760,6 +4788,7 @@ def compress_context(
             compressed = _render(
                 lines, scored, kept, citations=citations, reorder_best=_reorder,
                 gap_marker=gap_marker, total_chars=len(caller_text),
+                content_lines=score_lines,
             )
             risk = "high"
         elif recall < 0.5:

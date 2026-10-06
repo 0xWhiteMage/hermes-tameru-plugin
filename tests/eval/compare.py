@@ -44,6 +44,8 @@ def rows(result: dict) -> list[tuple[str, str]]:
         ("error fingerprints", f"{m['error_fingerprints']['retained']}/{m['error_fingerprints']['total']}"),
         ("re-fetch opportunities", f"{m['refetch']['refetch_opportunities']} calls ({m['refetch']['missing_needed_facts']} facts)"),
         ("pairing violations", str(m["pairing"]["violations"])),
+        ("rows rewritten between commits", str(m["byte_stability"]["rewrites_outside_commits"]) if "byte_stability" in m else "n/a"),
+        ("input chars (final request)", f"{m['input_chars_final']:,}"),
         ("engine seconds", f"{result['timing']['engine_seconds']:.2f}"),
     ]
 

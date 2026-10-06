@@ -8,7 +8,9 @@ engine hooks only *what a demoted tool result becomes*:
   summary a row goes down a ladder: superseded header, query-aware extract, structural brief,
   header-only, and as the last rung Hermes' own line (``_Ladder`` below);
 * seam B, ``_demote_stale_tail_tools`` (lean tail mode): stubs of Tameru rows keep their ``ref``;
-* ``_augment_summary_lean``: the artifact trail of ``ledger``;
+* ``_prune_old_tool_results`` / ``_prune_boundary``: with ``prune_tail="tokens"`` the proactive prune sizes its
+  protected tail like a full compaction does (and runs pass 4), instead of by message count alone;
+* ``_augment_summary_lean``: the artifact trail and the errors of ``ledger``;
 * ``tameru_expand``: the tool that hands a pruned original back.
 
 Public overrides only set the per-pass scope (a ``ContextVar``) and return ``super()``'s object
@@ -62,6 +64,7 @@ from .render import (
     header_only,
     make_ref,
     omitted_categories,
+    parse_header,
     render,
     retarget_rung,
 )
@@ -87,9 +90,11 @@ _EXEMPT_TOOLS = frozenset({
     "session_search", "tameru_expand", "delegate_task", "cronjob_manage", "process_manage",
 })
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
+_BODYLESS = frozenset({"header", "superseded"})   # rungs that keep no text of the original
 _MEMO_ENTRIES = 2048
 _MEMO_MAX_TEXT = 50_000       # a bigger extract is recomputed rather than held
 _LINE_BREAK_RE = re.compile(r"\r\n|\r|\n")
+_SPILL_PATH_RE = re.compile(r"^Full output saved to: (\S[^\n]*)$", re.MULTILINE)   # Hermes' <persisted-output> block
 _VERSION_RE = re.compile(r"^version:\s*(\S+)", re.MULTILINE)
 
 
@@ -150,12 +155,14 @@ class _Pass:
     focus: str | None = None                      # ``/compress <topic>``
     degrade: bool = False                         # escalation re-run: header-only rungs only
     pressure: bool = False                        # inside Hermes' pass 4
+    full: bool = False                            # inside compress(): a full compaction, not the proactive prune
     renders: int = 0                              # rows rewritten into a Tameru row
     messages: list[dict] | None = None            # the list Hermes was handed (indices match ``result``)
     query_cache: dict = field(default_factory=dict)
     supersede: SupersessionIndex | None = None
     age_demote: set[int] | None = None            # rendered rows beyond the retained budget
     room: int = 0                                 # retained-extract chars left for new rows
+    gone: list[str] = field(default_factory=list)  # refs of rows this pass cut down to a body-less header
 
 
 _SCOPE: ContextVar[_Pass | None] = ContextVar("tameru_pass", default=None)
@@ -177,6 +184,12 @@ def _json_args(raw: Any) -> dict:
     except ValueError:
         return {}
     return parsed if isinstance(parsed, dict) else {}
+
+
+def _spill_note(content: str) -> str:
+    """``spilled to <path>`` for a Hermes ``<persisted-output>`` block: the pointer is all that is worth keeping."""
+    found = _SPILL_PATH_RE.search(content) if PERSISTED_OUTPUT_TAG in content else None
+    return f"spilled to {found.group(1).strip()}" if found else ""
 
 
 def _line_count(text: str) -> int:
@@ -232,8 +245,13 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         try:
             self._settings_sha = _digest(repr(settings))[:12]
             self._seams = self._probe()
+            self._token_tail = (
+                "protect_tail_tokens" in inspect.signature(_Base._prune_old_tool_results).parameters
+                and callable(getattr(_Base, "_prune_boundary", None))
+            )
         except Exception as exc:  # degrade to stock behaviour
             self._settings_sha = ""
+            self._token_tail = False
             self._seams = SeamReport(reasons=(f"seam probe failed: {exc!r}",))
 
     @classmethod
@@ -314,7 +332,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 messages, current_tokens=current_tokens, focus_topic=focus_topic, force=force,
                 memory_context=memory_context, **kwargs,
             )
-        token = _SCOPE.set(self._new_scope(messages, focus=focus_topic))
+        token = _SCOPE.set(self._new_scope(messages, focus=focus_topic, full=True))
         started = time.perf_counter()
         try:
             return parent(
@@ -325,16 +343,39 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             _SCOPE.reset(token)
             self._telemetry.time(time.perf_counter() - started)
 
-    def _pressure_demote_tail(self, *args, **kwargs):
-        """Pass 4: rows demote to header-only so one commit covers every eligible row."""
+    def _token_tail_scope(self) -> _Pass | None:
+        """The scope of a proactive prune whose tail is token-sized (``prune_tail``), else None."""
         scope = _SCOPE.get()
-        if scope is None:
-            return super()._pressure_demote_tail(*args, **kwargs)
-        was, scope.pressure = scope.pressure, True
-        try:
-            return super()._pressure_demote_tail(*args, **kwargs)
-        finally:
-            scope.pressure = was
+        if (
+            scope is None or scope.full or not self._token_tail
+            or not (self._settings.enabled and self._seams.demote and self._settings.prune_tail == "tokens")
+        ):
+            return None
+        return scope
+
+    def _prune_old_tool_results(self, messages, protect_tail_count, protect_tail_tokens=None, *args, **kwargs):
+        """Hermes' prune passes; the proactive prune also sizes its tail in tokens (``prune_tail``).
+
+        Hermes protects the newest ``protect_last_n`` messages of a proactive prune whatever they weigh,
+        so a 50 KB result read a few turns ago stays verbatim for the rest of the session while the
+        cache-breaking commit leaves it behind. With ``prune_tail="tokens"`` the prune gets what a full
+        compaction gets: the tail is capped at ``tail_token_budget`` (the shorter of that and
+        ``protect_last_n`` wins, never fewer than Hermes' message floor) and pass 4 demotes the tail's
+        oldest bodies while it still exceeds its soft budget. The ladder keeps the query-relevant
+        lines and a ``ref`` of every row it cuts.
+        """
+        if protect_tail_tokens is None and self._token_tail_scope() is not None:
+            budget = getattr(self, "tail_token_budget", None)
+            if isinstance(budget, int) and not isinstance(budget, bool) and budget > 0:
+                protect_tail_tokens = budget
+        return super()._prune_old_tool_results(messages, protect_tail_count, protect_tail_tokens, *args, **kwargs)
+
+    def _prune_boundary(self, result, protect_tail_count, protect_tail_tokens):
+        """First index of the protected tail; in a token-tail prune never earlier than Hermes' count tail."""
+        boundary = super()._prune_boundary(result, protect_tail_count, protect_tail_tokens)
+        if protect_tail_tokens and self._token_tail_scope() is not None:
+            boundary = max(boundary, len(result) - protect_tail_count)
+        return boundary
 
     # ---- seam A: the ladder -------------------------------------------------------------------
     def _demote_tool_result_at(self, result, idx, call_id_to_tool, min_prune_chars, *rest, **kw):
@@ -379,6 +420,10 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         if scope.age_demote is None:
             self._plan_retention(scope, result)
         tool, raw_args = call_id_to_tool.get(msg.get("tool_call_id") or "", ("unknown", ""))
+        if not rest and not scope.full and tool in self._exempt:
+            # Pass 4 of a proactive prune (``prune_tail``): an instruction or state row, such as a skill the
+            # model believes is loaded, is not worth a ghost; only a full compaction may override that guard.
+            return False
 
         kind = classify_render(content)
         if kind:
@@ -395,9 +440,12 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         if (
             not isinstance(line, str) or tool in self._exempt
             or refused_summary(tool, args, content) is not None
-            or PERSISTED_OUTPUT_TAG in content or SKILL_PRUNED_MARKER_PREFIX in content
+            or SKILL_PRUNED_MARKER_PREFIX in content
             or len(content) < settings.min_tool_chars
         ):
+            return self._keep_parent(result, idx, shadow[0], tool)
+        spill = _spill_note(content)
+        if PERSISTED_OUTPUT_TAG in content and not spill:
             return self._keep_parent(result, idx, shadow[0], tool)
         if scope.budget < len(content):
             self._telemetry.count("budget_skip", tool=tool)
@@ -406,6 +454,11 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
 
         pl = parse_payload(content)
         ref = make_ref(msg, content)
+        if spill:   # Hermes already bounded this row; what the agent needs later is where the rest is
+            return self._commit(
+                result, idx, content, tool, ref, pl, scope, "header",
+                self._header_row(line, pl, ref, "header", spill),
+            )
         view = _view(scope, result)
         if settings.supersession:
             if scope.supersede is None:
@@ -567,6 +620,8 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         drop_stale_api_content(row)
         result[idx] = row
         scope.renders += 1
+        if rung in _BODYLESS:
+            scope.gone.append(ref)
         self._telemetry.count("render", rung=rung, tool=tool)
         self._telemetry.add_chars(len(content), len(rendered))
         self._telemetry.emit({
@@ -588,6 +643,10 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             self._store.put(ref, pl.inner, tool=tool, meta=pl.meta)
         elif "\n" in content:
             new = retarget_rung(content, "header")
+            header = parse_header(content)
+            scope = _SCOPE.get()
+            if scope is not None and header is not None:
+                scope.gone.append(header["ref"])
         else:
             return False   # already header-only
         if new is None or new == content:
@@ -621,6 +680,13 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 tool, raw_args = calls.get(before.get("tool_call_id") or "", ("unknown", ""))
                 if classify_render(content) == "v1":
                     new = retarget_rung(content, "header")
+                elif _spill_note(content) and tool not in self._exempt:
+                    pl = parse_payload(content)
+                    ref = make_ref(before, content)
+                    new = self._header_row(
+                        summarize_tool_result(tool, raw_args, content), pl, ref, "header", _spill_note(content),
+                    )
+                    self._store.put(ref, pl.inner, tool=tool, meta=pl.meta)
                 elif self._leaves_to_hermes(tool, raw_args, content):
                     continue
                 else:
@@ -655,11 +721,33 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         try:
             previous = getattr(self, "_previous_summary", None) or ""
             return merge_into_summary(
-                out, build_ledger(turns_to_summarize, self._store, previous=previous),
+                out, build_ledger(
+                    turns_to_summarize, self._store, previous=previous, skip_tools=self._exempt,
+                    extra_originals=self._bodyless_originals(),
+                ),
             )
         except Exception:
             self._telemetry.count("error", where="ledger")
             return out
+
+    def _bodyless_originals(self) -> list[str]:
+        """Originals of the rows that hold no text of them any more, wherever they sit in the transcript.
+
+        The summary covers only the middle of a compaction; a row cut down to its header and kept in the
+        tail would otherwise take its errors with it. Rows cut in this pass are tracked as they are
+        committed, earlier ones are found by their header in the list Hermes handed in.
+        """
+        scope = _SCOPE.get()
+        if scope is None:
+            return []
+        refs = list(scope.gone)
+        for msg in scope.messages or ():
+            content = msg.get("content") if msg.get("role") == "tool" else None
+            header = parse_header(content) if isinstance(content, str) and "\n" not in content else None
+            if header is not None and header["rung"] in _BODYLESS:
+                refs.append(header["ref"])
+        texts = (self._store.get(ref) for ref in dict.fromkeys(refs))
+        return [text for text in texts if text]
 
     # ---- tools --------------------------------------------------------------------------------
     def get_tool_schemas(self) -> list[dict[str, Any]]:

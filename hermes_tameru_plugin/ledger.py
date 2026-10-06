@@ -11,13 +11,20 @@ duplicating, an earlier section)::
     - `tests/test_app.py`: read; last read FAILED
     Commands:
     - `pytest -x tests/` -> exit 1 (x3)
+    Errors:
+      2025-03-14T02:17:41Z ERROR order=ORD-90417 capture failed: gateway timeout
 
 Files carry their operations (read / write / patch / search) with counts and the outcome of the
 last one (``ok``, ``FAILED``, or ``?`` when only a pruned stub is left). Commands carry the last
-exit code. Entries keep first-seen order. The section stays within ``max_chars``: when it would
-not fit, the least recently touched entries are left out and a ``(+N more)`` line says how many.
+exit code. Entries keep first-seen order. Files and Commands stay within ``max_chars``: when they
+would not fit, the least recently touched entries are left out and a ``(+N more)`` line says how many.
 An outcome is read from the original when the row is a Tameru render whose original the store
 still holds, else from the row itself.
+
+Errors are the first exemplar line of every distinct error fingerprint (``error_fingerprints``) in the
+original text of the summarized tool results, so a lossy summarizer cannot drop the failures a pruned
+log held; they live in their own budget (``ERRORS_CHARS``, on top of ``max_chars``) and the most
+recently seen win when they do not all fit.
 
 The text never contains ``User asked:`` (Hermes' summary validator reads it as a user claim), and a
 path or command that holds a probable credential is shown as ``<redacted>``.
@@ -29,7 +36,7 @@ from __future__ import annotations
 import itertools
 import json
 import re
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, NamedTuple
 
@@ -41,16 +48,18 @@ from .hermes_compat import (
     refused_summary,
     tool_calls_by_id,
 )
-from .payload import meta_line
+from .payload import meta_line, parse_payload
 from .render import parse_header
-from .tameru.compress_context import contains_secret
+from .tameru.compress_context import contains_secret, error_fingerprints
 from .tameru.transcript import text_of
 
 if TYPE_CHECKING:
     from .recovery import OriginalStore
 
 HEADING = "## Artifact Trail (Tameru, exact)"
-MAX_CHARS = 1500
+MAX_CHARS = 1500              # the Files and Commands lines
+ERRORS_CHARS = 1400           # the Errors lines, on top of that
+ERROR_LINE_CHARS = 200
 
 _FILE_OPS = {"read_file": "read", "write_file": "write", "patch": "patch", "search_files": "search"}
 _PATH_KEYS = ("path", "file_path", "file", "filename")   # not ``target``: a search mode
@@ -61,6 +70,8 @@ _V4A_PATH_RE = re.compile(
 )
 _EXIT_RE = re.compile(r"-> exit (-?\d+)")
 _USER_ASKED_RE = re.compile(r"\bUser\s+asked\s*:", re.IGNORECASE)
+_ERROR_SCAN_BUDGET = 2_000_000   # characters of original text scanned for errors in one ledger
+_ERROR_SCAN_MIN_CHARS = 60    # a shorter result cannot hold an error worth a line
 _LABEL_CHARS = 120
 _STUB_HEAD_CHARS = 400
 _REFUSAL_MAX_CHARS = 4000     # a refusal notice is short; do not parse megabytes for one
@@ -72,6 +83,7 @@ _SECTION_RE = re.compile(rf"^{re.escape(HEADING)}[^\n]*(?:\n|\Z).*?(?=^## |\Z)",
 _FILE_LINE_RE = re.compile(
     r"^- `(?P<path>[^`]+)`: (?P<ops>[^;\n]+); last (?P<op>[a-z]+) (?P<result>ok|FAILED|\?)$", re.MULTILINE,
 )
+_ERROR_LINE_RE = re.compile(r"^ {2}(?P<line>\S.*)$", re.MULTILINE)
 _COMMAND_LINE_RE = re.compile(
     r"^- `(?P<command>[^`]+)` -> (?P<result>exit -?\d+|exit \?|FAILED|not run)(?: \(x(?P<runs>\d+)\))?$",
     re.MULTILINE,
@@ -85,6 +97,12 @@ class _FileEntry:
     last_op: str = ""
     last_result: str = ""
     touched: int = 0          # position of the last touch on the build's clock
+
+
+@dataclass
+class _ErrorEntry:
+    line: str
+    touched: int = 0
 
 
 @dataclass
@@ -146,6 +164,42 @@ def _inspect(tool: str, args: dict, content: str, store: OriginalStore | None) -
         code = int(match[1]) if match else None
     failed = bool(envelope.get("error")) or envelope.get("success") is False or " FAILED" in head
     return _Outcome(failed=failed, exit_code=code)
+
+
+def _original_text(content: str, store: OriginalStore | None) -> str:
+    """The text a result's errors are read from: the stored original of a Tameru render, else its own text.
+
+    "" for what holds no original any more (Hermes' stubs and placeholders).
+    """
+    if (
+        content.startswith((PRUNED_PLACEHOLDER, DUPLICATE_PREFIX)) or PERSISTED_OUTPUT_TAG in content
+        or LEAN_STUB_RE.match(content)
+    ):
+        return ""
+    header = parse_header(content)
+    if header is None:
+        return parse_payload(content).inner
+    kept = store.get(header["ref"]) if store is not None else None
+    return kept if kept is not None else content
+
+
+def _error_line(line: str) -> str:
+    line = " ".join(line.split())
+    return line if len(line) <= ERROR_LINE_CHARS else line[:ERROR_LINE_CHARS - 1] + "…"
+
+
+def _note_errors(
+    errors: dict[str, _ErrorEntry], clock: Iterator[int], text: str,
+) -> None:
+    """Remember the first exemplar of every error fingerprint of ``text`` (a repeat only refreshes its age)."""
+    for fp, line in error_fingerprints(text).items():
+        entry = errors.get(fp)
+        if entry is None:
+            shown = _error_line(line)
+            if contains_secret(shown):
+                continue
+            entry = errors[fp] = _ErrorEntry(shown)
+        entry.touched = next(clock)
 
 
 def _file_result(outcome: _Outcome) -> str:
@@ -210,7 +264,7 @@ def _note_command(
 
 def _seed(
     previous: str, files: dict[str, _FileEntry], commands: dict[str, _CommandEntry],
-    clock: Iterator[int],
+    errors: dict[str, _ErrorEntry], clock: Iterator[int],
 ) -> None:
     """Entries of the Artifact Trail section of an earlier summary (our own line grammar).
 
@@ -226,6 +280,9 @@ def _seed(
         files[m["path"]].last_op = m["op"]
     for m in _COMMAND_LINE_RE.finditer(text):
         _note_command(commands, clock, m["command"], m["result"], int(m["runs"] or 1))
+    marker = text.find("\nErrors:\n")
+    for m in _ERROR_LINE_RE.finditer(text[marker + 1:] if marker >= 0 else ""):
+        _note_errors(errors, clock, m["line"])
 
 
 # ---- rendering -------------------------------------------------------------------------------
@@ -267,19 +324,32 @@ def _fit(items: list[tuple[int, str]], budget: int) -> list[str]:
 
 def build_ledger(
     turns: list[dict], store: OriginalStore | None = None, *, max_chars: int = MAX_CHARS,
-    previous: str = "",
+    previous: str = "", skip_tools: frozenset[str] = frozenset(), extra_originals: Iterable[str] = (),
 ) -> str:
     """The Artifact Trail section for ``turns`` (the messages being summarized), or "".
 
     ``store`` supplies the originals of Tameru-rendered rows. ``previous`` is the summary from
     before ``turns`` (Hermes' ``_previous_summary``, which does not yet account for them): the
     entries of its Artifact Trail section come first, so the trail accumulates across compactions.
-    The result never exceeds ``max_chars``.
+    ``skip_tools`` names tools whose results are not scanned for errors (instructions, memory);
+    ``extra_originals`` are texts of results outside ``turns`` whose bodies are gone (also scanned).
+    Files and Commands never exceed ``max_chars``, the Errors lines ``ERRORS_CHARS``.
     """
     files: dict[str, _FileEntry] = {}
     commands: dict[str, _CommandEntry] = {}
+    errors: dict[str, _ErrorEntry] = {}
     clock = itertools.count()
-    _seed(previous, files, commands, clock)
+    _seed(previous, files, commands, errors, clock)
+    scan_room = _ERROR_SCAN_BUDGET
+
+    def scan(text: str) -> None:
+        nonlocal scan_room
+        if text and len(text) <= scan_room:
+            scan_room -= len(text)
+            _note_errors(errors, clock, text)
+
+    for text in extra_originals:
+        scan(text)
     calls: dict[str, tuple[str, Any]] = {}
     for msg in turns:
         if not isinstance(msg, dict):
@@ -288,10 +358,13 @@ def build_ledger(
             calls.update(tool_calls_by_id([msg]))
         elif msg.get("role") == "tool" and msg.get("tool_call_id"):
             tool, raw_args = calls.get(str(msg["tool_call_id"]), ("", None))
+            content = text_of(msg.get("content"))
+            if tool not in skip_tools and len(content) >= _ERROR_SCAN_MIN_CHARS:
+                scan(_original_text(content, store))
             if tool != "terminal" and tool not in _FILE_OPS:
                 continue
             args = _args(raw_args)
-            outcome = _inspect(tool, args, text_of(msg.get("content")), store)
+            outcome = _inspect(tool, args, content, store)
             if tool == "terminal":
                 command = args.get("command")
                 if isinstance(command, str) and command.strip():
@@ -308,18 +381,22 @@ def build_ledger(
     ]
     sections = [(title, lines) for title, lines in sections if lines]
     room = max_chars - len(HEADING) - 1 - sum(len(title) + 1 for title, _ in sections)
-    if not sections or room <= _MORE_RESERVE:
-        return ""
-    # An earlier section may take 60% of the room (all of what the later ones leave unused).
-    out = [HEADING]
-    for i, (title, items) in enumerate(sections):
-        later = sum(_size([line for _, line in rest]) for _, rest in sections[i + 1:])
-        budget = room if i == len(sections) - 1 else max(room * 3 // 5, room - later)
-        kept = _fit(items, budget)
-        room -= _size(kept)
+    out: list[str] = []
+    if sections and room > _MORE_RESERVE:
+        # An earlier section may take 60% of the room (all of what the later ones leave unused).
+        for i, (title, items) in enumerate(sections):
+            later = sum(_size([line for _, line in rest]) for _, rest in sections[i + 1:])
+            budget = room if i == len(sections) - 1 else max(room * 3 // 5, room - later)
+            kept = _fit(items, budget)
+            room -= _size(kept)
+            if kept:
+                out += [title, *kept]
+    error_items = [(entry.touched, _plain(f"  {entry.line}")) for entry in errors.values()]
+    if error_items and ERRORS_CHARS > len("Errors:") + 1 + _MORE_RESERVE:
+        kept = _fit(error_items, ERRORS_CHARS - len("Errors:") - 1)
         if kept:
-            out += [title, *kept]
-    return "\n".join(out)
+            out += ["Errors:", *kept]
+    return "\n".join([HEADING, *out]) if out else ""
 
 
 def merge_into_summary(summary: str, ledger: str) -> str:

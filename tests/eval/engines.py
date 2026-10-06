@@ -3,7 +3,8 @@
 ``ENGINES`` maps a name to a zero-argument factory returning a fresh context engine. Hermes is imported
 inside the factories, so importing this module never needs it.
 
-``tameru_1_4`` is the seam-based plugin engine. ``tameru_1_3`` is kept only as the name of the frozen 1.3.0
+``tameru_1_4`` is the seam-based plugin engine with the SAME Hermes prune gates as ``stock`` (an equal-gates
+comparison); ``tameru_1_4_product`` is the plugin as shipped, with its own gate defaults. ``tameru_1_3`` is kept only as the name of the frozen 1.3.0
 baseline: its factory returns whatever engine the plugin ships now, ``plugin_engine_version()`` reports what
 that is, and the replay test compares the saved 1.3.0 baseline only while the vendored engine is 1.3.x.
 """
@@ -15,7 +16,7 @@ from typing import Any
 ENGINES: dict[str, Callable[[], Any]] = {}
 
 #: Engines the replay test runs and compares exactly against ``baselines/<name>.json``.
-BASELINE_ENGINES = ("stock", "tameru_1_4")
+BASELINE_ENGINES = ("stock", "tameru_1_4", "tameru_1_4_product")
 
 
 def register(name: str, factory: Callable[[], Any] | None = None):
@@ -69,3 +70,11 @@ def tameru_1_4() -> Any:
     from hermes_tameru_plugin.engine import TameruContextEngine
 
     return TameruContextEngine(proactive_prune_tokens=48_000, proactive_prune_min_result_chars=8000, quiet_mode=True)
+
+
+@register("tameru_1_4_product")
+def tameru_1_4_product() -> Any:
+    """The plugin exactly as shipped (its own prune-gate defaults: 48K tokens, 2000-char minimum result)."""
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(quiet_mode=True)

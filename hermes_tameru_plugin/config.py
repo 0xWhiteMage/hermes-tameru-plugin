@@ -25,6 +25,7 @@ from typing import Any, NamedTuple
 PLUGIN_ID = "tameru"
 ENV_PREFIX = "TAMERU_HERMES_"
 RISK_LEVELS = ("low", "medium", "high")
+PRUNE_TAILS = ("tokens", "count")
 
 _TRUE_WORDS = frozenset({"1", "true", "yes", "on"})
 _FALSE_WORDS = frozenset({"0", "false", "no", "off"})
@@ -46,9 +47,10 @@ class TameruSettings:
     store_max_entries: int = 512
     store_max_chars: int = 32_000_000
     pass_char_budget: int = 4_000_000          # inner chars Tameru may process per pass; beyond -> parent_line
-    retained_extract_budget_chars: int = 60_000
+    retained_extract_budget_chars: int = 6000  # bodies (extract/brief) the newest rendered rows may keep in all
+    prune_tail: str = "tokens"                 # proactive-prune tail: "tokens" (Hermes' tail_token_budget) | "count" (protect_last_n)
     supersession: bool = True
-    ledger: bool = False
+    ledger: bool = True
     telemetry_log: str = ""                    # JSONL path; "" = off
     default_proactive_prune_tokens: int = 48_000          # only if compression.proactive_prune_tokens is not set
     default_proactive_prune_min_result_chars: int = 2000  # only if compression.proactive_prune_min_result_chars is not set
@@ -120,6 +122,12 @@ def _parse_risk(raw: Any) -> str:
     raise ValueError(f"expected one of {', '.join(RISK_LEVELS)}")
 
 
+def _parse_prune_tail(raw: Any) -> str:
+    if isinstance(raw, str) and raw.strip().lower() in PRUNE_TAILS:
+        return raw.strip().lower()
+    raise ValueError(f"expected one of {', '.join(PRUNE_TAILS)}")
+
+
 def _parse_str(raw: Any) -> str:
     if not isinstance(raw, str):
         raise ValueError("expected a string")
@@ -169,6 +177,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "store_max_chars": _min_int(0),
     "pass_char_budget": _min_int(0),
     "retained_extract_budget_chars": _min_int(0),
+    "prune_tail": _parse_prune_tail,
     "supersession": _parse_bool,
     "ledger": _parse_bool,
     "telemetry_log": _parse_str,

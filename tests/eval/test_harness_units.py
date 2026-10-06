@@ -405,3 +405,15 @@ def test_gold_needles_occur_only_where_the_fact_is_planted(seed):
                         assert key == g.call_key, f"{g.id} also appears in the result of {key}"
                     else:
                         assert role == g.source, f"{g.id} ({g.source}) also appears in a {role} row"
+
+
+def test_byte_stability_check_flags_rewrites_only_outside_commits():
+    sess = _Session(object(), None, estimate=lambda messages: 0)
+    row = {"role": "tool", "tool_call_id": "a", "content": "x"}
+    sess._check_stability([row, {"role": "tool", "tool_call_id": "b", "content": "k"}], committed=False)
+    sess._check_stability([{**row, "content": "y"}, {"role": "tool", "tool_call_id": "b", "content": "k"}], committed=True)
+    assert sess.rewrites == []                      # a commit (prune or compaction) may rewrite rows
+    sess._check_stability([{**row, "content": "y"}, {"role": "tool", "tool_call_id": "b", "content": "k"}], committed=False)
+    assert sess.rewrites == []                      # same bytes: stable
+    sess._check_stability([{**row, "content": "z"}], committed=False)
+    assert len(sess.rewrites) == 1 and "a" in sess.rewrites[0]

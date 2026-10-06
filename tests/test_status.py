@@ -160,8 +160,11 @@ def test_the_artifact_trail_joins_the_summary_when_the_ledger_is_on():
     assert again.count("## Artifact Trail") == 1 and len(again) <= len(summary) + 50
 
 
-def test_the_ledger_is_off_by_default_and_with_the_kill_switch():
-    for settings in (TameruSettings(), TameruSettings(enabled=False, ledger=True)):
+def test_the_ledger_is_on_by_default_and_off_when_disabled():
+    default = make_engine(TameruSettings())
+    default.tail_mode = "lean"
+    assert "Artifact Trail" in default._augment_summary_lean("## Goal\nfix it", _turns())
+    for settings in (TameruSettings(ledger=False), TameruSettings(enabled=False, ledger=True)):
         engine = make_engine(settings)
         engine.tail_mode = "lean"
         assert "Artifact Trail" not in engine._augment_summary_lean("## Goal\nfix it", _turns())

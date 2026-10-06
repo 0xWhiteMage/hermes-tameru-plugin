@@ -114,8 +114,19 @@ def test_refused_call_keeps_the_refusal_line():
         assert "BLOCKED, not run" in out[idx]["content"]
 
 
-def test_persisted_output_and_skill_markers_take_hermes_line():
+def test_persisted_output_becomes_a_header_that_keeps_the_spill_path():
+    """Hermes already bounded the row; the pointer to the rest is what the agent needs later."""
     persisted = hp.persisted_output("p" * 1500, 90_000, "/tmp/spill.txt")
+    engine, msgs, idx = _one("q", "terminal", {"command": "make"}, persisted)
+    _, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    assert classify_render(row) == "v1" and parse_header(row)["rung"] == "header"
+    assert "spilled to /tmp/spill.txt" in row and "\n" not in row and len(row) < 400
+    assert engine._store.get(parse_header(row)["ref"]) == persisted
+
+
+def test_a_persisted_block_without_a_path_takes_hermes_line():
+    persisted = hp.persisted_output("p" * 1500, 90_000, "/tmp/spill.txt").replace("Full output saved to:", "Saved:")
     engine, msgs, idx = _one("q", "terminal", {"command": "make"}, persisted)
     _, out = demote(engine, msgs, idx)
     assert classify_render(out[idx]["content"]) is None and len(out[idx]["content"]) < 400

@@ -323,6 +323,8 @@ class _Session:
         self._prev_total = 0
         self.last_request: list[dict] = []
         self.last_usage: dict | None = None
+        self._prev_rows: dict[str, str] | None = None
+        self.rewrites: list[str] = []  # tool rows whose bytes changed in a request that committed nothing
 
     # -- Hermes' pre-request check --------------------------------------------------------------
     def preflight(self, messages: list[dict], *, after_tools: bool = False) -> list[dict]:
@@ -403,10 +405,25 @@ class _Session:
         if self._overrides("on_turn_complete"):
             self.engine.on_turn_complete(list(messages), usage=self.last_usage)
 
+    def _check_stability(self, messages: list[dict], *, committed: bool) -> None:
+        """Hermes only rewrites history inside a commit (a prune or a compaction): between commits every
+        tool row must keep its bytes, or the prompt cache breaks for nothing."""
+        rows = {
+            str(m["tool_call_id"]): m["content"] for m in messages
+            if m.get("role") == "tool" and m.get("tool_call_id") and isinstance(m.get("content"), str)
+        }
+        if self._prev_rows is not None and not committed:
+            for cid, content in rows.items():
+                if cid in self._prev_rows and self._prev_rows[cid] != content:
+                    self.rewrites.append(f"request {len(self.request_chars) + 1}: {cid}")
+        self._prev_rows = rows
+
     # -- one model request ----------------------------------------------------------------------
     def request(self, messages: list[dict]) -> list[dict]:
         """Preflight (may compact the persisted transcript), then send. Returns the persisted transcript."""
+        before = messages
         messages = self.preflight(messages, after_tools=bool(messages) and messages[-1].get("role") == "tool")
+        self._check_stability(messages, committed=messages is not before)
         sent = self._select(messages)
         wire = [_wire(m) for m in sent]
         total = sum(len(w) + 1 for w in wire)
@@ -559,6 +576,8 @@ def run_session(
         },
         "pairing": {"requests_checked": len(sess.request_chars), "violations": len(sess.violations),
                     "details": sess.violations[:10]},
+        "byte_stability": {"requests_checked": len(sess.request_chars), "rewrites_outside_commits": len(sess.rewrites),
+                           "details": sess.rewrites[:10]},
     }
     series = {
         "request_chars": sess.request_chars,

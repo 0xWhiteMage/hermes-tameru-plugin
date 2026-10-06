@@ -117,7 +117,10 @@ def _contains_selector(text: str, selectors: tuple[str, ...]) -> bool:
 def _json_loads(value: str):
     try:
         return json.loads(value)
-    except (json.JSONDecodeError, RecursionError):
+    except (ValueError, RecursionError):
+        # ValueError covers JSONDecodeError AND CPython's 4300-digit int limit:
+        # a line that is a 20k-digit number (`python -c "print(2**100000)"`)
+        # is not JSON for our purposes, and must not crash detection.
         return None
 
 

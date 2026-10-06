@@ -92,6 +92,11 @@
    "requests_checked": 62,
    "violations": 0,
    "details": []
+  },
+  "byte_stability": {
+   "requests_checked": 62,
+   "rewrites_outside_commits": 0,
+   "details": []
   }
  },
  "series": {
@@ -313,10 +318,10 @@
   ]
  },
  "timing": {
-  "engine_seconds": 0.147,
+  "engine_seconds": 0.136,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 0.143,
+   "compress": 0.132,
    "prune": 0.004
   }
  }

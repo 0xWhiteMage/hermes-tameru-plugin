@@ -428,3 +428,83 @@ def test_iterative_compactions_never_duplicate_the_section(trail, payloads):
         assert summary.count(HEADING) == 1
     assert summary.startswith("## Goal\nship it\n\n" + HEADING)
     assert all(f"f{n}.py" in summary and f"step {n}" in summary for n in range(5))
+
+
+# ---- errors ------------------------------------------------------------------------------------
+LOG = "\n".join([
+    "2025-03-14T02:12:54.144Z INFO  worker.pool worker-4 picked job id=0389ee86",
+    "2025-03-14T02:13:03.278Z ERROR ledger.writer LedgerWriteError: duplicate key entry_id=3c72b50d",
+    "2025-03-14T02:13:09.801Z ERROR ledger.writer LedgerWriteError: duplicate key entry_id=9f11a0c4",
+    "2025-03-14T02:14:45.635Z ERROR payments.gateway PaymentGatewayTimeout: after 388ms (order_id=ORD-22965)",
+    "2025-03-14T02:16:26.476Z CRITICAL scheduler.cron JobMissedDeadline: nightly-reconcile exceeded 8s",
+] + [f"2025-03-14T02:17:{i:02d}.000Z INFO  heartbeat ok" for i in range(40)])
+
+
+def error_lines_of(text: str) -> list[str]:
+    return text.split("\nErrors:\n", 1)[1].split("\n") if "\nErrors:\n" in text else []
+
+
+def test_errors_list_the_first_exemplar_of_every_fingerprint(trail):
+    from hermes_tameru_plugin.tameru.compress_context import error_fingerprints
+
+    text = trail(("terminal", {"command": "tail app.log"}, run(LOG, exit_code=0)))
+    shown = error_lines_of(text)
+    assert [line.strip() for line in shown] == [
+        line for line in LOG.split("\n") if "ERROR" in line and "09.801Z" not in line or "CRITICAL" in line
+    ]
+    assert all(line.startswith("  ") for line in shown), "indented, so the exemplars stay exact lines"
+    assert error_fingerprints(text).keys() >= error_fingerprints(LOG).keys()
+
+
+def test_errors_of_a_rendered_row_come_from_the_stored_original(trail):
+    store = OriginalStore(10, 10**6)
+    store.put("abcdef12", LOG)
+    row = header_only("[terminal] ran `tail app.log` -> exit 0", stats("header"), "abcdef12")
+    text = trail(("terminal", {"command": "tail app.log"}, row), store=store)
+    assert len(error_lines_of(text)) == 3
+    assert error_lines_of(trail(("terminal", {"command": "tail app.log"}, row))) == [], "no original, no errors"
+
+
+def test_errors_accumulate_across_compactions_without_repeats(trail):
+    first = trail(("terminal", {"command": "tail app.log"}, run(LOG)))
+    later = "2025-03-14T03:00:00.000Z ERROR cache.redis ConnectionResetError: peer reset " + "x" * 40
+    summary = merge_into_summary("## Goal\nfix", first)
+    second = build_ledger(
+        [{"role": "assistant", "content": "", "tool_calls": [{"id": "c1", "function": {
+            "name": "terminal", "arguments": json.dumps({"command": "tail again.log"})}}]},
+         {"role": "tool", "tool_call_id": "c1", "content": run(LOG + "\n" + later)}],
+        None, previous=summary,
+    )
+    shown = error_lines_of(second)
+    assert len(shown) == 4 and shown[-1].strip() == later and len(set(shown)) == 4
+
+
+def test_extra_originals_and_skipped_tools(trail):
+    text = build_ledger([], None, extra_originals=[LOG])
+    assert len(error_lines_of(text)) == 3 and text.startswith(HEADING)
+    skipped = trail(("skill_view", {"name": "x"}, run(LOG)), skip_tools=frozenset({"skill_view"}))
+    assert skipped == ""
+
+
+def test_an_error_line_with_a_credential_is_not_listed(trail):
+    secret = f"2025-03-14T02:13:03.278Z ERROR auth.client request failed: curl -H 'Authorization: token {SECRET}'"
+    text = trail(("terminal", {"command": "tail app.log"}, run(secret + "\n" + LOG)))
+    assert SECRET not in text and len(error_lines_of(text)) == 3
+
+
+def test_errors_have_their_own_budget_and_the_newest_win(trail):
+    from hermes_tameru_plugin.ledger import ERRORS_CHARS
+
+    tags = [chr(97 + i % 26) + chr(97 + i // 26) for i in range(60)]   # letters only: digits are masked
+    many = "\n".join(f"2025-03-14T02:13:03Z ERROR svc{tag} Failure{tag}: " + "z" * 90 for tag in tags)
+    text = trail(("terminal", {"command": "tail app.log"}, run(many)), ("read_file", {"path": "a.py"}, OK))
+    errors = text.split("\nErrors:\n", 1)[1]
+    assert len(errors) <= ERRORS_CHARS
+    assert re.fullmatch(r"- \(\+\d+ more\)", errors.splitlines()[-1]), "the overflow is counted"
+    assert "- `a.py`: read; last read ok" in text, "the file trail keeps its own budget"
+    assert f"svc{tags[-1]} " in errors and f"svc{tags[0]} " not in errors, "the newest win"
+
+
+def test_errors_alone_make_a_ledger(trail):
+    text = trail(("terminal", {"command": "tail app.log"}, run(LOG)))
+    assert text.startswith(f"{HEADING}\nCommands:") and "\nErrors:\n" in text

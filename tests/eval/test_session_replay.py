@@ -6,8 +6,9 @@ Needs real Hermes (``HERMES_REPO_ROOT``); skipped otherwise. Regenerate the base
 
 The ``stock`` and ``tameru_1_4`` baselines are compared exactly: the replay is deterministic, so any
 difference means Hermes, the engine or the harness changed. The ``tameru_1_3`` baseline freezes the 1.3.0
-plugin and is compared only while the vendored engine reports 1.3.x (it is skipped now). How 1.4 compares
-with stock is REPORT-ONLY (``test_phase5_comparison_report``): the table is printed, nothing fails on cost.
+plugin and is compared only while the vendored engine reports 1.3.x (it is skipped now). How the plugin compares
+with stock is the Phase 5 acceptance (``test_acceptance_*``): cost after cache pricing, shrinking compactions,
+gold / error-fingerprint / re-fetch retention, byte stability and pairing all assert against ``stock``.
 """
 from __future__ import annotations
 
@@ -77,6 +78,7 @@ def test_metrics_are_complete_and_sane(name):
     assert m["summary_llm_calls"] <= m["compress_calls"]  # every summary call was made on behalf of a compress()
     assert m["summary_unparsed_prompts"] == 0  # Hermes' summary prompt still has the record format the fake reads
     assert m["input_chars_max"] >= m["input_chars_final"] > 0
+    assert m["byte_stability"]["requests_checked"] == m["requests"]
     gold = m["gold"]
     assert gold["total"] == 17 and set(gold["by_category"]) == set(CATEGORIES)
     assert sum(c["total"] for c in gold["by_category"].values()) == gold["total"]
@@ -143,17 +145,92 @@ def test_tameru_1_4_matches_saved_baseline():
     )
 
 
+def test_tameru_1_4_product_matches_saved_baseline():
+    got = replay.deterministic_part(runs("tameru_1_4_product")[0])
+    path = baseline_path("tameru_1_4_product")
+    if WRITE:
+        write_baseline("tameru_1_4_product", runs("tameru_1_4_product")[0])
+    assert path.is_file(), f"{path} missing; run once with TAMERU_WRITE_BASELINES=1"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert got == {"metrics": saved["metrics"], "series": saved["series"]}
+
+
 def test_phase5_comparison_report(capsys, record_property):
-    """REPORT-ONLY: print the stock vs tameru_1_4 table (``pytest -s`` to see it). Never asserts on cost."""
-    results = {name: runs(name)[0] for name in ("stock", "tameru_1_4")}
-    engine = _BUILT["tameru_1_4"][0]
-    telemetry = engine.get_status()["tameru"]["telemetry"]
-    report = compare.table(results) + "\n\ntameru_1_4 telemetry (rung counters, last replay engine):\n" + json.dumps(
-        telemetry, indent=1, sort_keys=True)
+    """Print the stock vs plugin table and the plugin's rung histogram (``pytest -s`` to see it)."""
+    names = ("stock", "tameru_1_4", "tameru_1_4_product")
+    results = {name: runs(name)[0] for name in names}
+    rungs = {}
+    for name in names[1:]:
+        telemetry = _BUILT[name][0].get_status()["tameru"]["telemetry"]
+        rungs[name] = telemetry["events"].get("render", {}).get("labels", {}).get("rung", {})
+        assert "events" in telemetry
+    report = compare.table(results) + "\n\nrungs used (rows rendered, by rung): " + json.dumps(rungs, sort_keys=True)
     record_property("phase5_report", report)
     with capsys.disabled():
         print("\n" + report)
-    assert set(results) == {"stock", "tameru_1_4"} and "events" in telemetry   # shape only: no cost threshold
+
+
+# ---- Phase 5 acceptance: the plugin against stock Hermes (release blocks if any of these fails) -------
+ACCEPTANCE_ENGINES = ("tameru_1_4", "tameru_1_4_product")
+
+
+def _metrics(name: str) -> dict:
+    return runs(name)[0]["metrics"]
+
+
+@pytest.mark.parametrize("name", ACCEPTANCE_ENGINES)
+def test_acceptance_cost_after_cache_pricing_is_no_more_than_stock(name):
+    assert _metrics(name)["cost_cache_priced"] <= _metrics("stock")["cost_cache_priced"]
+
+
+@pytest.mark.parametrize("name", ACCEPTANCE_ENGINES)
+def test_acceptance_no_more_shrinking_compactions_than_stock(name):
+    assert _metrics(name)["compactions_shrinking"] <= _metrics("stock")["compactions_shrinking"]
+
+
+@pytest.mark.parametrize("name", ACCEPTANCE_ENGINES)
+def test_acceptance_gold_retention_is_no_worse_than_stock_in_every_category(name):
+    ours, stock = _metrics(name)["gold"], _metrics("stock")["gold"]
+    assert ours["retained"] >= stock["retained"]
+    for category in CATEGORIES:
+        assert ours["by_category"][category]["retained"] >= stock["by_category"][category]["retained"], category
+
+
+@pytest.mark.parametrize("name", ACCEPTANCE_ENGINES)
+def test_acceptance_error_fingerprint_retention_is_no_worse_than_stock(name):
+    assert _metrics(name)["error_fingerprints"]["retained"] >= _metrics("stock")["error_fingerprints"]["retained"]
+
+
+@pytest.mark.parametrize("name", ACCEPTANCE_ENGINES)
+def test_acceptance_refetch_is_no_worse_than_stock(name):
+    ours, stock = _metrics(name)["refetch"], _metrics("stock")["refetch"]
+    assert ours["refetch_rate"] <= stock["refetch_rate"]
+    assert ours["refetch_opportunities"] <= stock["refetch_opportunities"]
+
+
+@pytest.mark.parametrize("name", ("stock", *ACCEPTANCE_ENGINES))
+def test_acceptance_committed_rows_are_byte_stable_between_commits(name):
+    stability = _metrics(name)["byte_stability"]
+    assert stability["rewrites_outside_commits"] == 0, stability["details"]
+    assert stability["requests_checked"] == _metrics(name)["requests"]
+
+
+@pytest.mark.parametrize("name", ACCEPTANCE_ENGINES)
+def test_acceptance_tool_call_pairs_stay_intact(name):
+    assert _metrics(name)["pairing"]["violations"] == 0
+
+
+@pytest.mark.parametrize("seed", (1, 2))
+def test_the_cost_advantage_is_not_an_artifact_of_seed_zero(seed):
+    """Seeds change the random content (log lines, ids, source filler), not the script; the plugin must still
+    cost no more than stock on them, or the seed-0 numbers are luck at a gate threshold."""
+    stock = replay.run_session(lambda: engines.make_engine("stock"), seed=seed)["metrics"]
+    ours = replay.run_session(lambda: engines.make_engine("tameru_1_4"), seed=seed)["metrics"]
+    assert ours["cost_cache_priced"] <= stock["cost_cache_priced"]
+    assert ours["gold"]["retained"] >= stock["gold"]["retained"]
+    assert ours["error_fingerprints"]["retained"] >= stock["error_fingerprints"]["retained"]
+    assert ours["compactions_shrinking"] <= stock["compactions_shrinking"]
+    assert ours["byte_stability"]["rewrites_outside_commits"] == 0 and ours["pairing"]["violations"] == 0
 
 
 def write_baseline(name: str, result: dict) -> None:
