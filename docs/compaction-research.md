@@ -481,8 +481,8 @@ optional offline job.
 Measured with the deterministic replay in `tests/eval` (definitions, metrics and caveats in
 `tests/eval/README.md`): one scripted 30-turn session (62 model requests, about 380 KB of tool output), a fake lossy
 summarizer, Hermes' rough token estimator, seed 0, Hermes pinned at `1298c8e`. Numbers are from the saved baselines
-`tests/eval/baselines/{stock,tameru_1_4,tameru_1_4_product}.json`, re-recorded on plugin commit `5b9e198` plus the
-working-tree changes of the 1.4.0 release candidate (vendored engine 1.4.0, `VENDORED_FROM` `fd8c5b0`; the
+`tests/eval/baselines/{stock,tameru_1_4,tameru_1_4_product}.json`, re-recorded on the commit that vendors engine 1.4.0
+( `VENDORED_FROM` `fd8c5b0`; the
 baselines pin the engine's output and must be re-recorded after every re-sync). Reproduce:
 
 ```bash
