@@ -39,8 +39,8 @@ class TameruSettings:
     min_tool_chars: int = 800                  # shorter results take the parent path
     max_extract_chars: int = 6000              # incl. header/meta/marker bytes
     brief_chars: int = 1200
-    max_risk: str = "medium"                   # accepted engine compression_risk ceiling: low|medium|high
-    min_savings: float = 0.30                  # extract must be <= (1-min_savings)*len(inner)
+    max_risk: str = "high"                     # accepted engine compression_risk ceiling: low|medium|high
+    min_savings: float = 0.10                  # extract must be <= (1-min_savings)*len(inner)
     exempt_tools: tuple[str, ...] = ()         # added to the built-in exempt set
     protect_patterns: tuple[str, ...] = ()     # regexes -> compress_context(pin_patterns=...)
     expand_tool: bool = True

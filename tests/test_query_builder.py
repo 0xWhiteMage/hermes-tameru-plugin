@@ -303,3 +303,27 @@ def test_a_call_issued_before_another_assistant_row_is_still_found():
     plain = task_query(messages, 3, skip_user=lambda m: False)
     assert "foo.py" in " ".join(plain)
     assert build_query(messages, 3, cache={}) == plain
+
+
+def test_usable_query_drops_the_part_that_names_something_absent_from_the_text():
+    from hermes_tameru_plugin.query import usable_query
+
+    text = "payment timeout is 5 seconds\nbackup host is lunar-db-2"
+    parts = ["cat report.txt", "what is the payment timeout?", "pytest tests/test_x.py"]
+    assert usable_query(parts, text) == ["what is the payment timeout?"]
+
+
+def test_usable_query_keeps_a_part_whose_identifier_is_in_the_text():
+    from hermes_tameru_plugin.query import usable_query
+
+    text = "ERROR svc-3 timeout after 30s\nINFO ok"
+    assert usable_query(["why did svc-3 time out?", "grep -n svc-3 app.log"], text) == [
+        "why did svc-3 time out?", "grep -n svc-3 app.log",
+    ]
+
+
+def test_usable_query_keeps_parts_with_nothing_distinctive_and_is_case_blind():
+    from hermes_tameru_plugin.query import usable_query
+
+    assert usable_query(["continue", "what is the host?"], "anything") == ["continue", "what is the host?"]
+    assert usable_query(["Read MyService.Config"], "see myservice.config here") == ["Read MyService.Config"]

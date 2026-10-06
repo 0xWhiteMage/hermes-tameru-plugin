@@ -18,8 +18,9 @@ Where Hermes writes a one-line summary, the plugin runs a deterministic ladder:
 1. **Supersession.** A read that a later write/patch of the same path made stale, a re-read of the same path and
    range, a repeated identical call, or an older state snapshot (`git status`, `ls`, a todo view, ...) becomes a
    header-only row with a "superseded by msg N" note.
-2. **Extract.** A query-aware extractive cut of the result (the engine's `compress_context`, query taken from the
-   latest real user request). Accepted only if it is not fail-open, its risk is within `max_risk`, it saves at
+2. **Extract.** A query-aware extractive cut of the result (the engine's `compress_context`; the query is the task: the
+   user's words plus the calls around the result, minus any part that names a file or identifier absent from the
+   output, which would only make the engine keep everything). Accepted only if it is not fail-open, its risk is within `max_risk`, it saves at
    least `min_savings`, fits `max_extract_chars`, and **keeps at least one exemplar line of every distinct
    ERROR/FAIL fingerprint the original had**.
 3. **Brief.** Otherwise a structural brief of at most `brief_chars` (errors and warnings, head and tail;
@@ -136,8 +137,8 @@ plugins:
 | `min_tool_chars` | `800` | Results shorter than this take Hermes' own one-line path. |
 | `max_extract_chars` | `6000` | Cap on a rendered extract row, header and markers included. |
 | `brief_chars` | `1200` | Cap on a brief row. |
-| `max_risk` | `medium` | Highest engine `compression_risk` an extract may have (`low`, `medium`, `high`). |
-| `min_savings` | `0.30` | An extract must be at most `(1 - min_savings)` of the original (0 to <1). |
+| `max_risk` | `high` | Highest engine `compression_risk` an extract may have (`low`, `medium`, `high`). The engine rates almost any cut past about 80% "high", so a lower ceiling mostly pushes rows to the query-blind brief. |
+| `min_savings` | `0.10` | An extract must be at most `(1 - min_savings)` of the original (0 to <1). |
 | `exempt_tools` | `[]` | Extra tool names left to Hermes' own handling (added to the built-in exempt set). |
 | `protect_patterns` | `[]` | Regexes; lines matching them are pinned in extracts. |
 | `expand_tool` | `true` | Add `tameru_expand` to the tool list. |

@@ -305,11 +305,11 @@
   ]
  },
  "timing": {
-  "engine_seconds": 2.116,
+  "engine_seconds": 2.941,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 1.059,
-   "prune": 1.058
+   "compress": 1.615,
+   "prune": 1.327
   }
  }
 }

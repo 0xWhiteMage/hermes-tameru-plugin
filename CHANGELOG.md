@@ -5,6 +5,14 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.4.0] - 2026-10-06
 
+### Fixed (QA round, same release)
+- **Benchmark parity.** The task query included the tool's own command (`cat report.txt`); the engine reads a
+  file name that is absent from the output as "the answer is not here" and keeps the whole result, so 11 of 14
+  cases of the engine's QA corpus came back uncompressed and fell to the query-blind brief, which kept
+  distractors in 5 and lost the answer in 2. Query parts that name something absent from the output are now
+  dropped (`query.usable_query`), and the defaults match the engine's own: `max_risk` `high`, `min_savings` `0.10`.
+  `tests/test_benchmark_parity.py` runs the corpus through the plugin: every gold string kept, no distractor.
+
 Rebuilt on Hermes' own demotion seam, on the 1.4.0 Tameru engine. The "G" numbers refer to the gap matrix in
 [docs/compaction-research.md](docs/compaction-research.md).
 

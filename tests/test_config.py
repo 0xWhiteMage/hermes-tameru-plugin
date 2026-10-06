@@ -56,7 +56,7 @@ def init_params(compressor_cls) -> set[str]:
 def test_defaults_match_the_contract():
     assert dataclasses.asdict(TameruSettings()) == {
         "enabled": True, "min_tool_chars": 800, "max_extract_chars": 6000, "brief_chars": 1200,
-        "max_risk": "medium", "min_savings": 0.30, "exempt_tools": (), "protect_patterns": (),
+        "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (),
         "expand_tool": True, "store_max_entries": 512, "store_max_chars": 32_000_000,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000,
@@ -288,7 +288,7 @@ def test_an_invalid_value_falls_through_to_the_next_layer(hermes_config):
 def test_one_bad_value_does_not_spoil_the_others(hermes_config):
     hermes_config(plugin_config(min_savings="lots", brief_chars=700))
     settings, warnings = load_settings(env={ENV + "LEDGER": "1"})
-    assert (settings.min_savings, settings.brief_chars, settings.ledger) == (0.30, 700, True)
+    assert (settings.min_savings, settings.brief_chars, settings.ledger) == (0.10, 700, True)
     assert len(warnings) == 1
 
 

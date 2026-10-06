@@ -16,6 +16,7 @@ from collections.abc import Iterable
 from typing import Any
 
 from .hermes_compat import is_compaction_summary, is_synthetic_user_row
+from .tameru.contract_gates import distinctive_query_terms
 from .tameru.transcript import _find_tool_call, task_query, text_of
 
 # A user row ``task_query`` takes for a real one but cleans down to nothing: a run of 200 printable
@@ -114,3 +115,21 @@ def build_query(
         [first, *messages[lo:hi], last], idx - lo + 1, focus=focus, max_chars=max_chars,
         skip_user=lambda m: m is not first and m is not last,
     )
+
+
+def usable_query(parts: list[str], text: str) -> list[str]:
+    """``parts`` without those that can only make the engine keep ``text`` whole.
+
+    The engine fails open when a query names something distinctive (a file name, a path, an
+    identifier) that is nowhere in the text: the answer is not here, so it keeps everything. The call
+    that produced a tool result names exactly such things (``cat report.txt``, ``pytest tests/x.py``),
+    and the output rarely contains them. A part whose distinctive terms are all absent from ``text``
+    is dropped; a part with none, or with one that appears, stays.
+    """
+    folded = text.casefold()
+    kept = []
+    for part in parts:
+        terms = [t for t in distinctive_query_terms(part) if not t.startswith("script:")]
+        if not terms or any(t in folded for t in terms):
+            kept.append(part)
+    return kept

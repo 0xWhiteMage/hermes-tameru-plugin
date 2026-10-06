@@ -54,7 +54,7 @@ from .hermes_compat import (
 )
 from .ledger import build_ledger, merge_into_summary
 from .payload import HermesPayload, content_hint, meta_line, parse_payload
-from .query import build_query
+from .query import build_query, usable_query
 from .recovery import EXPAND_SCHEMA, EXPAND_TOOL_NAME, OriginalStore, expand, session_lookup_factory
 from .render import (
     TAMERU_TAG,
@@ -476,7 +476,9 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 self._header_row(line, pl, ref, "header"),
             )
 
-        query = build_query(view, idx, focus=scope.focus, cache=scope.query_cache)
+        query = usable_query(
+            build_query(view, idx, focus=scope.focus, cache=scope.query_cache), pl.inner,
+        )
         capped = min(settings.max_extract_chars, int((1 - settings.min_savings) * len(content)))
         limit = min(capped, scope.room)
         hint = content_hint(tool, args, pl.inner)

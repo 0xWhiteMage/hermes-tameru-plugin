@@ -64,7 +64,7 @@ def test_one_missing_error_class_is_enough_to_reject(monkeypatch):
 
 @pytest.mark.parametrize("kwargs", [{"fail_open": True}, {"risk": "high"}, {"risk": None}])
 def test_fail_open_and_risk_above_the_ceiling_are_rejected(monkeypatch, kwargs):
-    engine, msgs, idx = _setup()
+    engine, msgs, idx = _setup(TameruSettings(max_risk="medium"))
     _fake(monkeypatch, ["\n".join(ERRORS)], **kwargs)
     _, out = demote(engine, msgs, idx)
     assert parse_header(out[idx]["content"])["rung"] == "brief"
