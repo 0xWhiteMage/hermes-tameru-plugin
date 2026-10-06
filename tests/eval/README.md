@@ -173,21 +173,21 @@ vendored 1.4.0-dev engine, plugin defaults of Phase 2):
 
 | | stock | 1.4 before tuning | 1.4 tuned (equal gates) | 1.4 tuned (product) |
 |---|---|---|---|---|
-| cost, cache-priced (char-eq) | 1,273,007 | 1,458,023 (+14.5%) | 1,018,269 (-20.0%) | 986,732 (-22.5%) |
-| input chars, total | 6,361,016 | 7,183,940 | 5,475,877 | 5,276,458 |
-| input chars, final request | 84,080 | 191,730 | 123,278 | 122,531 |
+| cost, cache-priced (char-eq) | 1,273,007 | 1,458,023 (+14.5%) | 1,015,225 (-20.3%) | 983,687 (-22.7%) |
+| input chars, total | 6,361,016 | 7,183,940 | 5,457,084 | 5,257,665 |
+| input chars, final request | 84,080 | 191,730 | 122,789 | 122,042 |
 | compress calls / shrank | 1 / 1 | 1 / 1 | 1 / 1 | 1 / 1 |
 | prune commits (rows) | 2 (8) | 2 (6) | 1 (7) | 1 (9) |
-| prefix invalidated (chars) | 469,751 | 451,426 | 286,010 | 276,674 |
+| prefix invalidated (chars) | 469,751 | 451,426 | 285,486 | 276,150 |
 | gold retained (recall/artifact/continuation/decision) | 10/17 (0/3/3/4) | 13/17 (2/4/3/4) | 13/17 (2/4/3/4) | 12/17 (1/4/3/4) |
 | error fingerprints retained | 0/7 | 0/7 | 7/7 | 7/7 |
 | re-fetch (facts missing / calls to redo) | 4 / 3 | 2 / 2 | 2 / 2 | 2 / 2 |
 | rows rewritten between commits | 0 | 0 | 0 | 0 |
 | pairing violations | 0 | 0 | 0 | 0 |
-| rungs used | | brief 11, extract 2, header 1, superseded 1 | brief 5, header 10, superseded 2 | brief 4, extract 1, header 11, superseded 1 |
+| rungs used (before the 1.4.0 engine re-sync; not re-measured) | | brief 11, extract 2, header 1, superseded 1 | brief 5, header 10, superseded 2 | brief 4, extract 1, header 11, superseded 1 |
 
-The ratio to stock does not depend on seed 0: over seeds 0-5 the equal-gates plugin costs -20.0% .. -22.9% (mean
--21.2%) and the shipped plugin -22.5% .. -25.3% (mean -23.6%) against stock, with gold 13 against 10 and
+The ratio to stock does not depend on seed 0: over seeds 0-5 the equal-gates plugin costs -20.2% .. -23.1% (mean
+-21.2%) and the shipped plugin -22.7% .. -25.5% (mean -23.8%) against stock, with gold 13 against 10 and
 7/7 against 0/7 fingerprints on every seed (`test_the_cost_advantage_is_not_an_artifact_of_seed_zero` checks
 two of them on every run).
 
@@ -266,7 +266,7 @@ tuning.
 ### Not met / open
 
 Nothing in the acceptance list fails. Not an acceptance criterion, but worth saying: the final request is still
-larger than stock's (123 KB against 84 KB, 1.47x; it was 2.3x). The two big late rows (49 KB and 36 KB) arrive after
+larger than stock's (123 KB against 84 KB, 1.46x; it was 2.3x). The two big late rows (49 KB and 36 KB) arrive after
 the plugin's last cache-breaking rewrite and its context (about 35K estimated tokens) never reaches the 48K prune
 trigger again, so they stay verbatim to the end. Stock reaches 84 KB only because it paid a 72K char-eq rewrite at
 request 56. The plugin's total input (5.48 M chars) and cost are lower.

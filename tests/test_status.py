@@ -3,7 +3,7 @@ from __future__ import annotations
 
 import json
 
-from engine_support import Chat, demote, make_engine, pytest_failure
+from engine_support import Chat, demote, make_engine, pytest_failure, pytest_failure_with_passes
 from fixtures import hermes_payloads as hp
 
 from hermes_tameru_plugin.config import TameruSettings
@@ -53,7 +53,7 @@ def test_status_extends_hermes_dict():
 def test_status_counts_the_store_and_telemetry():
     engine = make_engine()
     chat = Chat(TASK)
-    idx = chat.tool("terminal", {"command": "pytest -q"}, pytest_failure())
+    idx = chat.tool("terminal", {"command": "pytest -v"}, pytest_failure_with_passes())
     demote(engine, chat.finish(), idx)
     info = engine.get_status()["tameru"]
     assert info["store"]["entries"] == 1 and info["store"]["chars"] > 1000

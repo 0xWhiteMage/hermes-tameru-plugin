@@ -118,3 +118,11 @@ def test_plugin_registers_a_context_engine():
     hermes_tameru_plugin.register(ctx)
     (engine,) = ctx.engines
     assert engine.name == "tameru" and isinstance(engine, hermes_tameru_plugin.ExtractiveContextEngine)
+
+
+def test_vendored_engine_is_pinned_to_a_commit_and_matches_the_package_version(pyproject):
+    from hermes_tameru_plugin.tameru import VENDORED_FROM
+    from hermes_tameru_plugin.tameru.compress_context import ENGINE_VERSION
+
+    assert re.fullmatch(r"[0-9a-f]{40}", VENDORED_FROM), VENDORED_FROM
+    assert ENGINE_VERSION == pyproject["project"]["version"]

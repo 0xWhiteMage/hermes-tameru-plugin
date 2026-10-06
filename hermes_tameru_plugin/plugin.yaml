@@ -1,6 +1,6 @@
 name: tameru
 display_name: Tameru (貯める)
-description: "Tameru 1.3.0 deterministic extractive context compaction"
-version: 1.3.0
+description: "Tameru 1.4.0 deterministic extractive context compaction: query-aware per-result pruning inside Hermes' own gates, with a tameru_expand recovery tool"
+version: 1.4.0
 license: MIT
-homepage: https://github.com/0xWhiteMage/tameru-compaction-system
+homepage: https://github.com/0xWhiteMage/hermes-tameru-plugin

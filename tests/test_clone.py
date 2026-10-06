@@ -6,7 +6,7 @@ import sys
 import types
 
 import pytest
-from engine_support import Chat, demote, make_engine, pytest_failure
+from engine_support import Chat, demote, make_engine, pytest_failure, pytest_failure_with_passes
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.engine import TameruContextEngine
@@ -62,7 +62,7 @@ def test_a_clone_works_as_an_engine():
     engine, _ = _loaded_engine()
     clone = engine.clone_for_agent()
     chat = Chat("tests/test_orders.py::test_reserve_stock_rollback failed")
-    idx = chat.tool("terminal", {"command": "pytest -q"}, pytest_failure())
+    idx = chat.tool("terminal", {"command": "pytest -v"}, pytest_failure_with_passes())
     changed, out = demote(clone, chat.finish(), idx)
     assert changed and parse_header(out[idx]["content"])["rung"] == "extract"
     assert len(clone._store) == 1 and len(engine._store) == 1

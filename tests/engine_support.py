@@ -76,6 +76,22 @@ def pytest_failure(seed: int = 1) -> str:
     return hp.terminal_result(output, exit_code=1)
 
 
+def pytest_failure_with_passes(seed: int = 1) -> str:
+    """A failing ``pytest -v`` run: 150 PASSED lines, then one failure block (reaches the extract rung).
+
+    Since engine 1.4.0 a test run is reduced to its failure blocks *whole*, so ``pytest_failure`` (one
+    block carrying a 60-line captured log, saving ~4%) is below ``min_savings`` and lands on the brief.
+    The verbose passes are what the extract elides.
+    """
+    rng = random.Random(seed)
+    passes = hp.pytest_verbose_output(rng, 150).split("\n")[:-2]      # without the "N passed" footer
+    run = hp.pytest_output(
+        rng, failed=["tests/test_orders.py::test_reserve_stock_rollback"], n_passed=120, extra_log_lines=8,
+    )
+    output = "\n".join(passes) + "\n" + run[run.index("=" * 35 + " FAILURES"):]
+    return hp.terminal_result(output, exit_code=1)
+
+
 def server_log(seed: int = 1) -> str:
     """A ``terminal`` result holding a 450-line application log with a burst of errors."""
     return hp.terminal_result(hp.server_log(random.Random(seed), n_lines=450)[0])

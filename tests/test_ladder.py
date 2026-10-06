@@ -7,7 +7,8 @@ import random
 import pytest
 from conftest import REAL_HERMES
 from engine_support import (
-    Chat, demote, in_scope, make_engine, pytest_failure, server_log, source_file,
+    Chat, demote, in_scope, make_engine, pytest_failure, pytest_failure_with_passes, server_log,
+    source_file,
 )
 from fixtures import hermes_payloads as hp
 
@@ -31,7 +32,9 @@ def _one(task: str, name: str, args: dict, content, **engine_kw):
 
 
 def test_extract_rung_keeps_the_lines_the_query_names():
-    engine, msgs, idx = _one(TASK_NAMING_THE_TEST, "terminal", {"command": "pytest -q"}, pytest_failure())
+    engine, msgs, idx = _one(
+        TASK_NAMING_THE_TEST, "terminal", {"command": "pytest -v"}, pytest_failure_with_passes(),
+    )
     changed, out = demote(engine, msgs, idx)
     row = out[idx]["content"]
     assert changed and _rung(row) == "extract"
@@ -49,6 +52,17 @@ def test_brief_rung_when_the_extract_is_not_acceptable():
     assert changed and _rung(row) == "brief"
     assert len(row) <= engine._settings.brief_chars + 200
     assert "FATAL" in row or "ERROR" in row
+
+
+def test_a_failure_block_the_extract_cannot_shrink_falls_to_the_brief():
+    """Engine 1.4.0 keeps a failure block whole (captured log included): a lone ~7k failure saves ~4%,
+    under ``min_savings``, so the extract is refused and the structural brief takes the row."""
+    engine, msgs, idx = _one(TASK_NAMING_THE_TEST, "terminal", {"command": "pytest -q"}, pytest_failure())
+    changed, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    assert changed and _rung(row) == "brief"
+    assert len(row) < 0.3 * len(msgs[idx]["content"])
+    assert "test_reserve_stock_rollback" in row and "AssertionError" in row
 
 
 def test_header_rung_in_the_pressure_pass_and_when_degraded():
@@ -210,6 +224,8 @@ def test_the_brief_is_not_computed_when_the_extract_is_accepted(monkeypatch):
     calls: list[int] = []
     real = engine_module.brief_context
     monkeypatch.setattr(engine_module, "brief_context", lambda *a, **k: calls.append(1) or real(*a, **k))
-    engine, msgs, idx = _one(TASK_NAMING_THE_TEST, "terminal", {"command": "pytest -q"}, pytest_failure())
+    engine, msgs, idx = _one(
+        TASK_NAMING_THE_TEST, "terminal", {"command": "pytest -v"}, pytest_failure_with_passes(),
+    )
     _, out = demote(engine, msgs, idx)
     assert _rung(out[idx]["content"]) == "extract" and calls == []

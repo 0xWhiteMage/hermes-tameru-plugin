@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hermes-tameru-plugin"
-version = "1.3.0"
+version = "1.4.0"
 description = "Tameru deterministic extractive context compaction engine for Hermes Agent"
 readme = "README.md"
 license = "MIT"
