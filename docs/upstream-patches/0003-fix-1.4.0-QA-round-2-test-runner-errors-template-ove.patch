@@ -1,0 +1,755 @@
+From 11b9e5ed336c51a35f43cf9ec438023b2e0ca277 Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 15:11:21 +0000
+Subject: [PATCH 3/3] fix: 1.4.0 QA round 2 (test-runner errors, template
+ over-masking, lossless fold)
+
+Adversarial review of the 1.4.0 surfaces (agent_formats, folding, log
+templates, helpers) with fuzzing and a differential against 1.3.0:
+
+- test-runner reduction no longer drops errors printed around or inside a
+  run (pytest rule lines in captured output, compiler/make/tox, cargo, npm)
+- quoted values and paths are masked in log templates only when they hold a
+  digit, so distinct messages and errors are not merged
+- zero-count phrases no longer negate a failure line
+- recursion markers are found inside JSON tool payloads
+- fold_lossless JSON minify is byte-exact for literals; briefs escape
+  surrogates and bidi controls; fold idempotence and CR-run fixes
+- content_hint="code" on numbered reads; 4300-digit integer crash
+
+Suite 1125 passed, 3 skipped; run_battery 15/15 and threshold_sweep
+unchanged.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01S4NKzUk5qwpQGbt2YF3Qh3
+---
+ CHANGELOG.md                         | 11 +++-
+ src/tameru/agent_formats.py          | 44 +++++++++++++-
+ src/tameru/compress_context.py       | 47 +++++++++++----
+ src/tameru/folding.py                | 90 +++++++++++++++++++++-------
+ src/tameru/transcript.py             |  2 +-
+ tests/test_engine_helpers.py         | 14 +++++
+ tests/test_extractive_tool_prune.py  | 17 ++++++
+ tests/test_fold_lossless.py          | 35 +++++++++++
+ tests/test_json_brief.py             | 16 +++++
+ tests/test_log_templates.py          | 35 ++++++++++-
+ tests/test_numbered_code_reads.py    | 21 +++++++
+ tests/test_recursion_markers.py      | 27 +++++++++
+ tests/test_test_runner_preprocess.py | 84 ++++++++++++++++++++++++++
+ 13 files changed, 405 insertions(+), 38 deletions(-)
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index ef5d080..81fe1f8 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -34,13 +34,22 @@ affected by the fixes below is unchanged.
+ - Quadratic hot spots in critical-line recall, summary fact checks and backtracking path/token regexes (bounded): a generated 650 KB INFO/ERROR log through `compress_context(log, "why are requests failing?", ccr=False, citations=False)` went from 22.5 s to under 1 s; every error fingerprint is retained.
+ - Misdetection of code as CSV and numbered reads as two-column TSV.
+ 
++### Fixed (QA round 2, same release)
++- Test-runner reduction dropped errors printed around or inside a run: a `=====` rule in captured stdout ended the pytest FAILURES section (later failure bodies lost); compiler/`make`/tox `ERROR:` lines around a pytest run, cargo `error[E…]` / `could not compile`, and `npm ERR!` around jest were dropped. Unknown lines outside the recognised noise are now kept.
++- Log templates masked every quoted value and path, merging distinct messages (`table "orders"` / `"payments"`, `a.db` / `b.db`) into one template and one error fingerprint; quoted values and paths are masked only when they hold a digit.
++- Error lines that also report a zero count (`Failures: 2, Errors: 0 ... FAILURE!`, `FAILED (failures=2, errors=0)`) were treated as negated and lost exemplar protection.
++- `recursion_markers` missed a marker opening a line inside a JSON tool payload (`rewrap_tool_payload` output was compressed twice).
++- `fold_lossless` JSON minify re-serialised values (`1.10` → `1.1`, `-0` → `0`, lone surrogates, raw bidi overrides); it now removes only whitespace outside strings. `json_brief`/`brief_context` escape surrogates and bidi controls. Fold is idempotent on literal `[×N identical lines]` lines; a trailing CR run no longer erases a line.
++- `content_hint="code"` on a numbered read split function bodies (now routed as numbered code).
++- A 4300+ digit integer in tool JSON crashed the answer scan in `transcript`.
++
+ ### Removed
+ - `integration/hermes` bundle (`context_engine/extractive`, `context_engine/tameru`) and the nine Hermes-gated tests; the integration now lives in [hermes-tameru-plugin](https://github.com/0xWhiteMage/hermes-tameru-plugin).
+ 
+ ### Benchmarks
+ - Re-run 2026-10-06 on 1.4.0: `benchmarks/run_battery.py` 15/15 pass with savings identical to the checked-in 1.3.0 JSON; only per-case `ms` timings differ (machine noise, e.g. `large_doc_perf` 656 -> 819 ms), and `benchmarks/production-qa-v3-results.json` was updated accordingly. `benchmarks/threshold_sweep.py` (prints only): 15/15 clean at every `budget_ratio`, mean saved 77.3% / 68.4% / 61.2% / 41.5% / 24.9% at 0.1 / 0.2 / 0.3 / 0.5 / 0.7, 0 restorations, 0 leaks.
+ - Not re-run (need network or local models): the 17-case holdout and the jev_comparison arms (JEV, Laya, headroom, TF-IDF); their tables in `benchmarks/COMPARISON.md` and the README remain the 1.2.0/1.3.0 measurements and are labelled as such.
+-- Full suite: 1105 passed, 3 skipped.
++- Full suite: 1105 passed, 3 skipped (1125 passed, 3 skipped after QA round 2; battery and sweep unchanged).
+ 
+ ---
+ 
+diff --git a/src/tameru/agent_formats.py b/src/tameru/agent_formats.py
+index abfab81..965a1f5 100644
+--- a/src/tameru/agent_formats.py
++++ b/src/tameru/agent_formats.py
+@@ -741,11 +741,31 @@ def _render_kept(
+     return "\n".join(out)
+ 
+ 
++# Section headers pytest itself prints between "=" rules. A "=== x ===" line
++# inside a failure block that is NOT one of these is the test's own captured
++# output ("===== Report ====="), not a section boundary.
++_PYTEST_KNOWN_HDR_RE = re.compile(
++    r"test session starts|warnings? summary|passes|xfailures|xpasses"
++    r"|slowest(?: \d+)? durations|rerun test summary info|short test summary info"
++    r"|failures|errors|.*\bin [\d.]+s\b.*|no tests ran.*|.*\bwarnings?\b.*",
++    re.IGNORECASE,
++)
++# Lines of a dropped pytest section that still name a failure ("collected 3
++# items / 1 error", "ERROR: ...", an exception from a ``-s`` run).
++_PYTEST_FAILURE_WORD_RE = re.compile(
++    r"\b(?:errors?|failed|failures?|traceback|exceptions?|fatal|panic)\b|Error\b",
++    re.IGNORECASE,
++)
++
++
+ def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+     n = len(lines)
+     keep = [False] * n
+     tests = [0] * n
+     suites = [0] * n
++    # "" (before the first header, and after the final summary) keeps what it
++    # does not recognise: `make`/`tox`/compiler output around a pytest run
++    # carries the errors that explain the run ("make: *** [test] Error 1").
+     section = ""
+     for i, ln in enumerate(lines):
+         m = _PYTEST_HDR_RE.match(ln)
+@@ -753,10 +773,12 @@ def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int]
+             name = m.group(1).lower()
+             if _PYTEST_SUMMARY_RE.search(name):
+                 keep[i] = True
+-                section = "final"
++                section = ""
+             elif name in {"failures", "errors"} or name.startswith("short test summary"):
+                 keep[i] = True
+                 section = "keep"
++            elif section == "keep" and not _PYTEST_KNOWN_HDR_RE.fullmatch(name):
++                keep[i] = True  # captured output inside a failure block
+             else:
+                 section = "drop"
+             continue
+@@ -779,6 +801,11 @@ def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int]
+                 keep[i] = True  # names the file a failure is in (--tb=no has no block)
+             else:
+                 tests[i] = p.group(1).count(".")
++            continue
++        if section == "" and ln.strip():
++            keep[i] = True
++        elif section == "drop" and _PYTEST_FAILURE_WORD_RE.search(ln):
++            keep[i] = True
+     return keep, tests, suites
+ 
+ 
+@@ -807,6 +834,10 @@ def _classify_jest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+             keep[i] = True
+         elif _JEST_TICK_RE.match(ln):
+             tests[i] = 1
++        elif ln.strip() and ln[:1] not in (" ", "\t"):
++            # An unindented line outside every block ("npm ERR! Test failed",
++            # a build error printed around the run) is not jest's own report.
++            keep[i] = True
+     return keep, tests, suites
+ 
+ 
+@@ -854,12 +885,18 @@ def _classify_cargo(lines: list[str]) -> tuple[list[bool], list[int], list[int]]
+     tests = [0] * n
+     suites = [0] * n
+     in_failures = False
++    in_error = False  # a compiler/cargo `error...` diagnostic, up to its blank line
+     for i, ln in enumerate(lines):
+         if in_failures:
+             keep[i] = True
+             if ln.startswith("test result:"):
+                 in_failures = False
+             continue
++        if in_error:
++            if ln.strip():
++                keep[i] = True
++                continue
++            in_error = False
+         if ln == "failures:":
+             in_failures = True
+             keep[i] = True
+@@ -871,6 +908,11 @@ def _classify_cargo(lines: list[str]) -> tuple[list[bool], list[int], list[int]]
+             tests[i] = 1
+         elif ln.startswith("test ") and ln.endswith("FAILED"):
+             keep[i] = True
++        elif ln.startswith(("error:", "error[")):
++            # `error[E0432]: unresolved import`, `error: could not compile`,
++            # `error: test failed, to rerun pass ...`: never reduced away.
++            keep[i] = True
++            in_error = True
+     return keep, tests, suites
+ 
+ 
+diff --git a/src/tameru/compress_context.py b/src/tameru/compress_context.py
+index 4885089..2a20261 100644
+--- a/src/tameru/compress_context.py
++++ b/src/tameru/compress_context.py
+@@ -461,30 +461,35 @@ _DIGITS_RE = re.compile(r"\d+")
+ _FINGERPRINT_CAP = 160
+ 
+ 
++def _without_zero_counts(s: str) -> str:
++    """``s`` with its literal-zero count phrases ("0 errors", "errors: 0",
++    "failed=0") removed. A line is negated only when nothing else in it signals
++    a failure: Maven's ``[ERROR] Tests run: 5, Failures: 2, Errors: 0`` reports
++    a failure *and* a zero count, and must stay an error line."""
++    return _ERR_NEGATED_RE.sub(" ", s)
++
++
+ def _is_level_error_line(line: str) -> bool:
+     """A level-tagged ERROR/FATAL/CRITICAL/PANIC/FAIL* log line."""
+-    s = line[:_RX_LINE_CAP]
+-    return _ERR_LEVEL_RE.search(s) is not None and _ERR_NEGATED_RE.search(s) is None
++    return _ERR_LEVEL_RE.search(_without_zero_counts(line[:_RX_LINE_CAP])) is not None
+ 
+ 
+ def _is_error_line(line: str) -> bool:
+     """Level-tagged error, ``XxxError:``/``Exception:`` head, traceback head or
+     Go panic — the lines :func:`error_fingerprints` keys on."""
+-    s = line[:_RX_LINE_CAP]
++    s = _without_zero_counts(line[:_RX_LINE_CAP])
+     # The exception head is anchored at the line start: look past a "[×N] "
+     # collapse prefix so the same failure keeps its key after a fold.
+     head = s
+     prefix = _COUNT_PREFIX_RE.match(s)
+     if prefix:
+         head = s[prefix.end():]
+-    if not (
++    return bool(
+         _ERR_LEVEL_RE.search(s)
+         or _ERR_EXC_RE.match(head)
+         or _ERR_TRACEBACK in s
+         or _ERR_PANIC_RE.search(s)
+-    ):
+-        return False
+-    return _ERR_NEGATED_RE.search(s) is None
++    )
+ 
+ 
+ def _error_fp(line: str) -> str:
+@@ -1142,9 +1147,28 @@ def _has_anchored_marker(text: str, markers: tuple[str, ...]) -> bool:
+     or text that resembles a marker without being one, does not count."""
+     if not markers:
+         return False
+-    if not any(m in text for m in markers):  # cheap reject before the line scan
++    if any(m in text for m in markers) and any(
++        line.lstrip().startswith(markers) for line in text.splitlines()
++    ):  # (the substring test is a cheap reject before the line scan)
++        return True
++    return _marker_in_tool_payload(text, markers)
++
++
++def _marker_in_tool_payload(text: str, markers: tuple[str, ...]) -> bool:
++    """A Hermes tool result is a JSON object around ONE payload string, so a
++    marker that opens a line of the payload is escaped inside the JSON text and
++    never opens a line of it. Judge the unwrapped payload as well, otherwise a
++    host that re-wraps its compacted output (``rewrap_tool_payload``) would see
++    that output compressed a second time."""
++    if text.lstrip()[:1] != "{":
++        return False
++    escaped = [json.dumps(m, ensure_ascii=a)[1:-1] for m in markers for a in (False, True)]
++    if not any(e in text for e in escaped):
++        return False
++    inner = unwrap_tool_payload(text).inner
++    if inner is text:
+         return False
+-    return any(line.lstrip().startswith(markers) for line in text.splitlines())
++    return any(line.lstrip().startswith(markers) for line in inner.splitlines())
+ 
+ 
+ def preprocess(
+@@ -4450,8 +4474,11 @@ def compress_context(
+     # judged on the unwrapped payload: no table detector, no supersession, the
+     # gutter kept in the output but out of the scorer's view. `route_hint` is
+     # what the engine routes by; the receipt still records the caller's hint.
++    # A "code" hint on a numbered read means the same thing: the gutter must
++    # not count as code (it made blank source lines non-blank and split
++    # function bodies at the cut).
+     route_hint = content_hint
+-    if route_hint is None and is_numbered_code(text):
++    if route_hint in (None, "code") and is_numbered_code(text):
+         route_hint = "numbered_code"
+         code_hint = True
+         no_table = True
+diff --git a/src/tameru/folding.py b/src/tameru/folding.py
+index e07a834..95ccbd3 100644
+--- a/src/tameru/folding.py
++++ b/src/tameru/folding.py
+@@ -33,6 +33,10 @@ _ANSI_RE = re.compile(
+ )
+ _RUN_MIN = 3
+ _ANSI_PASSES = 4
++# The marker this module writes. A literal marker-looking line is never run-
++# collapsed: otherwise ``a a a a`` (-> ``a`` + marker) followed by two literal
++# marker lines would fold again on the next pass (not idempotent).
++_RUN_MARKER_RE = re.compile(r"\[×\d+ identical lines\]")
+ 
+ 
+ def _strip_ansi_line(ln: str) -> tuple[str, int]:
+@@ -61,7 +65,10 @@ def _fold_text_steps(text: str, stats: dict) -> list[str]:
+     cr = 0
+     for i, ln in enumerate(lines):
+         if "\r" in ln:
+-            body = ln[:-1] if ln.endswith("\r") else ln  # the \r of a \r\n
++            # Trailing \r's belong to the line ending (\r\n, or a bare \r
++            # that redraws nothing): they must not erase the line's text
++            # ("abc\r\r\n" shows "abc").
++            body = ln.rstrip("\r")
+             if "\r" in body:
+                 body = body.rsplit("\r", 1)[1]
+                 cr += 1
+@@ -95,7 +102,7 @@ def _fold_runs(lines: list[str], stats: dict) -> list[str]:
+         while j < n and lines[j] == lines[i]:
+             j += 1
+         run = j - i
+-        if run >= _RUN_MIN:
++        if run >= _RUN_MIN and not _RUN_MARKER_RE.fullmatch(lines[i]):
+             marker = f"[×{run - 1} identical lines]"
+             if len(lines[i]) + 1 + len(marker) < run * len(lines[i]) + run - 1:
+                 out.append(lines[i])
+@@ -109,28 +116,35 @@ def _fold_runs(lines: list[str], stats: dict) -> list[str]:
+     return out
+ 
+ 
++_JSON_STRING_OR_WS_RE = re.compile(r'("[^"\\]*(?:\\.[^"\\]*)*")|[ \t\r\n]+')
++
++
+ def _json_minified(text: str) -> str | None:
+-    """Minified form of ``text`` when it is JSON and that is strictly shorter."""
++    """``text`` with the insignificant whitespace removed, when it is JSON and
++    that is strictly shorter.
++
++    Only whitespace outside string literals is removed, so every number
++    literal, string escape, key order and duplicate key stays byte for byte
++    (re-serialising would turn ``"\\ud800"`` into a lone surrogate, ``"\\u202e"``
++    into a raw bidi override, ``1.10`` into ``1.1`` and ``-0`` into ``0``).
++    """
+     head = text.lstrip()[:1]
+     if head not in ("{", "["):
+         return None
+     try:
+-        obj = json.loads(text)
+-        mini = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
+-    except (ValueError, RecursionError):
+-        return None
+-    if len(mini) >= len(text):
+-        return None
+-    if "Infinity" in mini and "Infinity" not in text:  # 1e400 parses to inf
+-        return None
+-    try:
+-        # Pair-list hook: also catches duplicate keys and reordered keys.
+-        same = json.loads(mini, object_pairs_hook=list) == json.loads(
+-            text, object_pairs_hook=list
+-        )
++        # a number that overflows to inf (1e400) is not minified, as before
++        json.loads(text, parse_float=_finite_float)
+     except (ValueError, RecursionError):
+         return None
+-    return mini if same else None
++    mini = _JSON_STRING_OR_WS_RE.sub(lambda m: m.group(1) or "", text)
++    return mini if len(mini) < len(text) else None
++
++
++def _finite_float(literal: str) -> float:
++    value = float(literal)
++    if value in (float("inf"), float("-inf")):
++        raise ValueError("non-finite number")
++    return value
+ 
+ 
+ def fold_lossless(text: str) -> tuple[str, dict]:
+@@ -193,22 +207,31 @@ _M_HEX = re.compile(r"[0-9a-f]{6,}")
+ _M_DIGITS = re.compile(r"\d+")
+ 
+ 
++def _volatile(placeholder: str):
++    """A substitution that masks a quoted value or path only when it holds a digit (an id, a temp dir,
++    a port): ``table "orders"`` and ``table "payments"``, or ``/srv/data/a.db`` and ``/srv/data/b.db``,
++    are different messages, not one template."""
++    def sub(m: re.Match) -> str:
++        return placeholder if any(ch.isdigit() for ch in m.group(0)) else m.group(0)
++    return sub
++
++
+ def mask_template(s: str) -> str:
+     """Mask the volatile fields of one (already lowercased) log line.
+ 
+-    Quoted strings -> ``"<str>"``, ISO-8601 timestamps and ``HH:MM:SS(.fff)``
++    Quoted strings holding a digit -> ``"<str>"``, ISO-8601 timestamps and ``HH:MM:SS(.fff)``
+     -> ``<ts>``, UUIDs -> ``<uuid>``, IPv4/IPv6 -> ``<ip>``, paths of three or
+-    more segments -> ``<path>``, durations -> ``<dur>``, hex runs of 6+ ->
++    more segments holding a digit -> ``<path>``, durations -> ``<dur>``, hex runs of 6+ ->
+     ``<hex>``, then digits -> ``#`` and whitespace collapsed. Callers apply
+     their own length cap.
+     """
+-    s = _M_DQ.sub('"<str>"', s)
+-    s = _M_SQ.sub('"<str>"', s)
++    s = _M_DQ.sub(_volatile('"<str>"'), s)
++    s = _M_SQ.sub(_volatile('"<str>"'), s)
+     s = _M_TS.sub("<ts>", s)
+     s = _M_UUID.sub("<uuid>", s)
+     s = _M_IP4.sub("<ip>", s)
+     s = _M_IP6.sub("<ip>", s)
+-    s = _M_PATH.sub("<path>", s)
++    s = _M_PATH.sub(_volatile("<path>"), s)
+     s = _M_DUR.sub("<dur>", s)
+     s = _M_HEX.sub("<hex>", s)
+     s = _M_DIGITS.sub("#", s)
+@@ -224,9 +247,30 @@ _MAX_NOTABLE = 5
+ _LOWCARD_MAX = 10
+ 
+ 
++# ensure_ascii=False writes these raw: lone surrogates (a str that cannot be
++# encoded as UTF-8), bidi/format controls (a brief must not turn the escaped
++# "\\u202e" of its input into a live override) and line separators. They are
++# escaped back, which is always valid inside a JSON string.
++_UNSAFE_RAW_RE = re.compile(
++    "[\x7f-\x9f\u00ad\u061c\u180e\u200b-\u200f\u2028-\u202e\u2060-\u206f"
++    "\ufeff\ufff9-\ufffb\ud800-\udfff\U000e0000-\U000e007f]"
++)
++
++
+ def _dumps(obj: Any) -> str:
+     # allow_nan=False: NaN/Infinity are not valid JSON, and the brief must be.
+-    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
++    out = json.dumps(obj, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
++    if out.isascii():
++        return out
++    return _UNSAFE_RAW_RE.sub(_escape_char, out)
++
++
++def _escape_char(match: "re.Match[str]") -> str:
++    code = ord(match.group())
++    if code > 0xFFFF:  # JSON escapes astral characters as a surrogate pair
++        code -= 0x10000
++        return "\\u%04x\\u%04x" % (0xD800 + (code >> 10), 0xDC00 + (code & 0x3FF))
++    return "\\u%04x" % code
+ 
+ 
+ def _find_rows(obj: Any) -> tuple[list[dict], str | None, dict] | None:
+diff --git a/src/tameru/transcript.py b/src/tameru/transcript.py
+index 42469d8..528e1f7 100644
+--- a/src/tameru/transcript.py
++++ b/src/tameru/transcript.py
+@@ -361,7 +361,7 @@ def _json_query_answer_requirements(
+         normalised = preprocess_json(payload, query)
+         try:
+             parsed_values.append(json.loads(normalised))
+-        except (json.JSONDecodeError, RecursionError):
++        except (ValueError, RecursionError):  # JSONDecodeError + the 4300-digit int limit
+             return
+ 
+     parse_payload(content)
+diff --git a/tests/test_engine_helpers.py b/tests/test_engine_helpers.py
+index b30e660..10674cc 100644
+--- a/tests/test_engine_helpers.py
++++ b/tests/test_engine_helpers.py
+@@ -616,3 +616,17 @@ def test_estimate_tokens_fast_path_matches_the_definition():
+             else len(cc.token_units(text))
+         )
+         assert estimate_tokens(text) == max(1, expected)
++
++
++@pytest.mark.parametrize(
++    "line",
++    [
++        "[ERROR] Tests run: 5, Failures: 2, Errors: 0, Skipped: 0, Time elapsed: 0.1 s <<< FAILURE!",
++        "FAILED (failures=2, errors=0)",
++        "ERROR: build broke (errors: 0 in lint)",
++    ],
++)
++def test_a_failure_line_that_also_reports_a_zero_count_is_still_an_error(line):
++    """The zero-count phrase negates a line only when nothing else in it signals a
++    failure (Maven prints ``Failures: 2, Errors: 0`` on the failing line)."""
++    assert error_fingerprints(line)
+diff --git a/tests/test_extractive_tool_prune.py b/tests/test_extractive_tool_prune.py
+index 64857d4..0feea19 100644
+--- a/tests/test_extractive_tool_prune.py
++++ b/tests/test_extractive_tool_prune.py
+@@ -85,3 +85,20 @@ class ExtractiveToolPruneTests(unittest.TestCase):
+ 
+ if __name__ == "__main__":
+     unittest.main()
++
++
++class BigIntegerJsonTests(unittest.TestCase):
++    def test_answer_scan_survives_a_4300_digit_integer_in_tool_json(self):
++        """CPython refuses to parse an integer of more than 4300 digits with a
++        ValueError (not a JSONDecodeError): the answer-requirement scan must treat
++        that payload as "not JSON" like every other JSON site, not crash."""
++        from tameru.transcript import _json_query_answers, query_facts_lost
++
++        payload = '{"a": %s, "name": "widget-12"}' % ("9" * 5000)
++        query = "what is the name of widget-12?"
++        self.assertEqual(_json_query_answers(payload, query), set())
++        before = [
++            {"role": "user", "content": query},
++            {"role": "tool", "tool_call_id": "1", "content": payload},
++        ]
++        self.assertIn(query_facts_lost(before, before, query), (True, False))
+diff --git a/tests/test_fold_lossless.py b/tests/test_fold_lossless.py
+index b6c1962..b453a8e 100644
+--- a/tests/test_fold_lossless.py
++++ b/tests/test_fold_lossless.py
+@@ -102,3 +102,38 @@ def test_json_minify_refuses_to_turn_an_overflowing_number_into_infinity():
+     folded, stats = fold_lossless(raw)
+     assert "Infinity" not in folded
+     assert not stats["json_minified"]
++
++
++# --- QA pass (1.4.0): CR line endings, literal markers, exact JSON minify ---
++
++
++def test_trailing_cr_run_does_not_erase_the_line():
++    """``abc\\r\\r\\n`` shows ``abc``: the CRs belong to the line ending."""
++    assert fold_lossless("abc\r\r\nnext")[0] == "abc\nnext"
++    assert fold_lossless("a\rb\r\r\n")[0] == "b\n"
++
++
++def test_literal_run_marker_lines_keep_fold_idempotent():
++    marker = "[×3 identical lines]"
++    text = "\n".join(["aaaaaaaa"] * 4 + [marker, marker])
++    once, _ = fold_lossless(text)
++    assert fold_lossless(once)[0] == once
++    assert len(once) <= len(text)
++    # marker-looking lines themselves are never run-collapsed
++    assert fold_lossless("\n".join([marker] * 5))[0] == "\n".join([marker] * 5)
++
++
++def test_json_minify_keeps_number_and_escape_literals_exactly():
++    raw = '[\n  1.10,\n  -0,\n  1E2,\n  "\\ud800",\n  "\\u202e",\n  0.1000000000000000055511151231257827\n]'
++    out, stats = fold_lossless(raw)
++    assert stats["json_minified"]
++    assert out == '[1.10,-0,1E2,"\\ud800","\\u202e",0.1000000000000000055511151231257827]'
++    assert json.loads(out) == json.loads(raw)
++    out.encode("utf-8")  # no lone surrogate was materialised
++
++
++def test_json_minify_keeps_duplicate_keys_and_whitespace_inside_strings():
++    raw = '{\n  "a": 1,\n  "a": " x  y ",\n  "b": "line\\n  two"\n}'
++    out, stats = fold_lossless(raw)
++    assert stats["json_minified"]
++    assert out == '{"a":1,"a":" x  y ","b":"line\\n  two"}'
+diff --git a/tests/test_json_brief.py b/tests/test_json_brief.py
+index 592557c..b42cf36 100644
+--- a/tests/test_json_brief.py
++++ b/tests/test_json_brief.py
+@@ -96,3 +96,19 @@ def test_query_term_present_in_every_row_does_not_crowd_out_anomalies():
+     rows = [{"id": i, "status": "ok" if i != 777 else "error"} for i in range(1000)]
+     out = json.loads(json_brief(json.dumps(rows), budget_chars=1200, query="status"))
+     assert any(r["id"] == 777 for r in out["_notable"])
++
++
++def test_brief_never_materialises_surrogates_or_bidi_controls():
++    """Escaped ``\\ud800`` / ``\\u202e`` in the input stay escaped in the brief:
++    a raw lone surrogate cannot be encoded, a raw override is a live control."""
++    rows = [{"id": i, "s": "\\ud800\\u202e".encode().decode("unicode_escape", "surrogatepass")} for i in range(30)]
++    text = json.dumps(rows)  # ensure_ascii=True: escapes in the source text
++    out = json_brief(text, budget_chars=600)
++    assert out is not None
++    out.encode("utf-8")
++    assert out.isascii()
++    assert json.loads(out)["_head"][0]["s"] == rows[0]["s"]
++    astral = json.dumps([{"i": i, "s": "\U000e0001"} for i in range(30)], ensure_ascii=False)
++    out = json_brief(astral, budget_chars=600)
++    assert out is not None and out.isascii()
++    assert json.loads(out)["_head"][0]["s"] == "\U000e0001"
+diff --git a/tests/test_log_templates.py b/tests/test_log_templates.py
+index 46817c2..158cad3 100644
+--- a/tests/test_log_templates.py
++++ b/tests/test_log_templates.py
+@@ -14,8 +14,12 @@ def test_masking_placeholders():
+     assert m("at 2026-03-14t12:00:01.123z") == "at <ts>"
+     assert m("12:00:01.5 took 12ms, 3.5s") == "<ts> took <dur>, <dur>"
+     assert m("sha deadbeef01 end") == "sha <hex> end"
+-    assert m("open 'a b' and \"c d\"") == 'open "<str>" and "<str>"'
+-    assert m("read /var/log/app/x.log now") == "read <path> now"
++    assert m("open 'a-1 b' and \"c 2\"") == 'open "<str>" and "<str>"'
++    assert m("read /var/log/app-7/x.log now") == "read <path> now"
++    # Without a digit a quoted value or path names a thing, not an instance: different messages stay apart.
++    assert m('table "orders" locked') != m('table "payments" locked')
++    assert m("open 'alice'") != m("open 'bob'")
++    assert m("read /srv/data/a.db") != m("read /srv/data/b.db")
+     assert m("worker-12") == "worker-#"
+     assert m("don't stop, it's fine") == "don't stop, it's fine"
+ 
+@@ -77,3 +81,30 @@ def test_masking_is_linear_on_pathological_lines():
+     for _ in range(50):
+         mask_template(line[:2000])
+     assert time.perf_counter() - t0 < 2.0
++
++
++def test_errors_naming_different_things_are_not_one_template():
++    """1.4.0 masked every quoted value and path, so these four distinct errors collapsed into one."""
++    lines = []
++    for i in range(12):
++        lines.append(f"2026-03-14 12:00:{i:02d} INFO heartbeat ok seq={i}")
++    errs = [
++        'ERROR db: deadlock on table "orders"',
++        'ERROR db: deadlock on table "payments"',
++        "ERROR store: cannot open /srv/data/a.db",
++        "ERROR store: cannot open /srv/data/b.db",
++    ]
++    text = "\n".join(lines[:6] + errs + lines[6:])
++    fps = error_fingerprints(text)
++    assert len(fps) == 4
++    kept = "\n".join(preprocess_logs(text.split("\n")))
++    for e in errs:
++        assert e in kept
++
++
++def test_messages_that_differ_by_a_quoted_word_keep_their_own_templates():
++    msgs = [f'msg="{w} completed"' for w in ("sync", "backup", "rotate", "index", "vacuum", "upload", "prune", "warmup")]
++    lines = [f"2026-03-14T12:{i // 60:02d}:{i % 60:02d}Z INFO {msgs[i % 8]} svc=api" for i in range(240)]
++    out = preprocess_logs(lines)
++    for m in msgs:
++        assert any(m in line for line in out), m
+diff --git a/tests/test_numbered_code_reads.py b/tests/test_numbered_code_reads.py
+index 59f8c43..bdc547d 100644
+--- a/tests/test_numbered_code_reads.py
++++ b/tests/test_numbered_code_reads.py
+@@ -100,3 +100,24 @@ def test_prose_with_numbered_lines_minority_is_not_numbered_code():
+         + [f"{i}: item" for i in range(1, 3)]
+     )
+     assert detect_format(text) != "numbered_code"
++
++
++@pytest.mark.parametrize("fmt", ["tab", "pipe"])
++def test_code_hint_on_a_numbered_read_keeps_the_function_whole(fmt):
++    """``content_hint="code"`` on a read that carries a line-number gutter used to
++    score the gutter as code: blank source lines read as non-blank and the
++    function asked about was cut in the middle of its body."""
++    text = _render(fmt)
++    results = [
++        compress_context(
++            text, "what does handler_240 do?", ccr=False, citations=False,
++            content_hint=hint,
++        )
++        for hint in (None, "code", "numbered_code")
++    ]
++    assert not results[1].fail_open
++    assert results[1].compressed_text == results[0].compressed_text
++    assert results[1].compressed_text == results[2].compressed_text
++    for fragment in BODY:
++        assert fragment in results[1].compressed_text
++    assert results[1].receipt["content_hint"] == "code"  # the caller's word is recorded
+diff --git a/tests/test_recursion_markers.py b/tests/test_recursion_markers.py
+index 5e20c7b..ad200f2 100644
+--- a/tests/test_recursion_markers.py
++++ b/tests/test_recursion_markers.py
+@@ -168,3 +168,30 @@ def test_a_non_matching_generator_is_read_once_and_the_auto_ladder_still_runs():
+     )
+     assert result.policy_name != "local-noop-recursion"
+     assert not result.fail_open
++
++
++@pytest.mark.parametrize("field", ["output", "content"])
++@pytest.mark.parametrize("ensure_ascii", [True, False])
++def test_marker_opening_a_tool_payload_line_counts_inside_the_json_wrapper(field, ensure_ascii):
++    """A Hermes tool result is a JSON object around one payload string: the
++    marker that opens the payload is escaped there and never opens a line of the
++    wrapper text, so a re-wrapped compacted result used to be compressed again."""
++    import json
++
++    payload = _marked()
++    text = json.dumps({field: payload, "exit_code": 0}, ensure_ascii=ensure_ascii)
++    result = compress_context(
++        text, QUERY, ccr=False, citations=False, recursion_markers=[HERMES]
++    )
++    _assert_guard_noop(text, result)
++
++
++def test_marker_mentioned_mid_line_of_a_wrapped_payload_is_still_not_a_match():
++    import json
++
++    payload = _doc("the host once wrote " + HERMES + " in a sentence")
++    text = json.dumps({"output": payload, "exit_code": 0})
++    result = compress_context(
++        text, QUERY, ccr=False, citations=False, recursion_markers=[HERMES]
++    )
++    assert result.policy_name != "local-noop-recursion"
+diff --git a/tests/test_test_runner_preprocess.py b/tests/test_test_runner_preprocess.py
+index 0610502..0222780 100644
+--- a/tests/test_test_runner_preprocess.py
++++ b/tests/test_test_runner_preprocess.py
+@@ -270,3 +270,87 @@ def test_reduced_jest_run_keeps_failing_test_names_through_scoring():
+         assert len(out) < len(text)
+         for i in range(12):
+             assert f"does thing {i}" in out and f"f{i}.test.js" in out
++
++
++# --- QA pass (1.4.0): errors around / inside a run are never reduced away ---
++
++
++def test_pytest_equals_rule_in_captured_output_does_not_end_the_failure_section():
++    text = "\n".join(
++        [
++            "=" * 25 + " test session starts " + "=" * 25,
++            "collected 30 items",
++            "",
++            "tests/test_a.py " + "." * 28 + "FF [100%]",
++            "",
++            "=" * 33 + " FAILURES " + "=" * 33,
++            "_" * 20 + " test_one " + "_" * 20,
++            "E   AssertionError: first failure",
++            "------------------------------ Captured stdout call ------------------------------",
++            "===== Report =====",
++            "_" * 20 + " test_two " + "_" * 20,
++            "E   ValueError: second failure body",
++            "tests/test_a.py:30: ValueError",
++            "=" * 20 + " short test summary info " + "=" * 20,
++            "FAILED tests/test_a.py::test_one - AssertionError",
++            "FAILED tests/test_a.py::test_two - ValueError",
++            "=" * 20 + " 2 failed, 28 passed in 1.23s " + "=" * 20,
++        ]
++    )
++    out = preprocess_test_output(text, "")
++    assert out is not None
++    assert "===== Report =====" in out
++    assert "E   ValueError: second failure body" in out
++    assert "tests/test_a.py:30: ValueError" in out
++
++
++def test_errors_printed_around_a_run_survive():
++    """``make test`` / ``tox`` / a compiler wrap the runner and say why it failed."""
++    pytest_run = [
++        "=" * 25 + " test session starts " + "=" * 25,
++        "collected 12 items",
++        "",
++        "tests/test_a.py " + "." * 12 + " [100%]",
++        "",
++        "=" * 25 + " 12 passed in 0.80s " + "=" * 25,
++    ]
++    text = "\n".join(
++        ["$ make test", "foo.c:3: error: expected ';' before '}' token"]
++        + pytest_run
++        + ["make: *** [Makefile:12: test] Error 1", "ERROR: py311: commands failed"]
++    )
++    out = preprocess_test_output(text, "")
++    assert out is not None
++    for line in (
++        "foo.c:3: error: expected ';' before '}' token",
++        "make: *** [Makefile:12: test] Error 1",
++        "ERROR: py311: commands failed",
++    ):
++        assert line in out
++    assert "collected 12 items" not in out
++
++    cargo = "\n".join(
++        [
++            "   Compiling a v0.1.0",
++            "error[E0432]: unresolved import `x`",
++            " --> src/main.rs:1:5",
++            "",
++            "error: could not compile `a` (bin \"a\") due to 1 previous error",
++            "     Running unittests src/lib.rs",
++            "running 2 tests",
++            "test a ... ok",
++            "test b ... ok",
++            "test result: ok. 2 passed; 0 failed; 0 ignored; finished in 0.00s",
++            "error: test failed, to rerun pass `--lib`",
++        ]
++    )
++    out = preprocess_test_output(cargo, "")
++    assert out is not None
++    assert "error[E0432]: unresolved import `x`" in out and " --> src/main.rs:1:5" in out
++    assert "could not compile `a`" in out and "error: test failed, to rerun" in out
++    assert "Compiling a" not in out
++
++    jest = JEST + "\nnpm ERR! Test failed.  See above for more details.\n"
++    out = preprocess_test_output(jest, "")
++    assert out is not None and "npm ERR! Test failed." in out
++    assert "noisy debug output" not in out and "PASS src/suite_3.test.js" not in out
+-- 
+2.43.0
+

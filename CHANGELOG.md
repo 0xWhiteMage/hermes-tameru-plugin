@@ -96,7 +96,7 @@ Rebuilt on Hermes' own demotion seam, on the 1.4.0 Tameru engine. The "G" number
 - Lossless folding (CR redraws, ANSI codes, trailing whitespace, identical runs, round-trip-checked JSON minify)
   and a JSON brief.
 - Filler queries no longer cause high-risk cuts.
-- Vendored from upstream commit `fd8c5b0` (see `VENDORED_FROM`). The two upstream commits are in
+- Vendored from upstream commit `11b9e5e` (see `VENDORED_FROM`). The three upstream commits are in
   `docs/upstream-patches/`.
 
 ## [1.3.0]

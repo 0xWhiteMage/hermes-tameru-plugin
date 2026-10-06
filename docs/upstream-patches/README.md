@@ -10,8 +10,9 @@ applied upstream: the vendored copy in `hermes_tameru_plugin/tameru/` already co
 |---|---|
 | `0001-feat-engine-fixes-for-agent-tool-output-plugin-facin.patch` | Engine fixes for agent tool output and the plugin-facing API (critical-line regex flag, quadratic hot spots, per-fingerprint error exemplars, filler queries, `gap_marker` / `recursion_markers` / `content_hint`, `error_fingerprints`, `brief_context`, `extract_evidence_lines`, `contains_secret`, payload unwrap/rewrap, `ENGINE_VERSION`, `task_query`, `sync_to_harness.py --check`; the `integration/hermes` bundle is removed) |
 | `0002-feat-1.4.0-agent-output-formats-lossless-folding-log.patch` | 1.4.0: agent-output format adapters, lossless folding, log templates, JSON brief; version bump, CHANGELOG, RESEARCH takeaways |
+| `0003-fix-1.4.0-QA-round-2-test-runner-errors-template-ove.patch` | QA round 2 fixes: test-runner errors kept, log-template over-masking, zero-count negation, recursion markers in JSON payloads, byte-exact JSON fold, numbered-code hint, big-integer crash |
 
-Range exported: `b480ab3..v1.4.0` (upstream `v1.4.0` is commit `fd8c5b0db23bd570615d5929bf21c02fadbb247c`, the
+Range exported: `b480ab3..v1.4.0` (upstream `v1.4.0` is commit `11b9e5ed336c51a35f43cf9ec438023b2e0ca277`, the
 commit recorded in `VENDORED_FROM`). Generated with:
 
 ```bash

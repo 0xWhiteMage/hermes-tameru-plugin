@@ -1,7 +1,7 @@
 From fd8c5b0db23bd570615d5929bf21c02fadbb247c Mon Sep 17 00:00:00 2001
 From: Claude <noreply@anthropic.com>
 Date: Tue, 6 Oct 2026 05:27:42 +0000
-Subject: [PATCH 2/2] =?UTF-8?q?feat:=201.4.0=20=E2=80=94=20agent-output=20?=
+Subject: [PATCH 2/3] =?UTF-8?q?feat:=201.4.0=20=E2=80=94=20agent-output=20?=
  =?UTF-8?q?formats,=20lossless=20folding,=20log=20templates,=20JSON=20brie?=
  =?UTF-8?q?f?=
 MIME-Version: 1.0
