@@ -55,7 +55,7 @@ def init_params(compressor_cls) -> set[str]:
 # ---- TameruSettings ------------------------------------------------------------------------------
 def test_defaults_match_the_contract():
     assert dataclasses.asdict(TameruSettings()) == {
-        "enabled": True, "min_tool_chars": 800, "max_extract_chars": 6000, "brief_chars": 1200,
+        "enabled": True, "min_tool_chars": 800, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
         "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (),
         "expand_tool": True, "store_max_entries": 512, "store_max_chars": 32_000_000,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "prune_tail": "tokens",
@@ -79,6 +79,7 @@ ENV_SAMPLES = {
     "brief_chars": (" 900 ", 900),
     "max_risk": ("HIGH", "high"),
     "min_savings": ("0.5", 0.5),
+    "brief_share": ("0.4", 0.4),
     "exempt_tools": ("a, b", ("a", "b")),
     "protect_patterns": (r"\bID-\d+\b", (r"\bID-\d+\b",)),
     "expand_tool": ("no", False),
@@ -249,7 +250,7 @@ def test_tuples_from_the_settings_file_take_lists_or_a_string(hermes_config):
 BAD_ENV = [
     ("enabled", "maybe"), ("enabled", ""), ("min_tool_chars", "abc"), ("min_tool_chars", "-1"),
     ("min_tool_chars", "1.5"), ("max_extract_chars", "0"), ("brief_chars", "x"), ("min_savings", "1.0"),
-    ("min_savings", "-0.1"), ("min_savings", "nan"), ("min_savings", "inf"), ("min_savings", "high"),
+    ("min_savings", "-0.1"), ("brief_share", "1.5"), ("min_savings", "nan"), ("min_savings", "inf"), ("min_savings", "high"),
     ("max_risk", "extreme"), ("prune_tail", "weeks"), ("protect_patterns", "ok,(unclosed"), ("store_max_entries", "-5"),
     ("default_proactive_prune_tokens", "-1"),
 ]

@@ -42,7 +42,7 @@ def test_the_token_tail_demotes_a_big_old_row_inside_the_count_tail():
     messages, big = _session()
     out = _prune(_engine(), messages)
     assert classify_render(out[big]["content"]) == "v1", "a 50 KB result 17 messages ago is not worth its bytes"
-    assert len(out[big]["content"]) < 2000
+    assert len(out[big]["content"]) <= TameruSettings().max_extract_chars < len(messages[big]["content"]) / 5
     assert all(out[i] == messages[i] for i in range(len(messages) - 8, len(messages))), "the newest rows stay"
 
 

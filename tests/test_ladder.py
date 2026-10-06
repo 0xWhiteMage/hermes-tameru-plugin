@@ -14,7 +14,9 @@ from fixtures import hermes_payloads as hp
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.hermes_compat import summarize_tool_result, tool_calls_by_id
+from hermes_tameru_plugin.payload import parse_payload
 from hermes_tameru_plugin.render import classify_render, parse_header
+from hermes_tameru_plugin.tameru.compress_context import error_fingerprints
 
 TASK_NAMING_THE_TEST = "tests/test_orders.py::test_reserve_stock_rollback failed"
 
@@ -50,8 +52,9 @@ def test_brief_rung_when_the_extract_is_not_acceptable():
     changed, out = demote(engine, msgs, idx)
     row = out[idx]["content"]
     assert changed and _rung(row) == "brief"
-    assert len(row) <= engine._settings.brief_chars + 200
-    assert "FATAL" in row or "ERROR" in row
+    assert len(row) <= engine._settings.max_extract_chars
+    # Every error template of the original survives the brief, however many there are.
+    assert error_fingerprints(parse_payload(msgs[idx]["content"]).inner).keys() <= error_fingerprints(row).keys()
 
 
 def test_a_failure_block_the_extract_cannot_shrink_falls_to_the_brief():
@@ -183,7 +186,7 @@ def test_pass_budget_sends_the_rest_to_hermes_line():
 def test_no_acceptable_rung_falls_back_to_hermes_line():
     """Nothing small enough: Hermes' own line, and nothing stored."""
     engine, msgs, idx = _one("q", "terminal", {"command": "ls"}, server_log(),
-                             settings=TameruSettings(brief_chars=10, max_risk="low"))
+                             settings=TameruSettings(brief_chars=10, max_risk="low", max_extract_chars=150))
     _, out = demote(engine, msgs, idx)
     assert classify_render(out[idx]["content"]) is None
     assert out[idx]["content"].startswith("[terminal]")
@@ -229,3 +232,33 @@ def test_the_brief_is_not_computed_when_the_extract_is_accepted(monkeypatch):
     )
     _, out = demote(engine, msgs, idx)
     assert _rung(out[idx]["content"]) == "extract" and calls == []
+
+
+# ---- QA round 2: results whose unforced extract is over the cap -------------------------------
+def test_an_oversized_extract_is_retried_until_it_fits():
+    """A 10 KB source read: the extract is over the cap, one fixed budget overshoots; a tighter
+    retry fits and keeps the function the question is about (before: the brief, without it)."""
+    source = hp.orders_service_source(random.Random(7), patched=True)
+    engine, msgs, idx = _one(
+        "what does reserve_stock do when the ledger write fails?", "read_file",
+        {"path": "src/orders/service.py"}, hp.read_file_result(source),
+    )
+    changed, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    assert changed and _rung(row) == "extract"
+    assert len(row) <= engine._settings.max_extract_chars
+    assert "release_holds(inventory, holds)" in row
+    assert "except (StockReservationConflict, LedgerWriteError):" in row
+
+
+def test_a_forced_budget_may_not_drop_the_lines_the_query_asks_about():
+    """``git log --stat`` asked about one change: a fixed-budget cut that loses every line naming it
+    is refused, and the brief (query lines first) keeps one."""
+    engine, msgs, idx = _one(
+        "which commit bumped the client timeout?", "terminal", {"command": "run"},
+        hp.terminal_result(hp.git_log_stat(random.Random(11), 40)),
+    )
+    changed, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    assert changed and _rung(row) in ("extract", "brief")
+    assert "bump client timeout" in row

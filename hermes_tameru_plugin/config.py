@@ -38,7 +38,8 @@ class TameruSettings:
     enabled: bool = True                       # kill switch -> pure stock ContextCompressor behaviour
     min_tool_chars: int = 800                  # shorter results take the parent path
     max_extract_chars: int = 6000              # incl. header/meta/marker bytes
-    brief_chars: int = 1200
+    brief_chars: int = 1200                    # smallest brief row
+    brief_share: float = 0.0                   # brief start size as a share of the result (0 = brief_chars)
     max_risk: str = "high"                     # accepted engine compression_risk ceiling: low|medium|high
     min_savings: float = 0.10                  # extract must be <= (1-min_savings)*len(inner)
     exempt_tools: tuple[str, ...] = ()         # added to the built-in exempt set
@@ -170,6 +171,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "brief_chars": _min_int(0),
     "max_risk": _parse_risk,
     "min_savings": _parse_savings,
+    "brief_share": _parse_savings,
     "exempt_tools": _parse_str_tuple,
     "protect_patterns": _parse_patterns,
     "expand_tool": _parse_bool,

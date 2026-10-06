@@ -32,16 +32,21 @@ def _bodies(messages: list[dict], idxs: list[int]) -> int:
     return sum(len(messages[i]["content"]) for i in idxs if "\n" in messages[i]["content"])
 
 
+def _all_bodies() -> TameruSettings:
+    return TameruSettings(retained_extract_budget_chars=10**6)
+
+
 def test_rows_beyond_the_budget_step_down_newest_first():
     messages, idxs = _session()
-    committed, _ = prune_pass(make_engine(), messages)
-    assert set(_rungs(committed, idxs)) == {"brief"}
-    one = len(committed[idxs[0]]["content"])
+    committed, _ = prune_pass(make_engine(_all_bodies()), messages)
+    rungs = _rungs(committed, idxs)
+    assert set(rungs) <= {"brief", "extract"}
+    newest_two = sum(len(committed[i]["content"]) for i in idxs[-2:])
 
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=2 * one + 50))
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=newest_two + 50))
     stepped, n = prune_pass(engine, committed)
     assert n == ROWS - 2
-    assert _rungs(stepped, idxs) == ["header"] * (ROWS - 2) + ["brief"] * 2
+    assert _rungs(stepped, idxs) == ["header"] * (ROWS - 2) + rungs[-2:]
     assert all(stepped[i] is committed[i] for i in idxs[-2:]) or all(
         stepped[i]["content"] == committed[i]["content"] for i in idxs[-2:]
     )
@@ -50,9 +55,22 @@ def test_rows_beyond_the_budget_step_down_newest_first():
         assert parse_header(stepped[i]["content"])["ref"] == parse_header(committed[i]["content"])["ref"]
 
 
+def test_one_pass_keeps_its_bodies_within_the_budget():
+    """Rows get bodies in the order Hermes visits them (oldest first) until the budget is spent."""
+    messages, idxs = _session()
+    budget = 4000
+    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
+    bodied = [_rungs(out, idxs)[k] != "header" for k in range(ROWS)]
+    assert any(bodied) and not all(bodied)
+    assert bodied == sorted(bodied, reverse=True), bodied
+    assert _bodies(out, idxs) <= budget
+    for i in idxs:   # every row stays recoverable
+        assert parse_header(out[i]["content"])["ref"]
+
+
 def test_a_budget_that_fits_everything_changes_nothing():
     messages, idxs = _session()
-    committed, _ = prune_pass(make_engine(), messages)
+    committed, _ = prune_pass(make_engine(_all_bodies()), messages)
     engine = make_engine(TameruSettings(retained_extract_budget_chars=10**6))
     again, n = prune_pass(engine, committed)
     assert n == 0 and again == committed
@@ -72,7 +90,7 @@ def test_new_rows_stop_taking_bodies_when_the_budget_is_spent():
 def test_the_budget_counts_rows_outside_this_pass_too():
     """Rendered rows in the protected tail still use up budget, so older rows give way."""
     messages, idxs = _session()
-    committed, _ = prune_pass(make_engine(), messages)
+    committed, _ = prune_pass(make_engine(_all_bodies()), messages)
     chat = Chat()
     tail_idx = chat.tool("terminal", {"command": "tail -n 449 app.log"}, server_log(9))
     tail = chat.messages[2:]
@@ -87,7 +105,7 @@ def test_the_budget_counts_rows_outside_this_pass_too():
 def test_only_a_committing_pass_changes_rows():
     """Hermes' min-reclaim gate decides: when it declines, the input list comes back untouched."""
     messages, idxs = _session()
-    committed, _ = prune_pass(make_engine(), messages)
+    committed, _ = prune_pass(make_engine(_all_bodies()), messages)
     before = [dict(m) for m in committed]
     engine = make_engine(
         TameruSettings(retained_extract_budget_chars=100), proactive_prune_min_reclaim_tokens=10**7,

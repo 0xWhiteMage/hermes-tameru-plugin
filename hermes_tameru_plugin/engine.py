@@ -74,6 +74,7 @@ from .tameru.compress_context import (
     brief_context,
     compress_context,
     error_fingerprints,
+    extract_evidence_lines,
 )
 from .telemetry import Telemetry
 
@@ -91,6 +92,7 @@ _EXEMPT_TOOLS = frozenset({
 })
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
 _BODYLESS = frozenset({"header", "superseded"})   # rungs that keep no text of the original
+_FIXED_RETRIES = 2                                 # fixed-budget extract attempts after an oversized one
 _MEMO_ENTRIES = 2048
 _MEMO_MAX_TEXT = 50_000       # a bigger extract is recomputed rather than held
 _LINE_BREAK_RE = re.compile(r"\r\n|\r|\n")
@@ -563,7 +565,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         self, parent_line: str, pl: HermesPayload, ref: str, query: list[str], hint: str | None,
         limit: int,
     ) -> str | None:
-        """The query-aware extract row, within ``limit`` chars; one fixed-budget retry if too big."""
+        """The query-aware extract row, within ``limit`` chars; fixed-budget retries if too big."""
         if limit <= 0:
             return None
         fingerprints = error_fingerprints(pl.inner)
@@ -577,29 +579,68 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         if room <= 0:
             return None
         ratio = max(0.05, min(0.9, room / len(pl.inner)))
-        out = self._compress(pl.inner, query, hint, round(ratio, 4))
-        if not self._acceptable(out, fingerprints):
-            return None
-        rendered = self._body_row(parent_line, pl, ref, "extract", out.text)
-        return rendered if len(rendered) <= limit else None
+        # A forced budget can cut what the query asked about: the cut must keep one of the engine's
+        # top query-evidence lines that the unforced extract kept (when there are any).
+        evidence = [
+            line for line in extract_evidence_lines(pl.inner, " ".join(query), limit=len(fingerprints) + 3)
+            if not error_fingerprints(line) and line in out.text
+        ][:3]
+        # A fixed budget lands near, not under, its target (whole lines, gap markers), so one
+        # tighter retry follows an overshoot.
+        for _ in range(_FIXED_RETRIES):
+            out = self._compress(pl.inner, query, hint, round(ratio, 4))
+            if not self._acceptable(out, fingerprints):
+                return None
+            if evidence and not any(line in out.text for line in evidence):
+                return None
+            rendered = self._body_row(parent_line, pl, ref, "extract", out.text)
+            if len(rendered) <= limit:
+                return rendered
+            ratio = max(0.05, ratio * min(0.9, limit / len(rendered)) * 0.9)
+        return None
 
     def _brief_row(
         self, parent_line: str, pl: HermesPayload, ref: str, query: list[str], limit: int,
     ) -> str | None:
-        """The structural brief row (errors, warnings, head, tail), within ``limit`` chars."""
+        """The structural brief row (errors, warnings, query lines, head, tail), within ``limit`` chars.
+
+        The brief is reached when the extract was refused, mostly because it was too big. It starts at
+        ``brief_chars`` (or ``brief_share`` of the result, when larger) and grows in steps up to
+        ``limit`` while an error template of the original is missing from it.
+        """
+        settings = self._settings
         stats = RenderStats(0, 0, 0, 0, (), "brief")
         reserve = len(build_header(parent_line, stats, ref)) + len(meta_line(pl.meta)) + 2
-        budget = self._settings.brief_chars - reserve
-        if budget <= 0:
-            return None
-        try:
-            body = brief_context(
-                pl.inner, budget_chars=budget, query=" ".join(query), gap_marker=elision_marker,
-            )
-        except Exception:
-            return None
-        rendered = self._body_row(parent_line, pl, ref, "brief", body)
-        return rendered if len(rendered) <= limit else None
+        first = max(settings.brief_chars, int(settings.brief_share * len(pl.inner)))
+        sizes = [min(first, limit)]
+        while sizes[-1] < limit:   # grow in steps, stopping at the first size that keeps every template
+            sizes.append(min(limit, sizes[-1] * 3 // 2))
+        fingerprints = error_fingerprints(pl.inner)
+        best = None
+        for size in sizes:
+            budget = size - reserve
+            rendered = body = None
+            for attempt in range(3):   # the reserve is an estimate: the real header carries the stats
+                if budget <= 0:
+                    break
+                try:
+                    body = brief_context(
+                        pl.inner, budget_chars=budget, query=" ".join(query), gap_marker=elision_marker,
+                    )
+                except Exception:
+                    return best
+                rendered = self._body_row(parent_line, pl, ref, "brief", body)
+                if len(rendered) <= limit:
+                    break
+                # Whole lines: a budget a few chars lower can give the same body, so cut below the body.
+                budget = min(budget, len(body)) - (len(rendered) - limit) - 64 * (attempt + 1)
+                rendered = None
+            if rendered is None:
+                break
+            best = rendered
+            if fingerprints.keys() <= error_fingerprints(body).keys():
+                break
+        return best
 
     # ---- committing rows ----------------------------------------------------------------------
     def _keep_parent(self, result: list[dict], idx: int, row: dict, tool: str) -> bool:
