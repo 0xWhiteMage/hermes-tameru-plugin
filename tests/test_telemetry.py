@@ -178,3 +178,52 @@ def test_deepcopy_of_a_holder_does_not_trip_over_the_lock():
     cloned = copy.deepcopy(holder)
     assert isinstance(cloned["telemetry"], Telemetry)
     assert cloned["telemetry"] is not holder["telemetry"]
+
+
+def test_a_hold_applies_what_it_recorded_only_when_kept(tmp_path):
+    t = Telemetry(str(tmp_path / "t.jsonl"))
+    with t.hold() as held:
+        t.count("render", rung="extract")
+        t.add_chars(100, 10)
+        t.emit({"event": "render"})
+        assert t.snapshot()["events"] == {} and t.snapshot()["chars"]["before"] == 0
+    assert t.snapshot()["events"] == {} and not (tmp_path / "t.jsonl").exists()
+
+    with t.hold() as held:
+        t.count("render", rung="extract")
+        t.add_chars(100, 10)
+        t.emit({"event": "render"})
+        held.keep = True
+    snapshot = t.snapshot()
+    assert snapshot["events"]["render"]["count"] == 1 and snapshot["chars"]["saved"] == 90
+    assert (tmp_path / "t.jsonl").read_text().count("\n") == 1
+
+
+def test_a_hold_that_raises_drops_its_counts_and_time_is_never_held():
+    t = Telemetry()
+    try:
+        with t.hold():
+            t.count("render")
+            raise RuntimeError("boom")
+    except RuntimeError:
+        pass
+    assert t.snapshot()["events"] == {}
+    with t.hold():
+        t.time(0.5)
+    assert t.snapshot()["time"]["calls"] == 1
+
+
+def test_an_inner_hold_defers_to_the_outer_one():
+    t = Telemetry()
+    with t.hold() as outer:
+        with t.hold() as inner:
+            t.count("a")
+            inner.keep = True
+        assert t.snapshot()["events"] == {}
+    assert t.snapshot()["events"] == {}
+    with t.hold() as outer:
+        with t.hold() as inner:
+            t.count("a")
+            inner.keep = True
+        outer.keep = True
+    assert t.snapshot()["events"]["a"]["count"] == 1

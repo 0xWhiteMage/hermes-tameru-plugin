@@ -142,6 +142,14 @@ def test_identity():
     assert message == "🗜️ Tameru (貯める) compaction — working"
 
 
+def test_the_status_message_honours_the_suppress_flag_and_the_kill_switch():
+    quiet = make_engine()
+    quiet.emit_automatic_compaction_status = False
+    assert quiet.get_automatic_compaction_status_message(phase="start", default_message="working") is None
+    stock = make_engine(TameruSettings(enabled=False))
+    assert stock.get_automatic_compaction_status_message(phase="start", default_message="working") == "working"
+
+
 def _turns():
     chat = Chat(TASK)
     chat.tool("read_file", {"path": "orders/service.py"}, hp.read_file_result("def f():\n    pass\n"))

@@ -15,12 +15,24 @@ from __future__ import annotations
 
 import json
 import threading
+from collections.abc import Iterator
+from contextlib import contextmanager
+from contextvars import ContextVar
 from pathlib import Path
 from typing import Any
 
 MAX_LABEL_CHARS = 64
 MAX_LABEL_VALUES = 64
 OVERFLOW_LABEL = "_other"
+
+# Calls recorded while a ``hold`` is open in this context: ``(telemetry, method name, args, kwargs)``.
+_HELD: ContextVar[list | None] = ContextVar("tameru_telemetry_held", default=None)
+
+
+class Held:
+    """The outcome of a ``Telemetry.hold`` block: set ``keep`` to apply what the block recorded."""
+
+    keep = False
 
 
 class Telemetry:
@@ -40,8 +52,41 @@ class Telemetry:
         self._seconds = 0.0
         self._timed = 0
 
+    @contextmanager
+    def hold(self) -> Iterator[Held]:
+        """Record ``count`` / ``add_chars`` / ``emit`` calls of this context without applying them.
+
+        On leaving the block they are applied when ``keep`` was set on the yielded ``Held`` and dropped
+        otherwise (also on an exception): a pass Hermes declined to commit rewrote nothing. ``time`` is
+        never held. Blocks may nest; the outer one decides.
+        """
+        held = Held()
+        outer = _HELD.get()
+        calls: list = []
+        token = _HELD.set(calls)
+        try:
+            yield held
+        finally:
+            _HELD.reset(token)
+            if held.keep:
+                if outer is not None:
+                    outer.extend(calls)
+                else:
+                    for owner, name, args, kwargs in calls:
+                        getattr(owner, name)(*args, **kwargs)
+
+    def _held(self, name: str, *args: Any, **kwargs: Any) -> bool:
+        """Park the call when a ``hold`` is open in this context."""
+        calls = _HELD.get()
+        if calls is None:
+            return False
+        calls.append((self, name, args, kwargs))
+        return True
+
     def count(self, event: str, n: int = 1, **labels: Any) -> None:
         """Add ``n`` to ``event`` and to the breakdown of each label value."""
+        if self._held("count", event, n, **labels):
+            return
         with self._lock:
             self._events[event] = self._events.get(event, 0) + n
             by_label = self._labels.setdefault(event, {})
@@ -54,6 +99,8 @@ class Telemetry:
 
     def add_chars(self, before: int, after: int) -> None:
         """Account one rewrite: ``before`` chars of original became ``after`` chars."""
+        if self._held("add_chars", before, after):
+            return
         with self._lock:
             self._chars_before += before
             self._chars_after += after
@@ -93,7 +140,7 @@ class Telemetry:
 
     def emit(self, record: dict) -> None:
         """Append ``record`` as one JSON line to ``log_path``; a no-op without one, never raises."""
-        if not self._log_path:
+        if not self._log_path or self._held("emit", record):
             return
         try:
             line = json.dumps(record, sort_keys=True, ensure_ascii=False, default=str)

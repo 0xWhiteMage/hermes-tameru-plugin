@@ -391,6 +391,52 @@ def test_a_failed_row_with_no_successful_repeat_is_kept(transcript):
     assert t.why(2) is None, "a failed read keeps its error even after a write"
 
 
+def test_spacing_inside_quotes_makes_a_command_different(transcript):
+    t = transcript(
+        ("terminal", {"command": 'grep "foo  bar" app.log'}, run("a")),
+        ("terminal", {"command": 'grep "foo bar" app.log'}, run("b")),
+        ("terminal", {"command": 'grep "foo bar" app.log'}, run("b")),
+    )
+    assert t.why(0) is None, "two spaces inside the pattern is another search"
+    assert t.why(1) == (2, "repeated-call")
+
+
+@pytest.mark.parametrize("change_dir", ["cd sub", "pushd sub", "popd", "cd"])
+@pytest.mark.parametrize("command", ["ls", "cat config.yaml", "git status"])
+def test_a_directory_change_between_two_identical_commands_keeps_the_earlier_result(
+    transcript, command, change_dir,
+):
+    """Hermes' terminal keeps its working directory between calls: the second ``ls`` lists elsewhere."""
+    t = transcript(
+        ("terminal", {"command": command}, run("root listing")),
+        ("terminal", {"command": change_dir}, run("")),
+        ("terminal", {"command": command}, run("sub listing")),
+        ("terminal", {"command": command}, run("sub listing")),
+    )
+    assert t.why(0) is None
+    assert t.why(2) == (3, "repeated-call")
+
+
+@pytest.mark.parametrize("command", ["cat /srv/app/config.yaml", "ls /srv/app", "tail -n 20 /var/log/app.log", "ps aux", "df -h"])
+def test_a_command_that_cannot_depend_on_the_directory_survives_a_cd(transcript, command):
+    t = transcript(
+        ("terminal", {"command": command}, run("out")),
+        ("terminal", {"command": "cd /srv/app && pytest -q"}, run("passed")),
+        ("terminal", {"command": command}, run("out")),
+    )
+    assert t.why(0) is not None
+
+
+def test_a_recursive_listing_is_not_replaced_by_a_shallow_one(transcript):
+    t = transcript(
+        ("terminal", {"command": "ls -R src"}, run("src:\na.py\nsrc/pkg:\nb.py")),
+        ("terminal", {"command": "ls src"}, run("a.py pkg")),
+        ("terminal", {"command": "ls -laR src"}, run("src:\na.py")),
+    )
+    assert t.why(0) == (2, "snapshot"), "another recursive listing does replace it"
+    assert t.why(1) is None
+
+
 # ---- snapshots -------------------------------------------------------------------------------
 def test_a_snapshot_is_superseded_by_any_later_snapshot_of_the_same_tool(transcript):
     t = transcript(

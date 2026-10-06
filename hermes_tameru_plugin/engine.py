@@ -265,8 +265,12 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
     def get_automatic_compaction_status_message(
         self, *, phase: str, default_message: str, **context: Any,
     ) -> str | None:
-        del phase, context
-        return f"🗜️ {self.DISPLAY_NAME} compaction — {default_message}"
+        message = super().get_automatic_compaction_status_message(
+            phase=phase, default_message=default_message, **context,
+        )
+        if message is None or not self._settings.enabled:   # suppressed by the host flag; or stock
+            return message
+        return f"🗜️ {self.DISPLAY_NAME} compaction — {message}"
 
     # ---- lifecycle ----------------------------------------------------------------------------
     def update_model(self, model: str, context_length: int, *args: Any, **kwargs: Any) -> None:
@@ -313,11 +317,17 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         token = _SCOPE.set(scope)
         started = time.perf_counter()
         try:
-            res = parent(messages, current_tokens, *args, **kwargs)
+            # Counters of a pass Hermes declines to commit (it returns the input object) are dropped:
+            # nothing was rewritten, so no row was rendered and no character saved.
+            with self._telemetry.hold() as held:
+                res = parent(messages, current_tokens, *args, **kwargs)
+                held.keep = res[0] is not messages
             if res[0] is messages and scope.renders and not scope.degrade:
                 self._telemetry.count("escalation")
                 _SCOPE.set(self._new_scope(messages, degrade=True))
-                res = parent(messages, current_tokens, *args, **kwargs)
+                with self._telemetry.hold() as held:
+                    res = parent(messages, current_tokens, *args, **kwargs)
+                    held.keep = res[0] is not messages
             return res
         finally:
             _SCOPE.reset(token)
@@ -612,9 +622,9 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         stats = RenderStats(0, 0, 0, 0, (), "brief")
         reserve = len(build_header(parent_line, stats, ref)) + len(meta_line(pl.meta)) + 2
         first = max(settings.brief_chars, int(settings.brief_share * len(pl.inner)))
-        sizes = [min(first, limit)]
+        sizes = [max(1, min(first, limit))]
         while sizes[-1] < limit:   # grow in steps, stopping at the first size that keeps every template
-            sizes.append(min(limit, sizes[-1] * 3 // 2))
+            sizes.append(min(limit, max(sizes[-1] + 1, sizes[-1] * 3 // 2)))
         fingerprints = error_fingerprints(pl.inner)
         best = None
         for size in sizes:

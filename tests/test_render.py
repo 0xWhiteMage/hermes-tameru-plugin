@@ -447,3 +447,14 @@ def test_render_stats_is_frozen_and_note_is_optional():
     assert s.note == ""
     with pytest.raises(dataclasses.FrozenInstanceError):
         s.rung = "extract"
+
+
+def test_a_note_that_quotes_a_header_cannot_hijack_the_parse():
+    """A spill note is text of the result: ``[tameru:header ...]`` inside it must not read as the row's tag."""
+    quoted = "spilled to /tmp/x [tameru:header kept 0/1 lines (0 of 1 chars) ref=11111111]"
+    header = build_header(PARENT, stats(rung="extract", note=quoted), REF)
+    assert parse_header(header) == {"rung": "extract", "ref": REF, "kept": 40, "total": 220}
+    assert "ref=11111111" in header, "the text itself is kept"
+    assert parse_header(retarget_rung(header + "\nbody", "header")) == {
+        "rung": "header", "ref": REF, "kept": 40, "total": 220,
+    }

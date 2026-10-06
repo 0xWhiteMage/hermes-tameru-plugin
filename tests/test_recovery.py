@@ -9,6 +9,7 @@ from __future__ import annotations
 import copy
 import json
 import threading
+import time
 
 import pytest
 
@@ -232,6 +233,21 @@ def test_expand_accepts_loose_ref_and_numeric_spellings():
     assert call(store, ref=" REF=AB12CD34 ")["total_lines"] == 10
     assert call(store, ref=REF, start_line="3", end_line=4.0)["returned_lines"] == [3, 4]
     assert json.loads(expand(store, json.dumps({"ref": REF, "end_line": 1})))["content"] == "line 1\n"
+
+
+@pytest.mark.parametrize("pattern", ["(x|x)*y", "(x+)+y", "(?:x+)*y", "(\\w+\\s?)+$"])
+def test_grep_with_catastrophic_backtracking_is_refused_not_run(pattern):
+    """``re`` cannot be interrupted: ``(x|x)*y`` on a 26-character line took 13 seconds."""
+    store = stocked("x" * 40 + "\nother")
+    started = time.perf_counter()
+    out = call(store, ref=REF, grep=pattern)
+    assert time.perf_counter() - started < 1
+    assert "rejected" in out["error"]
+
+
+@pytest.mark.parametrize("pattern", ["error|fail", r"(?:ERROR|WARN)\s+\d+", "foo(bar)?", "(ab)+", "(a|b)*", r"^\w+\s=\s\d+$"])
+def test_ordinary_grep_patterns_still_run(pattern):
+    assert "matched_lines" in call(stocked(), ref=REF, grep=pattern)
 
 
 # ---- expand: grep ------------------------------------------------------------------------------

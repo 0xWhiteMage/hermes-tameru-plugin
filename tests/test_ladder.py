@@ -262,3 +262,12 @@ def test_a_forced_budget_may_not_drop_the_lines_the_query_asks_about():
     row = out[idx]["content"]
     assert changed and _rung(row) in ("extract", "brief")
     assert "bump client timeout" in row
+
+
+def test_a_zero_brief_size_terminates():
+    """``brief_chars=0`` is a legal setting; the brief's growth steps must still reach the limit."""
+    engine, msgs, idx = _one("why did the payment gateway time out?", "terminal",
+                             {"command": "tail -n 450 app.log"}, server_log(),
+                             settings=TameruSettings(brief_chars=0, max_risk="low", max_extract_chars=2000))
+    changed, out = demote(engine, msgs, idx)
+    assert changed and len(out[idx]["content"]) <= 2000

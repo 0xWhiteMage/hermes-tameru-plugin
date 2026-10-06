@@ -70,9 +70,32 @@ def test_failed_min_reclaim_gate_returns_the_input_after_exactly_one_escalation(
     assert res[0] is messages and res[1] == 0
     assert messages == before                      # the input is never mutated
     assert engine._telemetry.snapshot()["events"]["escalation"]["count"] == 1
-    # The escalation pass runs with header-only rungs.
-    rungs = engine._telemetry.snapshot()["events"]["render"]["labels"]["rung"]
-    assert rungs.get("header", 0) >= 1
+    # Nothing was rewritten, so no row is counted as rendered and no character as saved.
+    snapshot = engine._telemetry.snapshot()
+    assert "render" not in snapshot["events"] and snapshot["chars"] == {"before": 0, "after": 0, "saved": 0}
+
+
+def test_the_escalation_pass_runs_with_header_only_rungs():
+    engine = make_engine(proactive_prune_min_reclaim_tokens=10_000_000)
+    degrade = []
+    new_scope = engine._new_scope
+    engine._new_scope = lambda messages, **fields: degrade.append(fields.get("degrade", False)) or new_scope(
+        messages, **fields,
+    )
+    engine.prune_tool_results_only(_messages(), 500_000)
+    assert degrade == [False, True]
+
+
+def test_a_declined_pass_leaves_no_telemetry_log_line(tmp_path):
+    from hermes_tameru_plugin.config import TameruSettings
+
+    log = tmp_path / "t.jsonl"
+    engine = make_engine(TameruSettings(telemetry_log=str(log)), proactive_prune_min_reclaim_tokens=10_000_000)
+    assert engine.prune_tool_results_only(_messages(), 500_000)[1] == 0
+    assert not log.exists()
+    committed = make_engine(TameruSettings(telemetry_log=str(log)))
+    assert committed.prune_tool_results_only(_messages(), 500_000)[1] >= 3
+    assert log.read_text().count('"event": "render"') >= 3
 
 
 def test_nothing_eligible_means_no_escalation():

@@ -78,8 +78,50 @@ EXPAND_SCHEMA: dict[str, Any] = {
 }
 
 _REF_RE = re.compile(r"[0-9a-f]{8}")
+_NESTED_QUANTIFIER_RE = re.compile(r"[)][*+]|[)][{]\d*,?\d*[}]")   # fallback when ``re``'s parser is unreachable
 _TERMINATOR_RE = re.compile(r"(\r\n|\r|\n)")   # the same line breaks ``render`` counts lines by
 _MISS_HINT = "session_search(query=..., role_filter='tool', session_id='{session_id}')"
+
+
+def _backtracking_risk(pattern: str) -> bool:
+    """True for a regex that can backtrack exponentially: a repeat (more than once) whose body holds
+    another repeat or an alternation (``(a+)+``, ``(x|x)*``). ``re`` cannot be interrupted, so such a
+    ``grep`` from the model (or from text it read) would hang the agent: 26 characters cost 13 seconds.
+    """
+    try:
+        from re import _constants as const
+        from re import _parser as parser
+
+        repeats = tuple(
+            getattr(const, name) for name in ("MAX_REPEAT", "MIN_REPEAT", "POSSESSIVE_REPEAT")
+            if hasattr(const, name)
+        )
+        looks = tuple(getattr(const, name) for name in ("ASSERT", "ASSERT_NOT") if hasattr(const, name))
+        atomic = getattr(const, "ATOMIC_GROUP", None)
+
+        def risky(sub: Any, repeating: bool) -> bool:
+            for op, av in sub:
+                if op in repeats:
+                    multi = av[1] > 1
+                    if (repeating and multi) or risky(av[2], repeating or multi):
+                        return True
+                elif op == const.BRANCH:
+                    if repeating or any(risky(alt, repeating) for alt in av[1]):
+                        return True
+                elif op == const.SUBPATTERN:
+                    if risky(av[3], repeating):
+                        return True
+                elif op in looks:
+                    if risky(av[1], repeating):
+                        return True
+                elif atomic is not None and op == atomic:
+                    if risky(av, repeating):
+                        return True
+            return False
+
+        return risky(parser.parse(pattern), False)
+    except Exception:
+        return _NESTED_QUANTIFIER_RE.search(pattern) is not None
 
 
 # ---- the store -------------------------------------------------------------------------------
@@ -247,6 +289,12 @@ def _expand(
             pattern = re.compile(grep, re.IGNORECASE)
         except re.error as exc:
             return _error(f"grep is not a valid regex: {exc}")
+        if _backtracking_risk(grep):
+            return _error(
+                "grep is rejected: a repeated group that holds a repeat or an alternation, such as "
+                "(a+)+ or (x|y)*, can run for minutes. Use a flat pattern (a|b alternation outside a "
+                "repeat, \\s+, .*)."
+            )
 
     original = store.get(ref)
     if original is None and session_lookup is not None:

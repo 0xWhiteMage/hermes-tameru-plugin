@@ -81,6 +81,10 @@ _FIND_MUTATORS = frozenset({
 })
 _SHELL_CONTROL_RE = re.compile(r"[>|;&`\n]|\$\(|<\(")
 _RM_RE = re.compile(r"(?<![\w./-])rm(?![\w-])")
+_CD_RE = re.compile(r"(?<![\w./-])(?:cd|pushd|popd)(?![\w-])")   # Hermes' terminal keeps its cwd between calls
+_CWD_BLIND_COMMANDS = frozenset({"env", "ps", "df", "which"})
+_QUOTING_RE = re.compile(r"[\"'\\]")
+_RECURSIVE_RE = re.compile(r"-[A-Za-z]*R[A-Za-z]*|--recursive")
 _FOLLOW_RE = re.compile(r"^(?:-[A-Za-z]*[fF][A-Za-z0-9]*|--follow.*)$")
 
 _V4A_FILE_RE = re.compile(r"^\*\*\*\s*(?:Update|Add|Delete)\s+File:\s*(.+?)\s*$", re.MULTILINE)
@@ -223,10 +227,26 @@ def _read_only(command: str, tokens: list[str]) -> bool:
     return True
 
 
-def _terminal_family(tokens: list[str], workdir: Any) -> tuple | None:
-    """Snapshot family of ``git status`` / ``git diff --stat`` / ``ls``: command and its targets."""
+def _cwd_free(tokens: list[str]) -> bool:
+    """True when a read-only command's result cannot depend on the shell's working directory: it names
+    only absolute (or ``~``) paths and numbers, or is one of the commands that never look at it."""
+    if tokens[0] in _CWD_BLIND_COMMANDS:
+        return True
+    operands = [t for t in tokens[1:] if not t.startswith("-")]
+    return bool(operands) and all(t.startswith(("/", "~")) or t.isdigit() for t in operands)
+
+
+def _terminal_family(tokens: list[str], workdir: Any, epoch: int = 0) -> tuple | None:
+    """Snapshot family of ``git status`` / ``git diff --stat`` / ``ls``: command and its targets.
+
+    ``epoch`` counts the earlier calls that changed the shell's working directory: the same relative
+    command asks about a different place after a ``cd``. A recursive ``ls`` is a family of its own (a
+    later shallow listing does not replace it).
+    """
     if tokens[0] == "ls":
         kind, rest = "ls", tokens[1:]
+        if any(_RECURSIVE_RE.fullmatch(t) for t in rest):
+            kind = "ls -R"
     elif tokens[0] == "git" and tokens[1:2] == ["status"]:
         kind, rest = "git status", tokens[2:]
     elif tokens[0] == "git" and tokens[1:2] == ["diff"] and any(
@@ -236,7 +256,7 @@ def _terminal_family(tokens: list[str], workdir: Any) -> tuple | None:
     else:
         return None
     targets = tuple(t for t in rest if not t.startswith("-"))
-    return "terminal", kind, targets, workdir if isinstance(workdir, str) else ""
+    return "terminal", kind, targets, workdir if isinstance(workdir, str) else "", epoch
 
 
 # ---- what a result says ----------------------------------------------------------------------
@@ -334,7 +354,7 @@ def _lookup(table: dict[str, tuple[str, Any]], call_id: Any) -> tuple[str, Any]:
     return "", None
 
 
-def _make_call(idx: int, tool: str, args: dict, content: Any) -> ToolCall:
+def _make_call(idx: int, tool: str, args: dict, content: Any, epoch: int = 0) -> ToolCall:
     call = ToolCall(idx, tool, content)
     if tool in _WRITERS:
         call.paths = _written_paths(args)
@@ -343,11 +363,15 @@ def _make_call(idx: int, tool: str, args: dict, content: Any) -> ToolCall:
     if tool == "read_file":
         call.span = _span(args)
     if tool == "terminal":
-        command = " ".join(str(args.get("command") or "").split())
+        raw_command = str(args.get("command") or "")
+        # Spacing inside quotes matters (``grep "a  b"`` is not ``grep "a b"``): only a command without
+        # quoting is whitespace-normalised.
+        command = raw_command.strip() if _QUOTING_RE.search(raw_command) else " ".join(raw_command.split())
         tokens = command.split()
         if not args.get("background") and _read_only(command, tokens):
-            call.canon = _canonical({**args, "command": command})
-            call.family = _terminal_family(tokens, args.get("workdir"))
+            epoch = 0 if _cwd_free(tokens) else epoch
+            call.canon = _canonical({**args, "command": command, "_cwd_epoch": epoch})
+            call.family = _terminal_family(tokens, args.get("workdir"), epoch)
     else:
         call.canon = _canonical(args)
         if tool == "browser_snapshot":
@@ -366,14 +390,18 @@ def build_index(
     """
     table = tool_calls_by_id(messages) if call_id_to_tool is None else call_id_to_tool
     index = SupersessionIndex(pending=_pending_round(messages))
+    epoch = 0   # earlier terminal calls that may have changed the working directory
     for idx, msg in enumerate(messages):
         if _get(msg, "role") != "tool":
             continue
         tool, raw_args = _lookup(table, msg.get("tool_call_id"))
         args = _args_dict(raw_args) if tool in _TRACKED else None
         if args is None:
+            epoch += tool == "terminal"   # unreadable arguments: assume the worst
             continue
-        call = _make_call(idx, tool, args, msg.get("content"))
+        call = _make_call(idx, tool, args, msg.get("content"), epoch)
+        if tool == "terminal" and _CD_RE.search(str(args.get("command") or "")):
+            epoch += 1
         index.calls[idx] = call
         for path in call.paths:
             index.writes.setdefault(path, []).append(idx)

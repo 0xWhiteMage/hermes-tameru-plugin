@@ -191,7 +191,8 @@ def build_header(
         f"({stats.kept_chars:,} of {stats.total_chars:,} chars)"
     )
     cats = ", ".join(f"{name} {count}" for name, count in stats.omitted)
-    pieces = [f"omitted: {cats}" if cats else "", _one_line(stats.note)]
+    # The note can quote text of the result (a spill path): never let it carry a tag the parse could take for ours.
+    pieces = [f"omitted: {cats}" if cats else "", _one_line(stats.note).replace(TAMERU_TAG, " [tameru ")]
     return _compose(_one_line(parent_line), stats.rung, counts, pieces, ref, max_len)
 
 
