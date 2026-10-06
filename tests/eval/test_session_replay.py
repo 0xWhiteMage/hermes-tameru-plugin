@@ -1,12 +1,13 @@
-"""Phase 0 baselines: replay the scripted 30-turn session against stock Hermes and Tameru 1.3.0.
+"""Baselines: replay the scripted 30-turn session against stock Hermes and the Tameru 1.4 plugin engine.
 
 Needs real Hermes (``HERMES_REPO_ROOT``); skipped otherwise. Regenerate the baselines with::
 
     TAMERU_WRITE_BASELINES=1 HERMES_REPO_ROOT=<hermes checkout> python -m pytest -q tests/eval
 
-The stock baseline is compared exactly: the replay is deterministic, so any difference means Hermes (or the
-harness) changed. The ``tameru_1_3`` baseline freezes the 1.3.0 plugin; once the vendored engine moves to
-1.4 it is no longer compared (``tameru_1_4`` gets its own baseline then).
+The ``stock`` and ``tameru_1_4`` baselines are compared exactly: the replay is deterministic, so any
+difference means Hermes, the engine or the harness changed. The ``tameru_1_3`` baseline freezes the 1.3.0
+plugin and is compared only while the vendored engine reports 1.3.x (it is skipped now). How 1.4 compares
+with stock is REPORT-ONLY (``test_phase5_comparison_report``): the table is printed, nothing fails on cost.
 """
 from __future__ import annotations
 
@@ -22,6 +23,7 @@ if os.environ.get("HERMES_REPO_ROOT", "").strip():
 else:
     pytest.importorskip("agent.context_compressor")
 
+import compare
 import engines
 import replay
 from fixtures import hermes_payloads as hp
@@ -32,12 +34,18 @@ pytestmark = pytest.mark.real_hermes
 BASELINES = Path(__file__).resolve().parent / "baselines"
 WRITE = os.environ.get("TAMERU_WRITE_BASELINES") == "1"
 _CACHE: dict[str, list[dict]] = {}
+_BUILT: dict[str, list] = {}   # the engine instances each run built, for the telemetry report
 
 
 def runs(name: str) -> list[dict]:
     """Two independent runs of the engine (cached for the module): the second proves determinism."""
     if name not in _CACHE:
-        _CACHE[name] = [replay.run_session(lambda: engines.make_engine(name)) for _ in range(2)]
+        def build(name=name):
+            engine = engines.make_engine(name)
+            _BUILT.setdefault(name, []).append(engine)
+            return engine
+
+        _CACHE[name] = [replay.run_session(build) for _ in range(2)]
     return _CACHE[name]
 
 
@@ -102,6 +110,14 @@ def test_stock_matches_saved_baseline():
     )
 
 
+def test_tameru_1_4_runs_with_the_same_prune_gates_as_stock():
+    """An equal-gates comparison: the plugin's own product defaults (2000-char min result) must not leak in."""
+    stock, plugin = (engines.make_engine(n) for n in ("stock", "tameru_1_4"))
+    for attr in ("proactive_prune_tokens", "proactive_prune_min_result_chars", "proactive_prune_min_reclaim_tokens",
+                 "protect_last_n", "threshold_percent", "tail_mode", "min_tail_user_messages"):
+        assert getattr(plugin, attr) == getattr(stock, attr), attr
+
+
 def test_tameru_1_3_matches_saved_baseline():
     version = engines.plugin_engine_version()
     if not version.startswith("1.3"):
@@ -112,6 +128,32 @@ def test_tameru_1_3_matches_saved_baseline():
     assert path.is_file(), f"{path} missing; run once with TAMERU_WRITE_BASELINES=1"
     saved = json.loads(path.read_text(encoding="utf-8"))
     assert replay.deterministic_part(runs("tameru_1_3")[0]) == {"metrics": saved["metrics"], "series": saved["series"]}
+
+
+def test_tameru_1_4_matches_saved_baseline():
+    got = replay.deterministic_part(runs("tameru_1_4")[0])
+    path = baseline_path("tameru_1_4")
+    if WRITE:
+        write_baseline("tameru_1_4", runs("tameru_1_4")[0])
+    assert path.is_file(), f"{path} missing; run once with TAMERU_WRITE_BASELINES=1"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert got == {"metrics": saved["metrics"], "series": saved["series"]}, (
+        "the tameru_1_4 replay differs from tests/eval/baselines/tameru_1_4.json "
+        "(engine, Hermes or harness changed; if intended, re-run with TAMERU_WRITE_BASELINES=1)"
+    )
+
+
+def test_phase5_comparison_report(capsys, record_property):
+    """REPORT-ONLY: print the stock vs tameru_1_4 table (``pytest -s`` to see it). Never asserts on cost."""
+    results = {name: runs(name)[0] for name in ("stock", "tameru_1_4")}
+    engine = _BUILT["tameru_1_4"][0]
+    telemetry = engine.get_status()["tameru"]["telemetry"]
+    report = compare.table(results) + "\n\ntameru_1_4 telemetry (rung counters, last replay engine):\n" + json.dumps(
+        telemetry, indent=1, sort_keys=True)
+    record_property("phase5_report", report)
+    with capsys.disabled():
+        print("\n" + report)
+    assert set(results) == {"stock", "tameru_1_4"} and "events" in telemetry   # shape only: no cost threshold
 
 
 def write_baseline(name: str, result: dict) -> None:

@@ -48,6 +48,19 @@ def rows(result: dict) -> list[tuple[str, str]]:
     ]
 
 
+def table(results: dict[str, dict]) -> str:
+    """The side-by-side metrics table for ``{engine name: run_session result}``."""
+    names = list(results)
+    cells = {n: dict(rows(r)) for n, r in results.items()}
+    labels = [k for k, _ in rows(next(iter(results.values())))]
+    width = max(len(label) for label in labels)
+    cols = {n: max(len(n), *(len(v) for v in cells[n].values())) for n in names}
+    lines = [f"{'metric':<{width}}  " + "  ".join(f"{n:<{cols[n]}}" for n in names)]
+    for label in labels:
+        lines.append(f"{label:<{width}}  " + "  ".join(f"{cells[n][label]:<{cols[n]}}" for n in names))
+    return "\n".join(lines)
+
+
 def main(argv: list[str]) -> int:
     _bootstrap()
     import engines
@@ -59,13 +72,7 @@ def main(argv: list[str]) -> int:
     if as_json:
         print(json.dumps({n: {"metrics": r["metrics"], "timing": r["timing"]} for n, r in results.items()}, indent=1))
         return 0
-    table = {n: dict(rows(r)) for n, r in results.items()}
-    labels = [k for k, _ in rows(next(iter(results.values())))]
-    width = max(len(label) for label in labels)
-    cols = {n: max(len(n), *(len(v) for v in table[n].values())) for n in names}
-    print(f"{'metric':<{width}}  " + "  ".join(f"{n:<{cols[n]}}" for n in names))
-    for label in labels:
-        print(f"{label:<{width}}  " + "  ".join(f"{table[n][label]:<{cols[n]}}" for n in names))
+    print(table(results))
     return 0
 
 
