@@ -1,0 +1,4263 @@
+From fd8c5b0db23bd570615d5929bf21c02fadbb247c Mon Sep 17 00:00:00 2001
+From: Claude <noreply@anthropic.com>
+Date: Tue, 6 Oct 2026 05:27:42 +0000
+Subject: [PATCH 2/2] =?UTF-8?q?feat:=201.4.0=20=E2=80=94=20agent-output=20?=
+ =?UTF-8?q?formats,=20lossless=20folding,=20log=20templates,=20JSON=20brie?=
+ =?UTF-8?q?f?=
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+- agent_formats: numbered reads (cat -n, N|, N:) route as code, code is no
+  longer read as CSV/TSV/YAML; unified-diff, grep/rg and pytest/jest/go/cargo
+  adapters; every adapter cut carries the caller's gap_marker. A query that
+  matches nothing fails open instead of cutting.
+- folding: fold_lossless (CR redraws, ANSI, trailing whitespace, identical
+  runs, JSON minify with parse round-trip), idempotent and round-trip safe.
+- logs: Drain3-style template masking, [last] exemplar; json_brief for JSON
+  that matches nothing.
+- Release: version 1.4.0, CHANGELOG, RESEARCH takeaways, benchmarks re-run
+  (battery 15/15, sweep clean, savings unchanged vs 1.3.0).
+
+Co-Authored-By: Claude Sonnet 5.5 <noreply@anthropic.com>
+Claude-Session: https://claude.ai/code/session_01S4NKzUk5qwpQGbt2YF3Qh3
+---
+ CHANGELOG.md                             |  42 +-
+ README.md                                |  34 +-
+ benchmarks/COMPARISON.md                 |   8 +-
+ benchmarks/production-qa-v3-results.json |  30 +-
+ docs/RESEARCH.md                         |  34 +
+ pyproject.toml                           |   2 +-
+ src/tameru/__init__.py                   |  56 +-
+ src/tameru/agent_formats.py              | 964 +++++++++++++++++++++++
+ src/tameru/compress_context.py           | 210 ++++-
+ src/tameru/folding.py                    | 432 ++++++++++
+ src/tameru/format_adapters.py            | 186 ++++-
+ src/tameru/industrial.py                 |   4 +
+ tests/test_adapter_markers.py            | 156 ++++
+ tests/test_code_not_csv.py               | 143 ++++
+ tests/test_diff_grep_adapters.py         | 242 ++++++
+ tests/test_engine_helpers.py             |  12 +-
+ tests/test_fold_lossless.py              | 104 +++
+ tests/test_formats_review.py             | 128 +++
+ tests/test_json_brief.py                 |  98 +++
+ tests/test_log_order.py                  |   6 +-
+ tests/test_log_templates.py              |  79 ++
+ tests/test_numbered_code_reads.py        | 102 +++
+ tests/test_release_artifacts.py          |  34 +
+ tests/test_reviewer_feedback_v101.py     |   3 +-
+ tests/test_test_runner_preprocess.py     | 272 +++++++
+ 25 files changed, 3292 insertions(+), 89 deletions(-)
+ create mode 100644 src/tameru/agent_formats.py
+ create mode 100644 src/tameru/folding.py
+ create mode 100644 tests/test_adapter_markers.py
+ create mode 100644 tests/test_code_not_csv.py
+ create mode 100644 tests/test_diff_grep_adapters.py
+ create mode 100644 tests/test_fold_lossless.py
+ create mode 100644 tests/test_formats_review.py
+ create mode 100644 tests/test_json_brief.py
+ create mode 100644 tests/test_log_templates.py
+ create mode 100644 tests/test_numbered_code_reads.py
+ create mode 100644 tests/test_test_runner_preprocess.py
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 30e2377..ef5d080 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,44 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+ 
+ ---
+ 
++## [1.4.0] - 2026-10-06
++
++Agent tool-output quality (Phase 1a/1b) and a plugin-facing API for
++`hermes-tameru-plugin`. With default arguments, output for inputs that are not
++affected by the fixes below is unchanged.
++
++### Added
++- `compress_context` kwargs: `gap_marker(omitted_chars, total_chars) -> str` (marks every cut, including adapter and CSV cuts), `recursion_markers` (caller-declared markers; input carrying one returns unchanged), and `content_hint` (skip detection: log/json/test/diff/grep/numbered_code/...).
++- Public helpers: `error_fingerprints`, `brief_context`, `extract_evidence_lines`, `contains_secret`, `unwrap_tool_payload` / `rewrap_tool_payload` / `ToolPayload` (Hermes wrapper fields such as exit code survive a round trip), and `ENGINE_VERSION`. Exported from `tameru` (engine helpers lazily, so `python -m tameru.compress_context` still runs cleanly) together with `fold_lossless`.
++- `tameru.agent_formats`: numbered-gutter detection (`cat -n`, Hermes `read_file` `N|`, `N: `), code detection, unified-diff adapter (whole hunks, per-file `+A -D in H hunks` stats, all hunk headers), grep/rg adapter (grouped by file), and pytest/jest/go test/cargo test reduction to failure blocks and summaries.
++- `tameru.folding`: `fold_lossless` (terminal redraws, ANSI, trailing blanks, identical-line runs, pretty-printed JSON; idempotent), `mask_template` (one masking function shared by log templates and error fingerprints) and `json_brief` (valid-JSON brief of large arrays of objects with `_count`/`_omitted`).
++- Log collapse keeps the last instance of each collapsed template as `[last] ...`; templates mask UUIDs, IPs, timestamps and durations.
++- `tameru.transcript`: `text_of`, `task_query`; `scripts/sync_to_harness.py --check` verifies a vendored copy.
++- Tests for all of the above, including `@pytest.mark.perf` linear-scaling tests.
++
++### Changed
++- Numbered reads and source code are no longer routed to CSV/TSV/YAML; `_looks_like_csv` and `detect_format` reject code (stable column counts, code keywords and line endings) and run diff/grep/gutter/code detectors before the table detectors. Python is no longer classified as YAML.
++- Logs: one exemplar per ERROR/FAIL/FATAL/CRITICAL/PANIC fingerprint is exempt from the stale-error cap and the important-block exclusion, and survives floor-saturated reduction. Python traceback dumps with no query hit are still purged. Error lines restored by preprocessing return at their original relative positions, and already-collapsed `[xN]` duplicates are not re-added.
++- A reduced pytest/jest/go/cargo run of at most 16 KB is final: block scoring no longer drops the failing test's file/name lines (receipt `adapter.name == "test_output"`).
++- Filler queries ("continue", "thanks") no longer cause high-risk cuts.
++- `trajectory_gate`: orphan tool calls no longer block compaction.
++- Verifier: a bare line-leading timestamp no longer makes a line "critical".
++
++### Fixed
++- `_CRIT_LINE_RE` was compiled per call and invoked as `.search(line, re.IGNORECASE)`, passing the flag as `pos`; now module-level with `re.IGNORECASE`.
++- Quadratic hot spots in critical-line recall, summary fact checks and backtracking path/token regexes (bounded): a generated 650 KB INFO/ERROR log through `compress_context(log, "why are requests failing?", ccr=False, citations=False)` went from 22.5 s to under 1 s; every error fingerprint is retained.
++- Misdetection of code as CSV and numbered reads as two-column TSV.
++
++### Removed
++- `integration/hermes` bundle (`context_engine/extractive`, `context_engine/tameru`) and the nine Hermes-gated tests; the integration now lives in [hermes-tameru-plugin](https://github.com/0xWhiteMage/hermes-tameru-plugin).
++
++### Benchmarks
++- Re-run 2026-10-06 on 1.4.0: `benchmarks/run_battery.py` 15/15 pass with savings identical to the checked-in 1.3.0 JSON; only per-case `ms` timings differ (machine noise, e.g. `large_doc_perf` 656 -> 819 ms), and `benchmarks/production-qa-v3-results.json` was updated accordingly. `benchmarks/threshold_sweep.py` (prints only): 15/15 clean at every `budget_ratio`, mean saved 77.3% / 68.4% / 61.2% / 41.5% / 24.9% at 0.1 / 0.2 / 0.3 / 0.5 / 0.7, 0 restorations, 0 leaks.
++- Not re-run (need network or local models): the 17-case holdout and the jev_comparison arms (JEV, Laya, headroom, TF-IDF); their tables in `benchmarks/COMPARISON.md` and the README remain the 1.2.0/1.3.0 measurements and are labelled as such.
++- Full suite: 1105 passed, 3 skipped.
++
++---
++
+ ## [1.3.0] - 2026-09-23
+ 
+ ### Added
+@@ -203,7 +241,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+ - Fast, local-only, zero-LLM context compaction.
+ - Fail-open safety contract.
+ 
+-[Unreleased]: https://github.com/0xWhiteMage/tameru-compaction-system/compare/v1.2.0...HEAD
++[Unreleased]: https://github.com/0xWhiteMage/tameru-compaction-system/compare/v1.4.0...HEAD
++[1.4.0]: https://github.com/0xWhiteMage/tameru-compaction-system/compare/v1.3.0...v1.4.0
++[1.3.0]: https://github.com/0xWhiteMage/tameru-compaction-system/compare/v1.2.0...v1.3.0
+ [1.2.0]: https://github.com/0xWhiteMage/tameru-compaction-system/compare/v1.1.1...v1.2.0
+ [1.1.1]: https://github.com/0xWhiteMage/tameru-compaction-system/compare/v1.1.0...v1.1.1
+ [1.1.0]: https://github.com/0xWhiteMage/tameru-compaction-system/compare/v0.10.0...v1.1.0
+diff --git a/README.md b/README.md
+index 51b60a8..7bf1c2d 100644
+--- a/README.md
++++ b/README.md
+@@ -2,9 +2,9 @@
+ 
+ <p align="center">
+   <img src="assets/header.png" alt="Tameru Compaction System (貯める)" width="100%"><br><br>
+-  <a href="LICENSE"><img src="https://img.shields.io/badge/release-v1.3.0-blue.svg?style=for-the-badge" alt="Version 1.3.0"></a>
++  <a href="LICENSE"><img src="https://img.shields.io/badge/release-v1.4.0-blue.svg?style=for-the-badge" alt="Version 1.4.0"></a>
+   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=for-the-badge" alt="License: MIT"></a>
+-  <a href="tests/"><img src="https://img.shields.io/badge/tests-326%20passed-success.svg?style=for-the-badge" alt="Test Suite"></a>
++  <a href="tests/"><img src="https://img.shields.io/badge/tests-1105%20passed-success.svg?style=for-the-badge" alt="Test Suite"></a>
+   <a href="benchmarks/run_battery.py"><img src="https://img.shields.io/badge/production_QA-15%2F15_green-brightgreen.svg?style=for-the-badge" alt="Production QA"></a>
+   <a href="#-head-to-head-competitive-benchmark"><img src="https://img.shields.io/badge/large_case-%3C1.2s-purple.svg?style=for-the-badge" alt="Large-case latency"></a>
+   <a href="#-core-design-tenets"><img src="https://img.shields.io/badge/determinism-100%25_reproducible-blueviolet.svg?style=for-the-badge" alt="Determinism"></a>
+@@ -14,7 +14,7 @@
+ </p>
+ 
+ > **Named from 貯める (*tameru*) — Japanese for *"to save, store up, or accumulate."***  
+-> Tameru is a query-aware, deterministic, purely extractive context compaction engine for autonomous LLM agents. v1.3 adds typed-edge dependency restoration, a SelfCompact-style timing gate, plan-aware multi-query, qualifier-aware structured trimming, a derived-objective mode for empty queries, and a context-calibrated compression ceiling — all without external LLM calls, GPU dependencies, or runtime dependencies in the deterministic extract path (the opt-in `summarise` tier is the only exception, and it falls back to `extract` on any LLM failure).
++> Tameru is a query-aware, deterministic, purely extractive context compaction engine for autonomous LLM agents. v1.4 hardens it for agent tool output (log errors survive, numbered reads and diffs are recognised, a 650 KB log takes under a second) and adds a plugin-facing API (`gap_marker`, `recursion_markers`, `content_hint`, `error_fingerprints`, `brief_context`, tool-payload envelope helpers). v1.3 added typed-edge dependency restoration, a SelfCompact-style timing gate, plan-aware multi-query, qualifier-aware structured trimming, a derived-objective mode for empty queries, and a context-calibrated compression ceiling — all without external LLM calls, GPU dependencies, or runtime dependencies in the deterministic extract path (the opt-in `summarise` tier is the only exception, and it falls back to `extract` on any LLM failure).
+ 
+ ---
+ 
+@@ -283,9 +283,9 @@ Run the full battery:
+ python -m unittest discover -s tests
+ ```
+ 
+-Current v1.3.0 release verification:
++Current v1.4.0 release verification (the comparison tables further down were measured on v1.3.0 and have not been re-run):
+ 
+-- **326 passed, 14 skipped** with pytest.
++- **1105 passed, 3 skipped** with pytest.
+ - **15/15** production-QA battery cases passed (`benchmarks/run_battery.py`), including Japanese, Chinese and Arabic needle cases with zero forbidden-distractor leaks.
+ - `benchmarks/threshold_sweep.py`: every `budget_ratio` operating point from 0.1–0.7 keeps all gold with **0 leaks** — a clean 77%→25% savings frontier.
+ - Six-arm live comparison (Tameru / JEV / Laya / mechanical / headroom / TF-IDF): only arm with **12/12 gold + 0 leaks + deterministic output** — table below.
+@@ -483,6 +483,29 @@ Second research round (v1.3.0 — lcc internals, SelfCompact, PAACE, TPC, Compac
+ - **Multilingual coverage**: `zh_needle` + `ar_needle` battery cases —
+   compression tuned on English silently fails other scripts.
+ 
++### Plugin-facing API (v1.4.0)
++
++```python
++from tameru import brief_context, error_fingerprints, unwrap_tool_payload, rewrap_tool_payload
++from tameru.compress_context import compress_context
++
++payload = unwrap_tool_payload(tool_result_text)       # JSON/Hermes wrapper -> inner text
++r = compress_context(
++    payload.inner, query,
++    content_hint="log",                               # skip detection: log/json/test/diff/grep/numbered_code/...
++    gap_marker=lambda omitted, total: f"[... {omitted} of {total} chars omitted ...]",
++    recursion_markers=("[my-plugin: compacted",),     # already-compacted input returns unchanged
++    citations=False,                                  # gap_marker replaces the renderer's cut markers only when citations are off
++)
++out = rewrap_tool_payload(payload, r.compressed_text)  # wrapper fields (exit code, ...) survive
++```
++
++- `gap_marker`, `recursion_markers`, `content_hint`: new `compress_context` kwargs; defaults keep earlier output byte-identical.
++- `error_fingerprints(text)`: one exemplar per level-tagged error template (the retention key for logs).
++- `brief_context(...)`, `extract_evidence_lines(text, query, limit)`: bounded briefs / verbatim evidence lines.
++- `unwrap_tool_payload` / `rewrap_tool_payload` / `ToolPayload`, `contains_secret`, `ENGINE_VERSION`: exported from `tameru`.
++- Agent formats are recognised automatically: numbered reads (`cat -n`, Hermes `read_file`), unified diffs, grep/rg output, pytest/jest/go/cargo test output. Hermes users: see [`hermes-tameru-plugin`](https://github.com/0xWhiteMage/hermes-tameru-plugin).
++
+ ### Harness integration
+ 
+ Tameru ships harness-agnostic. Three integration paths, cheapest first —
+@@ -508,6 +531,7 @@ see **[harnesses/README.md](harnesses/README.md)** for the full contract:
+ All notable changes, version milestones, and migration notes are tracked in **[CHANGELOG.md](CHANGELOG.md)**.
+ 
+ Highlights:
++- **v1.4.0**: Agent tool-output quality and plugin API — ERROR lines survive log compaction, 650 KB log 22.5 s → <1 s, numbered `cat -n`/`read_file` reads and Python no longer misread as CSV/TSV/YAML, diff/grep/test-runner adapters, lossless folding, log `[last]` exemplars, JSON array briefs, `gap_marker` / `recursion_markers` / `content_hint`, Hermes-wrapper-safe payload helpers. Hermes integration bundle moved to hermes-tameru-plugin.
+ - **v1.3.0**: Typed-edge dependency restoration, transcript timing gate, plan-aware multi-query, qualifier-aware trim refusal, `derive_query`, compression-ceiling reporting, threshold-sweep tool, multilingual battery.
+ - **v1.2.1**: JEV-inspired hardening — `pin_recent`, `min_savings_ratio`, `degraded_view`, secrets screen, recursion guard, compressible-subset budgeting, CCR recall tooling, selection receipts, `strategy="auto"`.
+ - **v1.2.0**: Bounded industrial preflight, logical-order Unicode across 20 script/language families, ten exact format adapters, deterministic receipt hashes and large-input SLOs.
+diff --git a/benchmarks/COMPARISON.md b/benchmarks/COMPARISON.md
+index 449510a..a7ddfb5 100644
+--- a/benchmarks/COMPARISON.md
++++ b/benchmarks/COMPARISON.md
+@@ -1,5 +1,11 @@
+ # Benchmark Comparison — Tameru v1.3.0 vs the field
+ 
++> v1.4.0 note (2026-10-06): only the offline `run_battery.py` (15/15) and
++> `threshold_sweep.py` (15/15 clean at every ratio) were re-run on v1.4.0. The
++> head-to-head and six-arm tables below were measured on v1.2.0/v1.3.0 and are
++> unchanged: the 17-case holdout, JEV, Laya and headroom arms need network or
++> local models and were not re-run.
++
+ All numbers from this repo's fixtures and production QA battery unless noted.
+ "Gold retention" = required gold strings present in compressed output.
+ 
+@@ -117,7 +123,7 @@ Design choices track published results:
+ ## Reproduce
+ 
+ ```bash
+-PYTHONPATH=src python -m pytest -q  # 326 passed, 14 skipped standalone
++PYTHONPATH=src python -m pytest -q  # 1105 passed, 3 skipped
+ python benchmarks/run_battery.py    # adversarial battery + timing table (15/15)
+ python benchmarks/jev_comparison.py # Tameru vs JEV-provider arms
+                                     # (needs lcc + TYPESAFE_API_KEY for the JEV arm)
+diff --git a/benchmarks/production-qa-v3-results.json b/benchmarks/production-qa-v3-results.json
+index 511ab67..c59df7e 100644
+--- a/benchmarks/production-qa-v3-results.json
++++ b/benchmarks/production-qa-v3-results.json
+@@ -9,7 +9,7 @@
+       "failed_gates": [],
+       "saved": 96.7,
+       "fail_open": false,
+-      "ms": 15.6,
++      "ms": 14.8,
+       "chars": 175,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -20,7 +20,7 @@
+       "failed_gates": [],
+       "saved": 95.0,
+       "fail_open": false,
+-      "ms": 0.0,
++      "ms": 11.8,
+       "chars": 266,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -31,7 +31,7 @@
+       "failed_gates": [],
+       "saved": 90.1,
+       "fail_open": false,
+-      "ms": 0.0,
++      "ms": 5.3,
+       "chars": 166,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -42,7 +42,7 @@
+       "failed_gates": [],
+       "saved": 92.5,
+       "fail_open": false,
+-      "ms": 0.0,
++      "ms": 5.4,
+       "chars": 138,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -53,7 +53,7 @@
+       "failed_gates": [],
+       "saved": 88.4,
+       "fail_open": false,
+-      "ms": 0.0,
++      "ms": 4.9,
+       "chars": 195,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -64,7 +64,7 @@
+       "failed_gates": [],
+       "saved": 95.6,
+       "fail_open": false,
+-      "ms": 15.6,
++      "ms": 13.7,
+       "chars": 295,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -75,7 +75,7 @@
+       "failed_gates": [],
+       "saved": 94.0,
+       "fail_open": false,
+-      "ms": 62.5,
++      "ms": 48.8,
+       "chars": 487,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -86,7 +86,7 @@
+       "failed_gates": [],
+       "saved": 31.0,
+       "fail_open": false,
+-      "ms": 15.6,
++      "ms": 20.2,
+       "chars": 3192,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -97,7 +97,7 @@
+       "failed_gates": [],
+       "saved": 57.5,
+       "fail_open": false,
+-      "ms": 140.6,
++      "ms": 217.2,
+       "chars": 5193,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -108,7 +108,7 @@
+       "failed_gates": [],
+       "saved": 90.9,
+       "fail_open": false,
+-      "ms": 15.6,
++      "ms": 13.9,
+       "chars": 60,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -119,7 +119,7 @@
+       "failed_gates": [],
+       "saved": 88.6,
+       "fail_open": false,
+-      "ms": 31.2,
++      "ms": 20.7,
+       "chars": 125,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -130,7 +130,7 @@
+       "failed_gates": [],
+       "saved": 64.7,
+       "fail_open": false,
+-      "ms": 0.0,
++      "ms": 10.5,
+       "chars": 966,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -141,7 +141,7 @@
+       "failed_gates": [],
+       "saved": 99.5,
+       "fail_open": false,
+-      "ms": 656.2,
++      "ms": 818.7,
+       "chars": 2467,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -152,7 +152,7 @@
+       "failed_gates": [],
+       "saved": 0.0,
+       "fail_open": true,
+-      "ms": 93.8,
++      "ms": 75.7,
+       "chars": 61832,
+       "missing_gold": [],
+       "leaked_forbid": []
+@@ -163,7 +163,7 @@
+       "failed_gates": [],
+       "saved": 87.3,
+       "fail_open": false,
+-      "ms": 15.6,
++      "ms": 7.1,
+       "chars": 232,
+       "missing_gold": [],
+       "leaked_forbid": []
+diff --git a/docs/RESEARCH.md b/docs/RESEARCH.md
+index c3c6270..1f08855 100644
+--- a/docs/RESEARCH.md
++++ b/docs/RESEARCH.md
+@@ -58,3 +58,37 @@ design. For measured head-to-head numbers see `benchmarks/COMPARISON.md`.
+ - **Deterministic beats clever at the boundary cases** that matter to agents:
+   byte-identical output keeps prompt caches stable and makes every decision
+   replayable after the fact.
++
++## 2026-10 survey takeaways
++
++A survey of agent-harness compaction and compression libraries (driving the
++v1.4.0 work). Full write-up:
++[docs/compaction-research.md](https://github.com/0xWhiteMage/hermes-tameru-plugin/blob/main/docs/compaction-research.md)
++in the hermes-tameru-plugin repo.
++
++- **Agent tool output is not generic text.** Numbered file reads, unified
++  diffs, grep output and test-runner output dominate real tool results, and
++  generic CSV/TSV/YAML detectors misread them; recognising them before the
++  table detectors is the largest correctness win (shipped as `agent_formats`).
++- **Errors are the last thing a log compactor may lose.** Recency and
++  staleness penalties silently dropped every ERROR line in long logs; one
++  exemplar per error fingerprint must be exempt from them.
++- **Keep gaps visible.** Hosts that mark where text was cut (a caller-supplied
++  gap marker) let the model ask for the rest; silent cuts look like complete
++  evidence (`gap_marker`).
++- **Collapse repeats losslessly first.** Terminal redraws, ANSI colour and
++  identical-line runs cost tokens and carry no information; folding them
++  before any scoring is free (`fold_lossless`).
++- **Template masking beats exact-line dedupe for logs.** Masking UUIDs, IPs,
++  timestamps and durations collapses near-duplicates; keeping the last
++  instance (`[last]`) preserves the final state.
++- **Big JSON arrays want a structural brief, not truncation.** A valid-JSON
++  summary with counts, omitted counts and notable items beats a cut-off dump.
++- **Compaction must not re-compact itself.** Recursion markers let a plugin
++  declare its own output so it is never wrapped twice.
++- **Host envelopes must round-trip.** Tool results arrive wrapped (exit code,
++  metadata); compress the inner text and put the wrapper back.
++- **Timing gates matter as much as content.** Orphan tool calls must not
++  block compaction forever; stuck loops should suppress it.
++- **Deterministic stays the floor.** Learned compressors are still scored
++  against a byte-identical, replayable extractive baseline.
+diff --git a/pyproject.toml b/pyproject.toml
+index b43d97e..232e626 100644
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
+ 
+ [project]
+ name = "tameru-compaction-system"
+-version = "1.3.0"
++version = "1.4.0"
+ description = "Query-aware extractive context compaction for LLM agents - deterministic, local-only, fail-open, reversible"
+ readme = "README.md"
+ license = "MIT"
+diff --git a/src/tameru/__init__.py b/src/tameru/__init__.py
+index e7bef1d..ef9d4b1 100644
+--- a/src/tameru/__init__.py
++++ b/src/tameru/__init__.py
+@@ -1,6 +1,8 @@
+ 
+ """Public metadata and industrial profiling API for Tameru."""
+ 
++from typing import TYPE_CHECKING
++
+ from .format_adapters import FormatLimits, FormatResult, adapt_format, detect_format
+ from .industrial import (
+     IndustrialLimits,
+@@ -9,21 +11,73 @@ from .industrial import (
+     industrial_preprocess,
+     profile_input,
+ )
++from .folding import fold_lossless
+ from .unicode_profile import UnicodeProfile, profile_text
+ 
+-__version__ = "1.3.0"
++if TYPE_CHECKING:  # pragma: no cover
++    from .compress_context import (
++        ENGINE_VERSION,
++        ToolPayload,
++        brief_context,
++        contains_secret,
++        error_fingerprints,
++        extract_evidence_lines,
++        rewrap_tool_payload,
++        unwrap_tool_payload,
++    )
++
++# Engine helpers are exported lazily (PEP 562): importing the package must not
++# import compress_context, or `python -m tameru.compress_context` runs a second
++# copy of an already-imported module (runpy RuntimeWarning).
++_ENGINE_EXPORTS = frozenset(
++    {
++        "ENGINE_VERSION",
++        "ToolPayload",
++        "brief_context",
++        "contains_secret",
++        "error_fingerprints",
++        "extract_evidence_lines",
++        "rewrap_tool_payload",
++        "unwrap_tool_payload",
++    }
++)
++
++
++def __getattr__(name: str):
++    if name in _ENGINE_EXPORTS:
++        from . import compress_context
++
++        value = getattr(compress_context, name)
++        globals()[name] = value
++        return value
++    raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
++
++
++def __dir__() -> list[str]:
++    return sorted(set(globals()) | _ENGINE_EXPORTS)
++
++__version__ = "1.4.0"
+ 
+ __all__ = [
++    "ENGINE_VERSION",
+     "FormatLimits",
+     "FormatResult",
+     "IndustrialLimits",
+     "IndustrialResult",
+     "InputProfile",
++    "ToolPayload",
+     "UnicodeProfile",
+     "__version__",
+     "adapt_format",
++    "brief_context",
++    "contains_secret",
+     "detect_format",
++    "error_fingerprints",
++    "extract_evidence_lines",
++    "fold_lossless",
+     "industrial_preprocess",
+     "profile_input",
+     "profile_text",
++    "rewrap_tool_payload",
++    "unwrap_tool_payload",
+ ]
+diff --git a/src/tameru/agent_formats.py b/src/tameru/agent_formats.py
+new file mode 100644
+index 0000000..abfab81
+--- /dev/null
++++ b/src/tameru/agent_formats.py
+@@ -0,0 +1,964 @@
++"""Agent-output format detection and adapters (v1.4.0, E4/E5).
++
++What an agent's tool results actually look like: ``cat -n`` / Hermes
++``read_file`` reads (a line-number gutter), source code, unified diffs,
++``grep``/``rg`` output and test-runner output. None of these is a table, and
++the generic CSV/TSV/YAML detectors mistake them for one (a numbered read is a
++two-column TSV; Python is "YAML"; a JS file with a comma in its first line is
++a CSV). This module owns
++
++* the detectors that run BEFORE the table detectors (numbered gutter, code,
++  diff, grep) and the guards that stop code being read as a table;
++* two extractive adapters, :func:`adapt_unified_diff` (whole hunks, never a
++  split -/+ pair) and :func:`adapt_grep_lines` (grouped by file);
++* :func:`preprocess_test_output` (pytest, jest, go test, cargo test);
++* :func:`apply_agent_adapters`, the one entry point ``compress_context`` calls.
++
++Stdlib only, deterministic, linear in the input (no per-line regex over the
++whole text more than once). Gap markers are ``gap_marker(omitted_chars,
++total_chars)`` callables, as in ``compress_context``; with ``None`` each cut
++gets a plain ``[… N hunks omitted …]`` style marker.
++"""
++from __future__ import annotations
++
++import csv
++import re
++from dataclasses import asdict, dataclass
++from typing import Callable
++
++from .unicode_profile import matching_shadow
++
++GapMarker = Callable[[int, int], str]
++
++
++@dataclass(frozen=True)
++class AdapterResult:
++    """Outcome of an adapter: the (possibly shortened) text plus accounting."""
++
++    format: str
++    text: str
++    total_records: int = 0
++    kept_records: int = 0
++    reason: str = ""
++    hit: bool = True  # False: a distinctive query selected nothing (orientation cut only)
++
++    def to_dict(self) -> dict[str, object]:
++        return asdict(self)
++
++
++def _plural(count: int, noun: str) -> str:
++    if count == 1:
++        return f"{count} {noun}"
++    return f"{count} {noun}{'es' if noun.endswith(('ch', 's')) else 's'}"
++
++
++def _marker(gap_marker: GapMarker | None, omitted_chars: int, total: int, default: str) -> str:
++    if gap_marker is None:
++        return default
++    return str(gap_marker(omitted_chars, total))
++
++
++# ---------------------------------------------------------------------------
++# Query selectors (lazy import: format_adapters imports this module).
++# ---------------------------------------------------------------------------
++
++
++class _Matcher:
++    """Case-insensitive, boundary-aware multi-selector matcher."""
++
++    def __init__(self, selectors: tuple[str, ...]):
++        self.empty = not selectors
++        self._rx: list[re.Pattern[str]] = []
++        self._plain: list[str] = []
++        for selector in selectors:
++            if selector[:1].isascii() and selector[-1:].isascii():
++                self._rx.append(
++                    re.compile(rf"(?<![\w]){re.escape(selector)}(?![\w])", re.IGNORECASE)
++                )
++            else:
++                self._plain.append(selector)
++
++    def hit(self, text: str) -> bool:
++        if self.empty:
++            return False
++        shadow = text if text.isascii() else matching_shadow(text)
++        if any(rx.search(shadow) for rx in self._rx):
++            return True
++        return any(sel in shadow for sel in self._plain)
++
++
++def _matcher_for(query: str) -> _Matcher:
++    from .format_adapters import _query_selectors
++
++    return _Matcher(_query_selectors(query or ""))
++
++
++# ---------------------------------------------------------------------------
++# E4: numbered gutter and code detection.
++# ---------------------------------------------------------------------------
++
++# `cat -n` ("   12\t..."), Hermes read_file ("12|..."), some readers ("12: ...").
++GUTTER_RE = re.compile(r"^\s*\d+(?:\t|\||:[ \t])")
++_GUTTER_TAB_RE = re.compile(r"^\s*\d+\t")
++_GUTTER_PIPE_RE = re.compile(r"^\s*\d+\|")
++NUMBERED_RATIO = 0.60
++
++
++def strip_gutter(line: str) -> str:
++    """``line`` without its line-number gutter (unchanged when it has none)."""
++    return GUTTER_RE.sub("", line, count=1)
++
++
++def numbered_gutter_ratio(lines: list[str]) -> float:
++    nonblank = [ln for ln in lines if ln.strip()]
++    if not nonblank:
++        return 0.0
++    return sum(1 for ln in nonblank if GUTTER_RE.match(ln)) / len(nonblank)
++
++
++def _consistent_delimiter_table(lines: list[str], delimiter: str) -> bool:
++    """True when ≥80% of ``lines`` carry the same count (≥2) of ``delimiter``:
++    a real table whose first column happens to be numeric, not a gutter.
++    A line whose first field after the gutter is blank or indented (tab- or
++    space-indented code: ``"12\t\treturn x"``) is code, not a row."""
++    counts: dict[int, int] = {}
++    for ln in lines:
++        c = ln.count(delimiter)
++        if delimiter == "\t" and GUTTER_RE.sub("", ln, count=1)[:1] in (" ", "\t"):
++            c = 0
++        counts[c] = counts.get(c, 0) + 1
++    if not counts:
++        return False
++    mode, share = max(counts.items(), key=lambda kv: (kv[1], -kv[0]))
++    return mode >= 2 and share / len(lines) >= 0.8
++
++
++def is_numbered_code(text: str) -> bool:
++    """≥60% of the non-blank lines start with a line-number gutter."""
++    lines = [ln for ln in text.split("\n") if ln.strip()]
++    if len(lines) < 2:
++        return False
++    if numbered_gutter_ratio(lines) < NUMBERED_RATIO:
++        return False
++    tab = sum(1 for ln in lines if _GUTTER_TAB_RE.match(ln))
++    pipe = sum(1 for ln in lines if _GUTTER_PIPE_RE.match(ln))
++    if tab >= pipe and tab and _consistent_delimiter_table(lines, "\t"):
++        return False  # "1\tAlice\t30": a TSV with an id column
++    if pipe > tab and pipe and _consistent_delimiter_table(lines, "|"):
++        return False  # "1|x|y": a pipe table
++    return True
++
++
++# Lines that open with a code keyword. A keyword immediately followed by a
++# colon ("if: ${{ ... }}", "from: 2020") is a YAML key, not code; "else:",
++# "try:" and "finally:" are the one-word Python statements.
++_CODE_KW_RE = re.compile(
++    r"^\s*(?:"
++    r"(?:import|from|def|class|function|const|let|var|return|if|for|while|elif|"
++    r"except|with|package|fn|pub|public|private|protected|async|export|switch|"
++    r"struct|impl|func|interface|enum|yield|raise|assert|lambda|using|namespace)\b(?!\s*[:,])"
++    r"|(?:else|try|finally)\s*:\s*$|else\s*\{|#include\b|#define\b"
++    r")"
++)
++_SQL_LIKE_RE = re.compile(
++    r"(?im)^\s*(?:CREATE|INSERT|UPDATE|DELETE|SELECT|ALTER|DROP)\b"
++)
++_STANDALONE_CLOSERS = frozenset({"}", "};", "})", "});", ");", "],", "},"})
++
++
++def code_scores(text: str) -> tuple[float, float, int]:
++    """``(strong, semicolon, n)`` for the non-blank, non-fenced lines of text.
++
++    ``strong`` is the share of lines that open with a code keyword or end in
++    ``{``, ``):`` or a standalone closing brace; ``semicolon`` the share ending
++    in ``;``. ``n`` is the number of lines scored.
++    """
++    strong = semi = n = 0
++    in_fence = False
++    for raw in text.split("\n"):
++        line = raw.strip()
++        if not line:
++            continue
++        if line.startswith(("```", "~~~")):
++            in_fence = not in_fence
++            continue
++        if in_fence:
++            continue
++        n += 1
++        if (
++            _CODE_KW_RE.match(raw)
++            or line.endswith(("{", "):"))
++            or line in _STANDALONE_CLOSERS
++        ):
++            strong += 1
++        elif line.endswith(";"):
++            semi += 1
++    if not n:
++        return 0.0, 0.0, 0
++    return strong / n, semi / n, n
++
++
++def looks_like_code(text: str) -> bool:
++    """Source code (Python, JS/TS, C-family, Go, Rust ...), judged by lines.
++
++    Not triggered by SQL scripts (``;``-terminated statements) or prose."""
++    strong, semi, n = code_scores(text)
++    if n < 4:
++        return False
++    if strong >= 0.25:
++        return True
++    return semi >= 0.5 and not _SQL_LIKE_RE.search(text)
++
++
++def code_vetoes_yaml(text: str) -> bool:
++    """Code lines count against YAML: a text with a real share of them is not."""
++    strong, semi, n = code_scores(text)
++    return n >= 3 and (strong >= 0.15 or semi >= 0.5)
++
++
++def delimited_columns_stable(lines: list[str], *, delimiter: str = ",") -> bool:
++    """A table keeps one column count on ≥80% of the sampled lines (and ≥3)."""
++    counts: dict[int, int] = {}
++    sample = [ln for ln in lines if ln.strip()][:40]
++    if not sample:
++        return False
++    for ln in sample:
++        try:
++            width = len(next(csv.reader([ln], delimiter=delimiter)))
++        except (csv.Error, StopIteration):
++            width = -1
++        counts[width] = counts.get(width, 0) + 1
++    mode, share = max(counts.items(), key=lambda kv: (kv[1], kv[0]))
++    return mode >= 3 and share / len(sample) >= 0.8
++
++
++def rejects_table(text_or_lines: str | list[str], *, stable_columns: bool = True) -> bool:
++    """``True`` when the text must NOT be read as CSV/TSV: it is numbered
++    code, it has code lines, or (``stable_columns``) its column count is not
++    stable."""
++    lines = text_or_lines.split("\n") if isinstance(text_or_lines, str) else text_or_lines
++    sample = [ln for ln in lines if ln.strip()][:200]
++    if is_numbered_code("\n".join(sample)):
++        return True
++    code_like = sum(
++        1
++        for ln in sample[:40]
++        if _CODE_KW_RE.match(ln) or ln.rstrip().endswith(("{", "}", ";", "):"))
++    )
++    if code_like >= 2 and code_like / max(1, len(sample[:40])) >= 0.15:
++        return True
++    return stable_columns and not delimited_columns_stable(sample)
++
++
++# ---------------------------------------------------------------------------
++# Detectors: unified diff and grep/rg output.
++# ---------------------------------------------------------------------------
++
++_HUNK_HEADER_RE = re.compile(r"^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@")
++_HUNK_ANY_RE = re.compile(r"(?m)^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@")
++_DIFF_FILE_RE = re.compile(r"(?m)^diff --git |^--- \S[^\n]*\n\+\+\+ ")
++_DIFF_STATS_RE = re.compile(r"^# \S.*: \+\d+ -\d+ in \d+ hunks?$")
++
++
++def detect_unified_diff(text: str) -> bool:
++    """A unified diff: at least one ``@@ -a,b +c,d @@`` hunk header and file
++    headers (``diff --git`` or a ``---``/``+++`` pair)."""
++    if not text or "@@ -" not in text:
++        return False
++    if not _HUNK_ANY_RE.search(text):
++        return False
++    return _DIFF_FILE_RE.search(text) is not None
++
++
++_GREP_MATCH_RE = re.compile(r"^([^\s:][^:]*):(\d+):(.*)$")
++_GREP_CTX_RE = re.compile(r"^([^\s:][^:]*?)-(\d+)-(.*)$")
++
++
++def _pathish(path: str) -> bool:
++    """A file path, not a clock ("12:00:00") or a date ("2026-03-14 12")."""
++    if not ("." in path or "/" in path):
++        return False
++    if re.fullmatch(r"[\d.\-/]+", path):
++        return False
++    if " " in path and "/" not in path:
++        return False
++    return any(ch.isalpha() for ch in path)
++
++
++def _grep_parse_line(line: str) -> tuple[str, str, int, str] | None:
++    m = _GREP_MATCH_RE.match(line)
++    if m and _pathish(m.group(1)):
++        return "m", m.group(1), int(m.group(2)), m.group(3)
++    m = _GREP_CTX_RE.match(line)
++    if m and _pathish(m.group(1)):
++        return "c", m.group(1), int(m.group(2)), m.group(3)
++    return None
++
++
++def detect_grep_lines(text: str) -> bool:
++    """≥70% of the non-blank lines are ``path:N:text`` matches or
++    ``path-N-text`` context lines (``--`` separators are neutral)."""
++    if not text:
++        return False
++    total = ok = real = 0
++    for raw in text.split("\n"):
++        if not raw.strip():
++            continue
++        total += 1
++        if raw == "--":
++            ok += 1
++            continue
++        parsed = _grep_parse_line(raw)
++        if parsed is not None:
++            ok += 1
++            if parsed[0] == "m":
++                real += 1
++    return total >= 2 and real >= 1 and ok / total >= 0.70
++
++
++# ---------------------------------------------------------------------------
++# Unified diff adapter.
++# ---------------------------------------------------------------------------
++
++
++@dataclass
++class _DiffFile:
++    header: list[str]
++    hunks: list[list[str]]
++    trailers: list[list[str]]  # lines after hunk k that are not diff syntax
++    has_minus: bool = False
++
++
++def _read_hunk(lines: list[str], i: int) -> int:
++    """Index just past the hunk starting at ``lines[i]`` (a ``@@`` header).
++
++    Consumes by the header's line counts, so a removed line that reads
++    ``--- foo`` or an added ``+++ bar`` can never be taken for a file header.
++    """
++    m = _HUNK_HEADER_RE.match(lines[i])
++    assert m is not None
++    old = int(m.group(2)) if m.group(2) is not None else 1
++    new = int(m.group(4)) if m.group(4) is not None else 1
++    j = i + 1
++    n = len(lines)
++    while j < n and (old > 0 or new > 0):
++        first = lines[j][:1]
++        if first == " " or lines[j] == "":
++            old -= 1
++            new -= 1
++        elif first == "-":
++            old -= 1
++        elif first == "+":
++            new -= 1
++        elif first != "\\":
++            break
++        j += 1
++    while j < n and lines[j].startswith("\\"):  # "\ No newline at end of file"
++        j += 1
++    return j
++
++
++def _parse_diff(lines: list[str]) -> tuple[list[str], list[_DiffFile]]:
++    preamble: list[str] = []
++    files: list[_DiffFile] = []
++    cur: _DiffFile | None = None
++    i = 0
++    n = len(lines)
++    while i < n:
++        ln = lines[i]
++        if _DIFF_STATS_RE.match(ln):  # our own per-file stats comment: regenerated
++            i += 1
++            continue
++        if ln.startswith("diff --git "):
++            cur = _DiffFile([ln], [], [])
++            files.append(cur)
++            i += 1
++            continue
++        if ln.startswith("--- ") and i + 1 < n and lines[i + 1].startswith("+++ "):
++            if cur is not None and not cur.hunks and not cur.has_minus:
++                cur.header.extend((ln, lines[i + 1]))
++                cur.has_minus = True
++            else:
++                cur = _DiffFile([ln, lines[i + 1]], [], [], has_minus=True)
++                files.append(cur)
++            i += 2
++            continue
++        if cur is not None and _HUNK_HEADER_RE.match(ln):
++            j = _read_hunk(lines, i)
++            cur.hunks.append(lines[i:j])
++            cur.trailers.append([])
++            i = j
++            continue
++        if cur is None:
++            preamble.append(ln)
++        elif not cur.hunks:
++            cur.header.append(ln)
++        else:
++            cur.trailers[-1].append(ln)
++        i += 1
++    return preamble, files
++
++
++def _diff_path(f: _DiffFile) -> str:
++    plus = minus = ""
++    for ln in f.header:
++        if ln.startswith("+++ "):
++            plus = ln[4:].split("\t")[0].strip()
++        elif ln.startswith("--- "):
++            minus = ln[4:].split("\t")[0].strip()
++    if plus and plus != "/dev/null":
++        return plus[2:] if plus.startswith("b/") else plus
++    if minus and minus != "/dev/null":
++        return minus[2:] if minus.startswith("a/") else minus
++    parts = f.header[0].split()
++    last = parts[-1] if parts else "?"
++    return last[2:] if last.startswith("b/") else last
++
++
++def adapt_unified_diff(
++    text: str, query: str, *, gap_marker: GapMarker | None = None
++) -> AdapterResult | None:
++    """Keep every file header, per-file stats and every hunk header line; keep
++    whole hunks (context and -/+ lines together) that mention the query; the
++    bodies of a contiguous run of dropped hunks are replaced by ONE marker
++    (placed after that run's hunk header lines).
++
++    ``None`` when ``text`` is not a unified diff. With no distinctive query
++    terms (or none that hit) the first and last hunk of each file are kept.
++    When nothing is dropped the text is returned unchanged.
++    """
++    if not detect_unified_diff(text):
++        return None
++    lines = text.split("\n")
++    preamble, files = _parse_diff(lines)
++    if not files or not any(f.hunks for f in files):
++        return None
++    matcher = _matcher_for(query)
++    total_hunks = sum(len(f.hunks) for f in files)
++    keep: list[list[bool]] = []
++    any_hit = False
++    for f in files:
++        flags = [False] * len(f.hunks)
++        if not matcher.empty:
++            if matcher.hit(_diff_path(f)):
++                flags = [True] * len(f.hunks)
++            else:
++                for k, hunk in enumerate(f.hunks):
++                    if matcher.hit("\n".join(hunk)):
++                        flags[k] = True
++            any_hit = any_hit or any(flags)
++        keep.append(flags)
++    if not any_hit:  # weak/empty query, or no hunk mentions it: orient the reader
++        for f, flags in zip(files, keep):
++            if flags:
++                flags[0] = True
++                flags[-1] = True
++    kept_hunks = sum(sum(flags) for flags in keep)
++    if kept_hunks == total_hunks:
++        return AdapterResult("diff", text, total_hunks, kept_hunks, "no hunks omitted", hit=any_hit)
++
++    out: list[str] = list(preamble)
++    for f, flags in zip(files, keep):
++        added = removed = 0
++        for hunk in f.hunks:
++            for ln in hunk[1:]:
++                if ln.startswith("+"):
++                    added += 1
++                elif ln.startswith("-"):
++                    removed += 1
++        out.append(f"# {_diff_path(f)}: +{added} -{removed} in {len(f.hunks)} hunks")
++        out.extend(f.header)
++        run: list[int] = []  # hunks whose body is dropped (header line is kept)
++
++        def flush() -> None:
++            if not run:
++                return
++            omitted = len("\n".join("\n".join(f.hunks[k][1:]) for k in run))
++            out.append(
++                _marker(
++                    gap_marker,
++                    omitted,
++                    len(text),
++                    f"[… {_plural(len(run), 'hunk')} omitted …]",
++                )
++            )
++            run.clear()
++
++        for k, hunk in enumerate(f.hunks):
++            if flags[k] or len(hunk) < 2:
++                flush()
++                out.extend(hunk)
++            else:
++                out.append(hunk[0])  # every hunk header line is kept
++                run.append(k)
++            if f.trailers[k]:
++                flush()
++                out.extend(f.trailers[k])
++        flush()
++    return AdapterResult(
++        "diff",
++        "\n".join(out),
++        total_hunks,
++        kept_hunks,
++        "file headers, hunk headers and matching whole hunks",
++        hit=any_hit or matcher.empty,
++    )
++
++
++# ---------------------------------------------------------------------------
++# grep / rg adapter.
++# ---------------------------------------------------------------------------
++
++
++@dataclass
++class _GrepRec:
++    kind: str  # "m" match | "c" context
++    lineno: int
++    text: str
++    raw: str
++    group: int  # `--` separator group
++
++
++def adapt_grep_lines(
++    text: str,
++    query: str,
++    *,
++    gap_marker: GapMarker | None = None,
++    per_file_cap: int = 8,
++) -> AdapterResult | None:
++    """Regroup grep/rg output by file: ``path  (N matches)`` then
++    ``  L<line>: <text>`` for the kept matches. Matches that mention the query
++    are kept; a file with none keeps its first ``per_file_cap``. One marker per
++    run of omitted matches. With no query the regroup is lossless whenever it
++    is shorter than the input (otherwise the per-file cap applies)."""
++    if not detect_grep_lines(text):
++        return None
++    per_file: dict[str, list[_GrepRec]] = {}
++    other: list[str] = []
++    group = 0
++    for raw in text.split("\n"):
++        if not raw.strip():
++            continue
++        if raw == "--":
++            group += 1
++            continue
++        parsed = _grep_parse_line(raw)
++        if parsed is None:
++            other.append(raw)
++            continue
++        kind, path, lineno, body = parsed
++        per_file.setdefault(path, []).append(_GrepRec(kind, lineno, body, raw, group))
++    if not per_file:
++        return None
++    matcher = _matcher_for(query)
++    total_matches = sum(1 for recs in per_file.values() for r in recs if r.kind == "m")
++
++    any_hit = [False]
++
++    def render(keep_all: bool) -> tuple[str, int]:
++        out: list[str] = []
++        kept_total = 0
++        for path, recs in per_file.items():
++            matches = [i for i, r in enumerate(recs) if r.kind == "m"]
++            keep = [True] * len(recs)
++            if not keep_all:
++                keep = [False] * len(recs)
++                hits = [i for i in matches if matcher.hit(recs[i].text)] if not matcher.empty else []
++                any_hit[0] = any_hit[0] or bool(hits)
++                for i in hits or matches[:per_file_cap]:
++                    keep[i] = True
++                # Context lines survive next to a kept match (same `--` group).
++                near = False
++                last_group = -1
++                for i, r in enumerate(recs):  # forward: context after a kept match
++                    if r.group != last_group:
++                        near = False
++                        last_group = r.group
++                    if r.kind == "m":
++                        near = keep[i]
++                    elif near:
++                        keep[i] = True
++                near = False
++                last_group = -1
++                for i in range(len(recs) - 1, -1, -1):  # backward: context before one
++                    r = recs[i]
++                    if r.group != last_group:
++                        near = False
++                        last_group = r.group
++                    if r.kind == "m":
++                        near = keep[i]
++                    elif near:
++                        keep[i] = True
++            out.append(f"{path}  ({_plural(len(matches), 'match')})")
++            run: list[_GrepRec] = []
++
++            def flush() -> None:
++                nonlocal run
++                n_match = sum(1 for r in run if r.kind == "m")
++                if n_match:
++                    omitted = len("\n".join(r.raw for r in run))
++                    out.append(
++                        "  "
++                        + _marker(
++                            gap_marker,
++                            omitted,
++                            len(text),
++                            f"[… {_plural(n_match, 'match')} omitted …]",
++                        )
++                    )
++                run = []
++
++            for i, r in enumerate(recs):
++                if keep[i]:
++                    flush()
++                    sep = ":" if r.kind == "m" else "-"
++                    out.append(f"  L{r.lineno}{sep} {r.text}")
++                    kept_total += r.kind == "m"
++                else:
++                    run.append(r)
++            flush()
++        out.extend(other)
++        return "\n".join(out), kept_total
++
++    if matcher.empty:
++        lossless, kept = render(True)
++        if len(lossless) < len(text):
++            return AdapterResult(
++                "grep", lossless, total_matches, kept, "lossless regroup by file"
++            )
++    body, kept = render(False)
++    return AdapterResult(
++        "grep",
++        body,
++        total_matches,
++        kept,
++        "matches grouped by file, capped per file",
++        hit=any_hit[0] or matcher.empty,
++    )
++
++
++# ---------------------------------------------------------------------------
++# Test-runner output.
++# ---------------------------------------------------------------------------
++
++_PYTEST_HDR_RE = re.compile(r"^={3,} (.+?) ={3,}$")
++_PYTEST_SUMMARY_RE = re.compile(
++    r"\b\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed|deselected|warnings?)\b.*\bin [\d.]+s"
++)
++_PYTEST_Q_SUMMARY_RE = re.compile(
++    r"^\d+ (?:passed|failed|errors?|skipped|xfailed|xpassed|deselected|warnings?)\b.*\bin [\d.]+s"
++)
++_PYTEST_PROGRESS_RE = re.compile(r"^\S+\s+([.FEsxX]+)(?:\s+\[\s*\d+%\])?$")
++_PYTEST_VERBOSE_RE = re.compile(r"^\S+::\S.*\s(PASSED|FAILED|ERROR|SKIPPED|XFAIL|XPASS)\b")
++_JEST_BLOCK_RE = re.compile(r"^\s*● (?!Console\b)")
++_JEST_SUMMARY_RE = re.compile(
++    r"^(?:Test Suites|Tests|Snapshots|Time|Ran all test suites|Test Files)\b"
++)
++_JEST_TICK_RE = re.compile(r"^\s*[✓✔√]\s")
++_GO_PKG_RE = re.compile(r"^(?:ok|FAIL|\?)\s+\S+(?:\s|$)")
++_CARGO_OK_RE = re.compile(r"^test \S.* \.\.\. ok$")
++_CARGO_RUNNING_RE = re.compile(r"^running \d+ tests?$")
++_GO_RESULT_RE = re.compile(r"^(?:ok|FAIL)\s+\S+\s+(?:[\d.]+s|\(cached\))")
++_PYTEST_START_RE = re.compile(r"^={3,} test session starts ={3,}$")
++_PYTEST_FINAL_RE = re.compile(
++    r"^={3,} .*\b\d+ (?:passed|failed|errors?|skipped)\b.* in [\d.]+s.* ={3,}$"
++)
++
++
++_LINE_CAP = 400  # test-runner structure lines are short; a longer line is data
++
++
++def detect_test_runner(text: str) -> str | None:
++    """``"cargo"``, ``"go"``, ``"jest"`` or ``"pytest"`` for recognised output.
++
++    Vitest-style ``Tests  N passed`` output is left to the legacy path.
++    One pass over the lines, each capped at ``_LINE_CAP`` characters (a long
++    line with many ``N passed`` fragments made the old whole-text regex cubic).
++    """
++    running = cargo_result = jest_suites = jest_tests = go = pytest_open = pytest_sum = False
++    for ln in text.split("\n"):
++        if len(ln) > _LINE_CAP:
++            continue
++        if ln.startswith("running ") and _CARGO_RUNNING_RE.match(ln):
++            running = True
++        elif ln.startswith("test result: "):
++            cargo_result = True
++        elif ln.startswith("Test Suites:") and ln[12:13] in (" ", "\t"):
++            jest_suites = True
++        elif ln.startswith("Tests:") and ln[6:7] in (" ", "\t"):
++            jest_tests = True
++        elif ln.startswith(("--- PASS:", "--- FAIL:", "=== RUN ")) or _GO_RESULT_RE.match(ln):
++            go = True
++        elif ln.startswith("===="):
++            if _PYTEST_START_RE.match(ln):
++                pytest_open = True
++            elif _PYTEST_FINAL_RE.match(ln):
++                pytest_sum = True
++    if running and cargo_result:
++        return "cargo"
++    if jest_suites and jest_tests:
++        return "jest"
++    if go:
++        return "go"
++    if pytest_open or pytest_sum:
++        return "pytest"
++    return None
++
++
++def _render_kept(
++    lines: list[str],
++    keep: list[bool],
++    tests: list[int],
++    suites: list[int],
++    gap_marker: GapMarker | None,
++    total: int,
++) -> str:
++    out: list[str] = []
++    run: list[int] = []
++
++    def flush() -> None:
++        if not run:
++            return
++        n_tests = sum(tests[i] for i in run)
++        n_suites = sum(suites[i] for i in run)
++        omitted = len("\n".join(lines[i] for i in run))
++        if gap_marker is not None:
++            if omitted and "\n".join(lines[i] for i in run).strip():
++                out.append(str(gap_marker(omitted, total)))
++        elif n_tests:
++            out.append(f"[… {n_tests} passing {'test' if n_tests == 1 else 'tests'} omitted …]")
++        elif n_suites:
++            out.append(f"[… {n_suites} passing {'suite' if n_suites == 1 else 'suites'} omitted …]")
++        run.clear()
++
++    for i, ln in enumerate(lines):
++        if keep[i]:
++            flush()
++            out.append(ln)
++        else:
++            run.append(i)
++    flush()
++    return "\n".join(out)
++
++
++def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
++    n = len(lines)
++    keep = [False] * n
++    tests = [0] * n
++    suites = [0] * n
++    section = ""
++    for i, ln in enumerate(lines):
++        m = _PYTEST_HDR_RE.match(ln)
++        if m:
++            name = m.group(1).lower()
++            if _PYTEST_SUMMARY_RE.search(name):
++                keep[i] = True
++                section = "final"
++            elif name in {"failures", "errors"} or name.startswith("short test summary"):
++                keep[i] = True
++                section = "keep"
++            else:
++                section = "drop"
++            continue
++        if section == "keep":
++            keep[i] = True
++            continue
++        if _PYTEST_Q_SUMMARY_RE.match(ln.strip()):
++            keep[i] = True
++            continue
++        v = _PYTEST_VERBOSE_RE.match(ln)
++        if v:
++            if v.group(1) in {"FAILED", "ERROR"}:
++                keep[i] = True
++            else:
++                tests[i] = 1
++            continue
++        p = _PYTEST_PROGRESS_RE.match(ln)
++        if p:
++            if "F" in p.group(1) or "E" in p.group(1):
++                keep[i] = True  # names the file a failure is in (--tb=no has no block)
++            else:
++                tests[i] = p.group(1).count(".")
++    return keep, tests, suites
++
++
++def _classify_jest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
++    n = len(lines)
++    keep = [False] * n
++    tests = [0] * n
++    suites = [0] * n
++    in_block = False
++    for i, ln in enumerate(lines):
++        if _JEST_BLOCK_RE.match(ln):
++            in_block = True
++            keep[i] = True
++        elif ln.startswith(("PASS ", "FAIL ")):
++            in_block = False
++            if ln.startswith("FAIL "):
++                keep[i] = True
++            else:
++                suites[i] = 1
++        elif _JEST_SUMMARY_RE.match(ln) or ln.startswith(("Summary of all failing", "Snapshot Summary")):
++            in_block = False
++            keep[i] = True
++        elif re.match(r"^\s*● Console\b", ln):
++            in_block = False
++        elif in_block:
++            keep[i] = True
++        elif _JEST_TICK_RE.match(ln):
++            tests[i] = 1
++    return keep, tests, suites
++
++
++def _classify_go(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
++    n = len(lines)
++    keep = [True] * n
++    tests = [0] * n
++    suites = [0] * n
++    pending: list[int] = []  # indented log lines since the last top-level result
++    dropping = False  # inside the indented children of a passing/skipped test
++    for i, ln in enumerate(lines):
++        indented = ln[:1] in {" ", "\t"}
++        if ln.startswith(("--- PASS:", "--- SKIP:")):
++            for j in pending:  # `t.Log` output of a test that passed
++                keep[j] = False
++            pending = []
++            keep[i] = False
++            tests[i] = 1 if ln.startswith("--- PASS:") else 0
++            dropping = True
++        elif ln.startswith("--- FAIL:"):
++            pending = []
++            dropping = False
++        elif ln.startswith("=== "):
++            keep[i] = False  # RUN / PAUSE / CONT / NAME
++            dropping = False
++        elif ln == "PASS":
++            keep[i] = False
++            pending = []
++            dropping = False
++        elif indented and dropping:
++            keep[i] = False
++            if ln.lstrip().startswith("--- PASS:"):
++                tests[i] = 1
++        elif indented:
++            pending.append(i)
++        else:
++            pending = []
++            dropping = False
++    return keep, tests, suites
++
++
++def _classify_cargo(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
++    n = len(lines)
++    keep = [False] * n
++    tests = [0] * n
++    suites = [0] * n
++    in_failures = False
++    for i, ln in enumerate(lines):
++        if in_failures:
++            keep[i] = True
++            if ln.startswith("test result:"):
++                in_failures = False
++            continue
++        if ln == "failures:":
++            in_failures = True
++            keep[i] = True
++        elif ln.startswith(("test result:", "running ", "     Running ", "   Doc-tests ")):
++            keep[i] = True
++        elif ln.startswith("---- ") and ln.endswith(" ----"):
++            keep[i] = True
++        elif _CARGO_OK_RE.match(ln):
++            tests[i] = 1
++        elif ln.startswith("test ") and ln.endswith("FAILED"):
++            keep[i] = True
++    return keep, tests, suites
++
++
++_RUNNERS = {
++    "pytest": _classify_pytest,
++    "jest": _classify_jest,
++    "go": _classify_go,
++    "cargo": _classify_cargo,
++}
++
++
++def preprocess_test_output(
++    text: str,
++    query: str = "",
++    *,
++    gap_marker: GapMarker | None = None,
++    force: bool = False,
++    total_chars: int | None = None,
++) -> str | None:
++    """Reduce pytest / jest / go test / cargo test output to the failures and
++    summary lines; passing per-test lines become a count marker.
++
++    ``None`` when the output is not a recognised runner's, or nothing would be
++    dropped. A dropped line that mentions the query is kept. ``force`` is the
++    ``content_hint="test"`` case; it only matters to callers (a recognised
++    runner is processed either way), so detection is never skipped.
++    """
++    del force
++    runner = detect_test_runner(text)
++    if runner is None:
++        return None
++    lines = text.split("\n")
++    keep, tests, suites = _RUNNERS[runner](lines)
++    matcher = _matcher_for(query)
++    if not matcher.empty:
++        dropped = [i for i, ln in enumerate(lines) if not keep[i] and ln.strip()]
++        hits = [i for i in dropped if matcher.hit(lines[i])]
++        # A query word that appears on a large share of the dropped lines
++        # ("test" in "test tests::ok_17 ... ok") selects nothing: ignore it.
++        if hits and len(hits) <= 0.2 * len(dropped):
++            for i in hits:
++                keep[i] = True
++    if all(keep):
++        return None
++    out = _render_kept(
++        lines, keep, tests, suites, gap_marker, total_chars if total_chars else len(text)
++    )
++    return out if len(out) < len(text) else None
++
++
++# ---------------------------------------------------------------------------
++# Entry point for compress_context.
++# ---------------------------------------------------------------------------
++
++
++def apply_agent_adapters(
++    text: str,
++    query: str,
++    *,
++    hint: str | None = None,
++    gap_marker: GapMarker | None = None,
++    weak_query: bool = False,
++) -> tuple[str, dict[str, object] | None]:
++    """Run the diff / grep adapter that ``hint`` names or detection finds.
++
++    Returns ``(text, info)``; ``info`` is ``None`` (and ``text`` untouched)
++    unless an adapter produced a strictly shorter text. With a weak query
++    (``weak_query=True``: no distinctive terms, e.g. "continue") only a
++    lossless result is accepted: filler must not license a cut.
++    """
++    if hint not in (None, "diff", "grep"):
++        return text, None
++    result: AdapterResult | None = None
++    if hint in (None, "diff") and detect_unified_diff(text):
++        result = adapt_unified_diff(text, query, gap_marker=gap_marker)
++    elif hint in (None, "grep"):
++        result = adapt_grep_lines(text, query, gap_marker=gap_marker)
++    if result is None or len(result.text) >= len(text):
++        return text, None
++    if (weak_query or not result.hit) and result.kept_records < result.total_records:
++        # A filler or empty query -- or a distinctive one that selects nothing
++        # in this output -- licenses no cut (E6): only a lossless regroup
++        # (every match kept) may apply. The adapters themselves still
++        # offer first/last-hunk orientation to direct callers.
++        return text, None
++    return result.text, {
++        "name": result.format,
++        "total_records": result.total_records,
++        "kept_records": result.kept_records,
++        "reason": result.reason,
++    }
+diff --git a/src/tameru/compress_context.py b/src/tameru/compress_context.py
+index 177a0a1..4885089 100644
+--- a/src/tameru/compress_context.py
++++ b/src/tameru/compress_context.py
+@@ -21,11 +21,20 @@ from dataclasses import asdict, dataclass, field, replace
+ from pathlib import Path
+ from typing import Any, Callable, Iterable, Optional
+ 
++from .agent_formats import (
++    GUTTER_RE as _AGENT_GUTTER_RE,
++    apply_agent_adapters,
++    detect_test_runner,
++    is_numbered_code,
++    preprocess_test_output,
++    rejects_table,
++)
+ from .contract_gates import (
+     GENERIC_WORDS,
+     distinctive_query_terms,
+     query_has_distinctive_selectors,
+ )
++from .folding import fold_lossless, json_brief, mask_template  # noqa: F401 (fold_lossless re-exported)
+ from .format_adapters import FILLER_WORDS
+ from .industrial import IndustrialLimits, IndustrialResult, industrial_preprocess
+ from .supersession import apply_supersession
+@@ -330,16 +339,27 @@ def _log_fingerprint(line: str) -> str | None:
+     Returns None for marker lines ([\u00d7N] ...) so re-running preprocessing
+     never re-collapses its own output markers (NTK idempotency invariant).
+     """
+-    if line.lstrip().startswith("[\u00d7"):
++    if line.lstrip().startswith(("[\u00d7", "[last] ")):
+         return None
+     stripped = _PROGRESS_RE.match(line.strip())
+     if stripped:
+         return None
+-    s = re.sub(r"\d+", "#", line.lower())
+-    s = re.sub(r"\s+", " ", s).strip()
++    # v1.4.0 (E10): volatile fields (ids, ips, timestamps, durations, quoted
++    # strings, paths) are masked before the digits, by the same function the
++    # error fingerprint uses.
++    s = mask_template(line[:_RX_LINE_CAP].lower())
+     return s[:240] or None
+ 
+ 
++def _template_long_enough(line: str) -> bool:
++    """A line is worth collapsing only if its digit-masked form is >12 chars.
++
++    Measured on the digit mask, not on the E10 template (``<ts> info ok`` is
++    short only because its timestamp became one token).
++    """
++    return len(_DIGITS_RE.sub("#", " ".join(line[:_RX_LINE_CAP].lower().split()))) > 12
++
++
+ def _is_progress_bar(line: str) -> bool:
+     t = line.strip()
+     if not t:
+@@ -432,7 +452,7 @@ _ERR_NEGATED_RE = re.compile(
+     r"|\b(?:errors?|failures?|failed|fatals?|critical)\s*[=:]\s*0(?!\w|\.\d)",
+     re.IGNORECASE,
+ )
+-_COUNT_PREFIX_RE = re.compile(r"^\s*\[\u00d7\d+\]\s*")
++_COUNT_PREFIX_RE = re.compile(r"^\s*\[(?:\u00d7\d+|last)\]\s*")
+ _UUID_RE = re.compile(
+     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+ )
+@@ -476,10 +496,7 @@ def _error_fp(line: str) -> str:
+     whitespace collapsed, capped at 160 chars.
+     """
+     s = _COUNT_PREFIX_RE.sub("", line[:_RX_LINE_CAP], count=1).lower()
+-    s = _UUID_RE.sub("<uuid>", s)
+-    s = _HEXRUN_RE.sub("<hex>", s)
+-    s = _DIGITS_RE.sub("#", s)
+-    return " ".join(s.split())[:_FINGERPRINT_CAP]
++    return mask_template(s)[:_FINGERPRINT_CAP]
+ 
+ 
+ def error_fingerprints(text: str) -> dict[str, str]:
+@@ -575,6 +592,7 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
+ 
+     seen: dict[str, int] = {}
+     exemplar_idx: dict[str, int] = {}
++    last_seen: dict[str, str] = {}  # v1.4.0 (E10): last instance of each template
+ 
+     i = 0
+     n = len(kept_lines)
+@@ -599,9 +617,10 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
+             i += 1
+             continue
+         fp = _log_fingerprint(line)
+-        if fp and len(fp) > 12:
++        if fp and _template_long_enough(line):
+             if fp in exemplar_idx:
+                 seen[fp] += 1
++                last_seen[fp] = line
+                 i += 1
+                 continue
+             exemplar_idx[fp] = len(out)
+@@ -612,18 +631,30 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
+     flush_trace()
+ 
+     # Attach counts: replace exemplar line with counted variant.
++    # v1.4.0 (E10): a template seen >=3 times keeps its LAST instance verbatim
++    # on the next line ("[last] ..."), so the end state of a repeating failure
++    # survives next to the first one.
+     counted_out: list[str] = []
++    counted_src: list[int] = []
+     for idx, ln in enumerate(out):
+         if idx in query_match_indices:
+             counted_out.append(ln)
++            counted_src.append(out_src[idx])
+             continue
+         fp = _log_fingerprint(ln)
+         cnt = seen.get(fp, 1) if fp else 1
+         if fp and cnt > 1 and not ln.lstrip().startswith("[\u00d7"):
+             counted_out.append(f"[\u00d7{cnt}] {ln}")
++            counted_src.append(out_src[idx])
++            last = last_seen.get(fp)
++            if cnt >= 3 and last is not None and last != ln:
++                counted_out.append(f"[last] {last}")
++                counted_src.append(out_src[idx])
+         else:
+             counted_out.append(ln)
++            counted_src.append(out_src[idx])
+     result = counted_out
++    out_src = counted_src
+ 
+     # N6 error-signal invariant: original error lines that are missing from
+     # the output must be restored. v1.4.0: a line counts as present when an
+@@ -795,7 +826,12 @@ def _looks_like_csv(text: str) -> bool:
+     if len(lines) < 6 or lines[0].count(",") < 2:
+         return False
+     similar = sum(1 for ln in lines[1:40] if ln.count(",") >= 2)
+-    return similar >= 4
++    if similar < 4:
++        return False
++    # v1.4.0 (E4): code is not CSV. A numbered read, code lines, or an unstable
++    # column count (a JS file whose first line happens to hold commas) is not a
++    # table, however many commas it has.
++    return not rejects_table(lines)
+ 
+ 
+ def _selector_patterns(terms: Iterable[str]) -> list[re.Pattern[str]]:
+@@ -805,8 +841,15 @@ def _selector_patterns(terms: Iterable[str]) -> list[re.Pattern[str]]:
+     ]
+ 
+ 
+-def preprocess_csv(text: str, query: str) -> str:
+-    """Keep header + distinctive-matching rows. No first-N cliff."""
++def preprocess_csv(
++    text: str,
++    query: str,
++    gap_marker: Callable[[int, int], str] | None = None,
++) -> str:
++    """Keep header + distinctive-matching rows. No first-N cliff.
++
++    ``gap_marker(omitted_chars, total_chars)`` marks each run of dropped rows
++    (v1.4.0); ``None`` keeps the output byte-identical to earlier releases."""
+     if not query_has_distinctive_selectors(query) or not _looks_like_csv(text):
+         return text
+     terms = [t for t in distinctive_query_terms(query) if not t.startswith("script:")]
+@@ -815,12 +858,33 @@ def preprocess_csv(text: str, query: str) -> str:
+     selectors = _selector_patterns(terms)
+     lines = text.split("\n")
+     kept = [lines[0]]
+-    for line in lines[1:]:
++    flags = [False] * len(lines)
++    flags[0] = True
++    for idx, line in enumerate(lines[1:], 1):
+         if any(selector.search(line) for selector in selectors):
+             kept.append(line)
++            flags[idx] = True
+     if len(kept) == 1 or len(kept) == len(lines):
+         return text
+-    return "\n".join(kept)
++    if gap_marker is None:
++        return "\n".join(kept)
++    out: list[str] = []
++    run: list[str] = []
++    for line, keep in zip(lines, flags):
++        if keep:
++            if run:
++                dropped = "\n".join(run)
++                if dropped.strip():
++                    out.append(str(gap_marker(len(dropped), len(text))))
++                run = []
++            out.append(line)
++        else:
++            run.append(line)
++    if run:
++        dropped = "\n".join(run)
++        if dropped.strip():
++            out.append(str(gap_marker(len(dropped), len(text))))
++    return "\n".join(out)
+ 
+ 
+ _FLAT_RECORD_RE = re.compile(r"^[^\s:#][^:\n]{0,200}:\s+\S.*$")
+@@ -858,11 +922,27 @@ def strip_ansi(text: str) -> str:
+     return _ANSI_RE.sub("", text)
+ 
+ 
+-def preprocess_test_runner(text: str, query: str) -> str:
++def preprocess_test_runner(
++    text: str,
++    query: str,
++    content_hint: str | None = None,
++    gap_marker: Callable[[int, int], str] | None = None,
++) -> str:
+     """Keep suite summary; drop per-file ticks and node warnings.
+ 
+     Super does this on vitest dumps. Skip if the query names a test file.
++
++    v1.4.0 (E5): pytest, jest, go test and cargo test output is reduced to its
++    failure blocks and summary lines (``agent_formats.preprocess_test_output``);
++    passing per-test lines become a count marker (or ``gap_marker``). Applied
++    when the runner is recognised, or when ``content_hint == "test"``.
+     """
++    if content_hint in (None, "test"):
++        reduced = preprocess_test_output(
++            text, query, gap_marker=gap_marker, force=content_hint == "test"
++        )
++        if reduced is not None:
++            return reduced
+     plain = strip_ansi(text)
+     if not _TEST_SUMMARY_RE.search(plain):
+         return text
+@@ -880,6 +960,8 @@ def preprocess_test_runner(text: str, query: str) -> str:
+     return "\n".join(kept)
+ 
+ 
++# A reduced test run at most this long is final (never re-scored).
++_TEST_REDUCTION_FINAL_CHARS = 16000
+ _FILLER_COMMENT_RE = re.compile(r"^(--|#)\s*filler\b", re.I)
+ _TRUST_RISK_RE = re.compile(
+     r"\b(?:untrusted|not\s+operational)\b"
+@@ -1040,7 +1122,7 @@ _HINT_ROUTES = {
+     "text": "text",
+ }
+ # Line-number gutter of numbered code: `cat -n` ("   12\t...") or `N|`.
+-_GUTTER_RE = re.compile(r"^\s*\d+(?:\t|\|)")
++_GUTTER_RE = _AGENT_GUTTER_RE  # `N\t` (cat -n), `N|` (Hermes read_file), `N: `
+ 
+ 
+ def _marker_tuple(markers: Iterable[str] | str | None) -> tuple[str, ...]:
+@@ -3847,6 +3929,12 @@ def brief_context(
+     budget = max(1, int(budget_chars))
+     if len(text) <= budget:
+         return text
++    # v1.4.0 (E11): JSON arrays of objects get a valid-JSON brief, not a
++    # line-cut that would leave unparseable fragments.
++    if text.lstrip()[:1] in ("[", "{"):
++        briefed = json_brief(text, budget_chars=budget, query=query)
++        if briefed is not None:
++            return briefed
+     total = len(text)
+     lines = text.split("\n")
+     n = len(lines)
+@@ -4265,7 +4353,16 @@ def compress_context(
+     industrial_query = query or ""
+     if no_table and len(industrial_query) <= (limits or IndustrialLimits()).max_query_chars:
+         industrial_query = ""
+-    industrial = industrial_preprocess(caller_text, industrial_query, limits)
++    # v1.4.0 (E8 completion): adapter cuts carry the caller's marker; the
++    # total they report is always the caller's original length.
++    adapter_gap = (
++        None
++        if gap_marker is None
++        else (lambda omitted, _total: gap_marker(omitted, len(caller_text)))
++    )
++    industrial = industrial_preprocess(
++        caller_text, industrial_query, limits, gap_marker=adapter_gap
++    )
+     if (
+         industrial.hard_fail_open
+         and degraded_view
+@@ -4349,7 +4446,51 @@ def compress_context(
+     tool_meta_line = ""
+     if tool_payload.wrapped and tool_payload.meta:
+         tool_meta_line = _compact_json(tool_payload.meta) + "\n"
+-    text = preprocess_test_runner(text, query or "")
++    # v1.4.0 (E4): an un-hinted numbered read (`cat -n`, Hermes `N|`) is code,
++    # judged on the unwrapped payload: no table detector, no supersession, the
++    # gutter kept in the output but out of the scorer's view. `route_hint` is
++    # what the engine routes by; the receipt still records the caller's hint.
++    route_hint = content_hint
++    if route_hint is None and is_numbered_code(text):
++        route_hint = "numbered_code"
++        code_hint = True
++        no_table = True
++    _pre_test_text = text
++    text = preprocess_test_runner(
++        text, query or "", content_hint=content_hint, gap_marker=adapter_gap
++    )
++    # v1.4.0 (E5): diff and grep/rg output get their own adapters (whole hunks,
++    # grouped matches) ahead of generic segmentation. The adapter's output is
++    # the selection: scoring below must not undo it (see `adapter_info`).
++    adapter_info: dict[str, Any] | None = None
++    if (
++        text is not _pre_test_text
++        and content_hint in (None, "test")
++        and len(text) <= _TEST_REDUCTION_FINAL_CHARS
++        and detect_test_runner(_pre_test_text) is not None
++    ):
++        # Same for a reduced test run (v1.4.0): block scoring must not drop
++        # the failing test's name/file line that the reduction kept (jest
++        # "FAIL f.test.js" / "● suite › case" vs "which tests failed?").
++        # Larger reductions still go through scoring and its budget.
++        adapter_info = {
++            "name": "test_output",
++            "total_records": None,
++            "kept_records": None,
++            "reason": "failure blocks and summaries kept",
++        }
++    if (
++        adapter_info is None
++        and route_hint not in _CODE_HINTS
++        and route_hint not in ("log", "json", "text")
++    ):
++        text, adapter_info = apply_agent_adapters(
++            text,
++            query or "",
++            hint=content_hint,
++            gap_marker=adapter_gap,
++            weak_query=not query_has_distinctive_selectors(query or ""),
++        )
+     if not text.strip():
+         return CompressResult(
+             compressed_text="", policy_name="noop", mode=requested_mode
+@@ -4359,13 +4500,13 @@ def compress_context(
+     # Destructive preprocess (JSON crush / later log collapse) only when
+     # the query names something specific. Generic/empty queries must not
+     # delete array tails or fingerprint-collapse logs before scoring.
+-    if query_has_distinctive_selectors(query or "") and not code_hint:
++    if query_has_distinctive_selectors(query or "") and not code_hint and not adapter_info:
+         # (content_hint code/numbered_code: source code with commas or JSON
+         # literals is not a table to crush; function bodies must survive.)
+         if route_content_type(_norm_newlines(text).split("\n")) != "json":
+             text = _preprocess_json(text, query or "")
+         if not no_table:
+-            text = preprocess_csv(text, query or "")
++            text = preprocess_csv(text, query or "", gap_marker=adapter_gap)
+         text = preprocess_filler_comments(text, query or "")
+ 
+     # Strategy ladder:
+@@ -4521,8 +4662,8 @@ def compress_context(
+         # LLM failed or returned a longer result — fall through to extract.
+         strategy_norm = "extract"
+ 
+-    if query_has_distinctive_selectors(query or ""):
+-        lines, content_type = preprocess(text, query or "", content_hint=content_hint)
++    if query_has_distinctive_selectors(query or "") and not adapter_info:
++        lines, content_type = preprocess(text, query or "", content_hint=route_hint)
+         if industrial.applied:
+             content_type = industrial.profile.format
+     else:
+@@ -4531,11 +4672,11 @@ def compress_context(
+         # on this path — ~0.4 s of log collapsing per 650 KB — so it is not
+         # run at all; the result is identical.)
+         lines = text.split("\n")
+-        content_type = _HINT_ROUTES.get(content_hint) or route_content_type(lines)
++        content_type = _HINT_ROUTES.get(route_hint) or route_content_type(lines)
+     # numbered_code: the "N\t" / "N|" gutter stays in the output (_render emits
+     # `lines`) but is not part of the code the scorer should read.
+     score_lines = lines
+-    if content_hint == "numbered_code":
++    if route_hint == "numbered_code":
+         score_lines = [_GUTTER_RE.sub("", ln, count=1) for ln in lines]
+     blocks = segment_blocks(score_lines)
+     if len(blocks) > industrial.limits.max_blocks:
+@@ -4684,6 +4825,13 @@ def compress_context(
+             # kept when a selector path ignores raw scores (needle-only),
+             # and neither freeze nor supersession may evict a pin.
+             kept |= pin_recent_ids
++    if adapter_info is not None and scored and not ambiguity_fail_open:
++        # v1.4.0 (E5): the format adapter already chose what to keep (every
++        # header, whole hunks, grouped matches); block scoring must not drop a
++        # file header or half a hunk. Risk reflects how the adapter chose.
++        kept = {b["id"] for b in scored}
++        fail_open = False
++        risk = "low" if query_has_distinctive_selectors(query or "") else "medium"
+     if ambiguity_fail_open:
+         fail_open = True
+         risk = "high"
+@@ -4883,6 +5031,8 @@ def compress_context(
+     reasons = sorted({scored[i]["reason"] for i in kept if i < len(scored)})
+     if industrial.applied:
+         reasons.append(f"industrial adapter: {industrial.profile.format}")
++    if adapter_info is not None and not fail_open:
++        reasons.append(f"format adapter: {adapter_info['name']}")
+     if freeze_cache_saturated:
+         reasons.append("freeze cache capacity reached")
+     if savings_gate:
+@@ -4955,7 +5105,15 @@ def compress_context(
+     # a different strategy or expand dropped blocks.
+     verifier = None
+     if not fail_open and compressed and original_tokens > 50:
+-        verifier = verify_compression(text, compressed, query or "")
++        if route_hint == "numbered_code":
++            # the gutter ("12: ") is not content: it must not read as key: value
++            verifier = verify_compression(
++                "\n".join(_GUTTER_RE.sub("", ln, count=1) for ln in text.split("\n")),
++                "\n".join(_GUTTER_RE.sub("", ln, count=1) for ln in compressed.split("\n")),
++                query or "",
++            )
++        else:
++            verifier = verify_compression(text, compressed, query or "")
+         risk_order = {"low": 0, "medium": 1, "high": 2}
+         verifier_risk = str(verifier.get("risk", "high"))
+         if risk_order.get(verifier_risk, 2) > risk_order.get(risk, 2):
+@@ -5019,6 +5177,8 @@ def compress_context(
+         "structural_collapse_only": bool(structural_collapse_only and not fail_open),
+         # v1.4.0: E8 — the caller's routing hint, always recorded.
+         "content_hint": content_hint,
++        # v1.4.0: E5 — which diff/grep adapter shaped the text (None: none did).
++        "adapter": adapter_info,
+         # v1.4.0: E3 — level-tagged error fingerprints kept/total (logs only).
+         "log_error_fingerprints": log_error_retention,
+         "industrial": industrial.to_dict(),
+diff --git a/src/tameru/folding.py b/src/tameru/folding.py
+new file mode 100644
+index 0000000..e07a834
+--- /dev/null
++++ b/src/tameru/folding.py
+@@ -0,0 +1,432 @@
++"""Lossless folding, log-template masking and JSON briefs (v1.4.0).
++
++Three small, stdlib-only, deterministic helpers that ``compress_context`` wires
++in:
++
++* :func:`fold_lossless` (E9) - a transformation that loses no information a
++  reader could see: terminal redraws, ANSI colour, trailing blanks, runs of
++  identical lines and pretty-printed JSON.
++* :func:`mask_template` (E10) - the ONE masking function behind both the log
++  template fingerprint and the error fingerprint, so the two never disagree.
++* :func:`json_brief` (E11) - a valid-JSON structural brief of a big array of
++  objects.
++
++Every regex here is linear: bounded character classes, no nested quantifiers.
++"""
++from __future__ import annotations
++
++import json
++import re
++from collections import Counter
++from typing import Any
++
++__all__ = ["fold_lossless", "mask_template", "json_brief"]
++
++# --------------------------------------------------------------------------
++# E9: fold_lossless
++# --------------------------------------------------------------------------
++
++_ANSI_RE = re.compile(
++    r"\x1b\[[0-?]*[ -/]*[@-~]"  # CSI (colours, cursor moves, erase)
++    r"|\x1b\][^\x07\x1b]*(?:\x07|\x1b\\)"  # OSC (titles, hyperlinks)
++    r"|\x1b[@-Z\\-_]"  # two-byte escapes
++)
++_RUN_MIN = 3
++_ANSI_PASSES = 4
++
++
++def _strip_ansi_line(ln: str) -> tuple[str, int]:
++    """Strip ANSI sequences to a fixed point (idempotence).
++
++    Removing one escape can splice the halves of another into a new one
++    (``ESC[3 ESC[0m 1m`` -> ``ESC[31m``), so a single pass is not idempotent.
++    Passes are capped (adversarial nesting would be quadratic); if the cap is
++    hit, the remaining stray ESC bytes are dropped, which cannot create a new
++    sequence since every sequence starts with ESC.
++    """
++    total = 0
++    for _ in range(_ANSI_PASSES):
++        ln, k = _ANSI_RE.subn("", ln)
++        total += k
++        if not k:
++            return ln, total
++    if _ANSI_RE.search(ln):
++        ln = ln.replace("\x1b", "")
++    return ln, total
++
++
++def _fold_text_steps(text: str, stats: dict) -> list[str]:
++    """CR redraws, ANSI, trailing whitespace -> list of lines."""
++    lines = text.split("\n")
++    cr = 0
++    for i, ln in enumerate(lines):
++        if "\r" in ln:
++            body = ln[:-1] if ln.endswith("\r") else ln  # the \r of a \r\n
++            if "\r" in body:
++                body = body.rsplit("\r", 1)[1]
++                cr += 1
++            lines[i] = body
++    stats["cr_redraws"] = cr
++    if "\x1b" in text:
++        ansi = 0
++        for i, ln in enumerate(lines):
++            if "\x1b" in ln:
++                lines[i], k = _strip_ansi_line(ln)
++                ansi += k
++        stats["ansi"] = ansi
++    ws = 0
++    for i, ln in enumerate(lines):
++        stripped = ln.rstrip()
++        if stripped != ln:
++            lines[i] = stripped
++            ws += 1
++    stats["trailing_ws"] = ws
++    return lines
++
++
++def _fold_runs(lines: list[str], stats: dict) -> list[str]:
++    """Collapse >=3 identical consecutive lines when that is strictly shorter."""
++    out: list[str] = []
++    n = len(lines)
++    i = 0
++    collapsed = 0
++    while i < n:
++        j = i + 1
++        while j < n and lines[j] == lines[i]:
++            j += 1
++        run = j - i
++        if run >= _RUN_MIN:
++            marker = f"[×{run - 1} identical lines]"
++            if len(lines[i]) + 1 + len(marker) < run * len(lines[i]) + run - 1:
++                out.append(lines[i])
++                out.append(marker)
++                collapsed += 1
++                i = j
++                continue
++        out.extend(lines[i:j])
++        i = j
++    stats["runs_collapsed"] = collapsed
++    return out
++
++
++def _json_minified(text: str) -> str | None:
++    """Minified form of ``text`` when it is JSON and that is strictly shorter."""
++    head = text.lstrip()[:1]
++    if head not in ("{", "["):
++        return None
++    try:
++        obj = json.loads(text)
++        mini = json.dumps(obj, separators=(",", ":"), ensure_ascii=False)
++    except (ValueError, RecursionError):
++        return None
++    if len(mini) >= len(text):
++        return None
++    if "Infinity" in mini and "Infinity" not in text:  # 1e400 parses to inf
++        return None
++    try:
++        # Pair-list hook: also catches duplicate keys and reordered keys.
++        same = json.loads(mini, object_pairs_hook=list) == json.loads(
++            text, object_pairs_hook=list
++        )
++    except (ValueError, RecursionError):
++        return None
++    return mini if same else None
++
++
++def fold_lossless(text: str) -> tuple[str, dict]:
++    """Fold ``text`` without losing information; return ``(folded, stats)``.
++
++    1. per line, keep only what follows the last ``\\r`` that is not part of a
++       ``\\r\\n`` (a terminal shows nothing else);
++    2. strip ANSI escape sequences;
++    3. strip trailing whitespace of each line;
++    4. a run of >=3 identical consecutive lines becomes the first line plus
++       ``[×{n-1} identical lines]`` (only when that is shorter);
++    5. JSON that parses and re-serialises shorter is minified, accepted only
++       if the parsed values are equal to the original's.
++
++    Idempotent, deterministic and never longer than the input. ``stats`` has
++    ``cr_redraws``, ``ansi``, ``trailing_ws``, ``runs_collapsed``,
++    ``json_minified`` and ``saved_chars``.
++    """
++    text = text if isinstance(text, str) else str(text or "")
++    stats = {
++        "cr_redraws": 0,
++        "ansi": 0,
++        "trailing_ws": 0,
++        "runs_collapsed": 0,
++        "json_minified": False,
++        "saved_chars": 0,
++    }
++    if not text:
++        return text, stats
++    lines = _fold_text_steps(text, stats)
++    folded = "\n".join(lines)
++    mini = _json_minified(folded)
++    if mini is not None:
++        stats["json_minified"] = True
++        folded = mini
++    else:
++        folded = "\n".join(_fold_runs(lines, stats))
++    if len(folded) > len(text):  # cannot happen; keep the invariant explicit
++        return text, {**stats, "saved_chars": 0}
++    stats["saved_chars"] = len(text) - len(folded)
++    return folded, stats
++
++
++# --------------------------------------------------------------------------
++# E10: template masking (shared by _log_fingerprint and _error_fp)
++# --------------------------------------------------------------------------
++
++_M_DQ = re.compile(r'"[^"\n]{0,200}"')
++_M_SQ = re.compile(r"(?<![\w'])'[^'\n]{0,200}'(?![\w'])")
++_M_TS = re.compile(
++    r"\b\d{4}-\d{2}-\d{2}(?:[t ]\d{2}:\d{2}:\d{2}(?:[.,]\d{1,9})?(?:z|[+-]\d{2}:?\d{2})?)?"
++    r"|\b\d{1,2}:\d{2}:\d{2}(?:[.,]\d{1,9})?"
++)
++_M_UUID = re.compile(r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}")
++_M_IP4 = re.compile(r"\b\d{1,3}(?:\.\d{1,3}){3}(?::\d{1,5})?\b")
++_M_IP6 = re.compile(r"(?<![\w:])(?:[0-9a-f]{1,4}:){2,7}[0-9a-f]{1,4}(?![\w:])")
++_M_PATH = re.compile(r"(?<![\w<>/.:=-])(?:/[\w.@+~%,=-]{1,128}){3,}/?")
++_M_DUR = re.compile(r"\b\d+(?:\.\d+)?(?:ms|us|µs|s|m|h)\b")
++_M_HEX = re.compile(r"[0-9a-f]{6,}")
++_M_DIGITS = re.compile(r"\d+")
++
++
++def mask_template(s: str) -> str:
++    """Mask the volatile fields of one (already lowercased) log line.
++
++    Quoted strings -> ``"<str>"``, ISO-8601 timestamps and ``HH:MM:SS(.fff)``
++    -> ``<ts>``, UUIDs -> ``<uuid>``, IPv4/IPv6 -> ``<ip>``, paths of three or
++    more segments -> ``<path>``, durations -> ``<dur>``, hex runs of 6+ ->
++    ``<hex>``, then digits -> ``#`` and whitespace collapsed. Callers apply
++    their own length cap.
++    """
++    s = _M_DQ.sub('"<str>"', s)
++    s = _M_SQ.sub('"<str>"', s)
++    s = _M_TS.sub("<ts>", s)
++    s = _M_UUID.sub("<uuid>", s)
++    s = _M_IP4.sub("<ip>", s)
++    s = _M_IP6.sub("<ip>", s)
++    s = _M_PATH.sub("<path>", s)
++    s = _M_DUR.sub("<dur>", s)
++    s = _M_HEX.sub("<hex>", s)
++    s = _M_DIGITS.sub("#", s)
++    return " ".join(s.split())
++
++
++# --------------------------------------------------------------------------
++# E11: json_brief
++# --------------------------------------------------------------------------
++
++_MAX_KEYS = 20
++_MAX_NOTABLE = 5
++_LOWCARD_MAX = 10
++
++
++def _dumps(obj: Any) -> str:
++    # allow_nan=False: NaN/Infinity are not valid JSON, and the brief must be.
++    return json.dumps(obj, separators=(",", ":"), ensure_ascii=False, allow_nan=False)
++
++
++def _find_rows(obj: Any) -> tuple[list[dict], str | None, dict] | None:
++    """(rows, wrapper_key, scalar_siblings) for an applicable JSON value."""
++    if isinstance(obj, list):
++        if obj and all(isinstance(x, dict) for x in obj):
++            return obj, None, {}
++        return None
++    if isinstance(obj, dict):
++        best_key = None
++        best_len = -1
++        for k, v in obj.items():
++            if isinstance(v, (list, dict)):
++                ln = len(_dumps(v))
++                if ln > best_len:
++                    best_key, best_len = k, ln
++        if best_key is None:
++            return None
++        v = obj[best_key]
++        if (
++            isinstance(v, list)
++            and len(v) >= 10
++            and all(isinstance(x, dict) for x in v)
++        ):
++            scalars = {
++                k: x
++                for k, x in obj.items()
++                if k != best_key and (x is None or isinstance(x, (str, int, float, bool)))
++            }
++            return v, best_key, scalars
++    return None
++
++
++def _query_terms(query: str) -> list[str]:
++    if not query:
++        return []
++    from .compress_context import _query_hit_terms  # lazy: avoids an import cycle
++
++    return _query_hit_terms(query)
++
++
++def _notable_order(rows: list[dict], dumped: list[str], terms: list[str]) -> list[int]:
++    """Indices of notable rows, best first: query hits, then rare field values."""
++    n = len(rows)
++    ranked: list[tuple[int, int, int]] = []  # (class, rarity, index)
++    seen: set[int] = set()
++    if terms:
++        from .compress_context import _term_in_text  # lazy, see above
++
++        term_rows: list[tuple[int, list[str]]] = []
++        for i, d in enumerate(dumped):
++            low = d[:4000].casefold()
++            hit_terms = [t for t in terms if _term_in_text(t, low)]
++            term_rows.append((i, hit_terms))
++        freq = Counter(t for _, ht in term_rows for t in ht)
++        for i, ht in term_rows:
++            # a term present in over half the rows (a key name such as
++            # "status") says nothing about which row matters
++            hits = sum(1 for t in ht if freq[t] * 2 <= n)
++            if hits:
++                ranked.append((0, -hits, i))
++                seen.add(i)
++    # Low-cardinality scalar fields: rows whose value is not the field's mode.
++    counts: dict[str, Counter] = {}
++    for row in rows:
++        for k, v in row.items():
++            if v is None or isinstance(v, (str, int, float, bool)):
++                c = counts.get(k)
++                if c is None:
++                    c = counts[k] = Counter()
++                if len(c) <= _LOWCARD_MAX:
++                    c[(type(v).__name__, v)] += 1
++    lowcard = {
++        k: c
++        for k, c in counts.items()
++        if 2 <= len(c) <= _LOWCARD_MAX and sum(c.values()) >= n * 0.9
++    }
++    modes = {k: c.most_common(1)[0][0] for k, c in lowcard.items()}
++    for i, row in enumerate(rows):
++        if i in seen:
++            continue
++        rarest = None
++        for k, c in lowcard.items():
++            if k in row:
++                v = row[k]
++                key = (type(v).__name__, v)
++                if key != modes[k] and key in c:
++                    rarest = c[key] if rarest is None else min(rarest, c[key])
++        if rarest is not None:
++            ranked.append((1, rarest, i))
++    ranked.sort()
++    return [i for _, _, i in ranked]
++
++
++def json_brief(text: str, *, budget_chars: int, query: str = "") -> str | None:
++    """See :func:`_json_brief`; returns None for non-finite numbers too."""
++    try:
++        return _json_brief(text, budget_chars=budget_chars, query=query)
++    except ValueError:  # NaN/Infinity cannot be written as valid JSON
++        return None
++
++
++def _json_brief(text: str, *, budget_chars: int, query: str = "") -> str | None:
++    """Valid-JSON structural brief of a JSON array of objects (v1.4.0).
++
++    Applies to a JSON array of objects, and to an object whose largest value
++    is an array of >=10 objects. Output::
++
++        {"_count": N, "_keys": [first 20 keys], "_head": [first K items],
++         "_tail": [last K items], "_notable": [<=5 items], "_omitted": M}
++
++    ``_notable`` holds items (not already in head/tail) that contain a query
++    term or whose low-cardinality field (e.g. ``status``) differs from that
++    field's mode, rarest first. ``_omitted`` counts the items shown nowhere.
++    For the object case the brief sits under the array's key beside the
++    object's other scalar keys. K is the largest value (>=1) that fits
++    ``budget_chars``. Returns ``None`` when the text is not applicable or even
++    K=1 does not fit.
++    """
++    if not isinstance(text, str) or text.lstrip()[:1] not in ("{", "["):
++        return None
++    try:
++        obj = json.loads(text)
++    except (ValueError, RecursionError):
++        return None
++    found = _find_rows(obj)
++    if found is None:
++        return None
++    rows, wrap_key, scalars = found
++    n = len(rows)
++    budget = int(budget_chars)
++
++    prefix = suffix = ""
++    if wrap_key is not None:
++        prefix = "{" + _dumps(wrap_key) + ":"
++        suffix = "".join("," + _dumps(k) + ":" + _dumps(v) for k, v in scalars.items()) + "}"
++    inner_budget = budget - len(prefix) - len(suffix)
++    if inner_budget <= 0:
++        return None
++
++    keys: list[str] = []
++    seen_keys: set[str] = set()
++    for row in rows:
++        for k in row:
++            if k not in seen_keys:
++                seen_keys.add(k)
++                if len(keys) < _MAX_KEYS:
++                    keys.append(k)
++    dumped = [_dumps(r) for r in rows]
++    # prefix sums so a candidate K costs O(1) to size
++    pre = [0] * (n + 1)
++    for i, d in enumerate(dumped):
++        pre[i + 1] = pre[i] + len(d) + 1
++    head_overhead = len('{"_count":%d,"_keys":%s,"_head":[],"_tail":[],"_notable":[],"_omitted":%d}' % (n, _dumps(keys), n))
++
++    def parts(k: int) -> tuple[list[int], list[int]]:
++        head = list(range(min(k, n)))
++        tail = list(range(max(len(head), n - k), n))
++        return head, tail
++
++    def size(head: list[int], tail: list[int], notable: list[int]) -> int:
++        tot = head_overhead
++        for grp in (head, tail, notable):
++            tot += sum(len(dumped[i]) + 1 for i in grp)
++        return tot
++
++    notable_all = [i for i in _notable_order(rows, dumped, _query_terms(query))]
++
++    def build(k: int, notable_cap: int) -> tuple[str, int] | None:
++        head, tail = parts(k)
++        shown = set(head) | set(tail)
++        notable = [i for i in notable_all if i not in shown][:notable_cap]
++        if size(head, tail, notable) > inner_budget + 3 * len(notable) + 4:
++            return None
++        omitted = n - len(shown) - len(notable)
++        body = (
++            '{"_count":%d,"_keys":%s,"_head":[%s],"_tail":[%s],"_notable":[%s],"_omitted":%d}'
++            % (
++                n,
++                _dumps(keys),
++                ",".join(dumped[i] for i in head),
++                ",".join(dumped[i] for i in tail),
++                ",".join(dumped[i] for i in sorted(notable)),
++                omitted,
++            )
++        )
++        return (body, len(body)) if len(body) <= inner_budget else None
++
++    for cap in (_MAX_NOTABLE, 2, 0):
++        # Largest K that fits (size grows with K): binary search, K in [1, n].
++        lo, hi, best = 1, max(1, n // 2 + 1), None
++        if build(1, cap) is None:
++            continue
++        while lo <= hi:
++            mid = (lo + hi) // 2
++            r = build(mid, cap)
++            if r is not None:
++                best, lo = r, mid + 1
++            else:
++                hi = mid - 1
++        if best is not None:
++            return prefix + best[0] + suffix
++    return None
+diff --git a/src/tameru/format_adapters.py b/src/tameru/format_adapters.py
+index bebac9b..5ef3a82 100644
+--- a/src/tameru/format_adapters.py
++++ b/src/tameru/format_adapters.py
+@@ -9,6 +9,15 @@ import xml.etree.ElementTree as ET
+ from dataclasses import asdict, dataclass
+ from typing import Callable
+ 
++from .agent_formats import (
++    code_vetoes_yaml,
++    detect_grep_lines,
++    detect_test_runner,
++    detect_unified_diff,
++    is_numbered_code,
++    looks_like_code,
++    rejects_table,
++)
+ from .contract_gates import GENERIC_WORDS, distinctive_query_terms
+ from .unicode_profile import graphemes, matching_shadow, search_units
+ 
+@@ -124,6 +133,35 @@ def _json_loads(value: str):
+         return None
+ 
+ 
++def _with_gaps(
++    units: list[str],
++    keep: list[bool],
++    sep: str,
++    gap_marker: Callable[[int, int], str] | None,
++    total_chars: int,
++) -> list[str]:
++    """``units`` that are kept, with ONE marker per contiguous omitted run
++    (leading and trailing runs included). All-blank runs carry nothing and get
++    no marker. ``gap_marker(omitted_chars, total_chars)``."""
++    out: list[str] = []
++    run: list[str] = []
++    for unit, kept in zip(units, keep):
++        if kept:
++            if run:
++                dropped = sep.join(run)
++                if dropped.strip():
++                    out.append(str(gap_marker(len(dropped), total_chars)))
++                run = []
++            out.append(unit)
++        else:
++            run.append(unit)
++    if run:
++        dropped = sep.join(run)
++        if dropped.strip():
++            out.append(str(gap_marker(len(dropped), total_chars)))
++    return out
++
++
+ def _looks_ndjson(text: str) -> bool:
+     lines = [line for line in text.splitlines() if line.strip()]
+     if len(lines) < 2:
+@@ -222,7 +260,24 @@ def detect_format(text: str) -> str:
+             return "xml"
+     if _looks_ndjson(value):
+         return "ndjson"
++    if stripped[:1] in {"{", "["} and _json_loads(stripped) is not None:
++        return "json"
++    # v1.4.0 (E4): agent outputs that are NOT tables run before the table
++    # detectors — a numbered read is a two-column TSV, Python is "YAML".
++    if detect_unified_diff(value):
++        return "diff"
++    if detect_grep_lines(value):
++        return "grep"
++    if is_numbered_code(value):
++        return "numbered_code"
++    if detect_test_runner(value):
++        return "test_output"  # pytest/jest/go/cargo: not YAML ("failures:")
++    is_code = looks_like_code(value)
++    if is_code:
++        return "code"
+     delimiter = _detect_delimiter(value)
++    if delimiter and rejects_table(value, stable_columns=False):
++        delimiter = None  # code with commas/tabs, not a table
+     if delimiter == "\t":
+         return "tsv"
+     if delimiter == ",":
+@@ -244,10 +299,8 @@ def detect_format(text: str) -> str:
+         r"(?m)^[ \t]+(?:[-?][ \t]+)?[^\s:#][^:\n]{0,120}:\s*(?:\S.*)?$",
+         value,
+     )
+-    if yaml_parent and yaml_child:
++    if yaml_parent and yaml_child and not code_vetoes_yaml(value):
+         return "yaml"
+-    if stripped[:1] in {"{", "["} and _json_loads(stripped) is not None:
+-        return "json"
+     if _looks_vertical(value):
+         return "vertical"
+     return "text"
+@@ -256,11 +309,14 @@ def detect_format(text: str) -> str:
+ _VERTICAL_MARKUP_RE = re.compile(r"writing-mode\s*:", re.IGNORECASE)
+ 
+ 
+-def _adapt_ndjson(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> FormatResult:
++def _adapt_ndjson(
++    text: str, selectors: tuple[str, ...], limits: FormatLimits, gap_marker: Callable[[int, int], str] | None = None
++) -> FormatResult:
+     lines = [line for line in text.splitlines() if line.strip()]
+     if len(lines) > limits.max_records:
+         return _decline(text, "ndjson", "record limit exceeded", total_records=len(lines))
+     kept: list[str] = []
++    flags: list[bool] = []
+     for line in lines:
+         if len(line) > limits.max_record_chars or _json_loads(line) is None:
+             return _decline(
+@@ -270,14 +326,17 @@ def _adapt_ndjson(text: str, selectors: tuple[str, ...], limits: FormatLimits) -
+                 total_records=len(lines),
+                 structurally_valid=False,
+             )
+-        if _contains_selector(line, selectors):
++        hit = _contains_selector(line, selectors)
++        flags.append(hit)
++        if hit:
+             kept.append(line)
+     if not kept or len(kept) == len(lines):
+         return _decline(text, "ndjson", "no selective record match", total_records=len(lines))
++    out_lines = kept if gap_marker is None else _with_gaps(lines, flags, "\n", gap_marker, len(text))
+     return FormatResult(
+         format="ndjson",
+         applied=True,
+-        text=_line_separator(text).join(kept),
++        text=_line_separator(text).join(out_lines),
+         total_records=len(lines),
+         kept_records=len(kept),
+         reason="exact matching NDJSON records",
+@@ -290,6 +349,7 @@ def _adapt_delimited(
+     limits: FormatLimits,
+     delimiter: str,
+     format_name: str,
++    gap_marker: Callable[[int, int], str] | None = None,
+ ) -> FormatResult:
+     records = _split_delimited_records(text)
+     if records is None:
+@@ -302,11 +362,20 @@ def _adapt_delimited(
+     width = len(parsed[0] or [])
+     if width < 2 or any(len(row or []) != width for row in parsed[1:]):
+         return _decline(text, format_name, "inconsistent field count", structurally_valid=False)
+-    kept = [record for record, row in zip(records[1:], parsed[1:]) if _contains_selector("\t".join(row or []), selectors)]
++    flags = [
++        _contains_selector("\t".join(row or []), selectors) for row in parsed[1:]
++    ]
++    kept = [record for record, hit in zip(records[1:], flags) if hit]
+     total = max(0, len(records) - 1)
+     if not kept or len(kept) == total:
+         return _decline(text, format_name, "no selective record match", total_records=total)
+-    result_records = [records[0], *kept]
++    if gap_marker is None:
++        result_records = [records[0], *kept]
++    else:
++        result_records = [
++            records[0],
++            *_with_gaps(records[1:], flags, "\n", gap_marker, len(text)),
++        ]
+     return FormatResult(
+         format=format_name,
+         applied=True,
+@@ -317,7 +386,9 @@ def _adapt_delimited(
+     )
+ 
+ 
+-def _adapt_markdown(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> FormatResult:
++def _adapt_markdown(
++    text: str, selectors: tuple[str, ...], limits: FormatLimits, gap_marker: Callable[[int, int], str] | None = None
++) -> FormatResult:
+     del limits
+     lines = text.splitlines()
+     sections: list[tuple[list[str], list[str]]] = []
+@@ -355,12 +426,20 @@ def _adapt_markdown(text: str, selectors: tuple[str, ...], limits: FormatLimits)
+         else:
+             current.append(line)
+     flush()
+-    selected = [(parents, body) for parents, body in sections if _contains_selector("\n".join(body), selectors)]
++    flags = [_contains_selector("\n".join(body), selectors) for _, body in sections]
++    selected = [section for section, hit in zip(sections, flags) if hit]
+     if not selected or len(selected) == len(sections):
+         return _decline(text, "markdown", "no selective section match", total_records=len(sections))
+     output: list[str] = []
+     seen_headings: set[str] = set()
+-    for parents, body in selected:
++    run_start = 0  # first section not yet emitted or accounted for as omitted
++    selected_ids = [i for i, hit in enumerate(flags) if hit]
++    for position, (parents, body) in zip(selected_ids, selected):
++        if gap_marker is not None and position > run_start:
++            dropped = "\n".join("\n".join(sections[i][1]) for i in range(run_start, position))
++            if dropped.strip():
++                output.append(str(gap_marker(len(dropped), len(text))))
++        run_start = position + 1
+         for heading in parents:
+             if heading not in seen_headings:
+                 output.append(heading)
+@@ -370,6 +449,10 @@ def _adapt_markdown(text: str, selectors: tuple[str, ...], limits: FormatLimits)
+         output.extend(body)
+         if body and body[0].startswith("#"):
+             seen_headings.add(body[0])
++    if gap_marker is not None and run_start < len(sections):
++        dropped = "\n".join("\n".join(sections[i][1]) for i in range(run_start, len(sections)))
++        if dropped.strip():
++            output.append(str(gap_marker(len(dropped), len(text))))
+     return FormatResult(
+         format="markdown",
+         applied=True,
+@@ -384,7 +467,9 @@ def _indent(line: str) -> int:
+     return len(line) - len(line.lstrip(" "))
+ 
+ 
+-def _adapt_yaml(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> FormatResult:
++def _adapt_yaml(
++    text: str, selectors: tuple[str, ...], limits: FormatLimits, gap_marker: Callable[[int, int], str] | None = None
++) -> FormatResult:
+     del limits
+     lines = text.splitlines()
+     selected: set[int] = set()
+@@ -425,7 +510,11 @@ def _adapt_yaml(text: str, selectors: tuple[str, ...], limits: FormatLimits) ->
+             selected.add(index)
+     if not selected or len(selected) >= len(lines):
+         return _decline(text, "yaml", "no selective subtree match", total_records=len(nonblank))
+-    output = "\n".join(lines[index] for index in sorted(selected)).strip("\n")
++    if gap_marker is None:
++        output = "\n".join(lines[index] for index in sorted(selected)).strip("\n")
++    else:
++        flags = [index in selected for index in range(len(lines))]
++        output = "\n".join(_with_gaps(lines, flags, "\n", gap_marker, len(text))).strip("\n")
+     return FormatResult(
+         format="yaml",
+         applied=True,
+@@ -436,7 +525,9 @@ def _adapt_yaml(text: str, selectors: tuple[str, ...], limits: FormatLimits) ->
+     )
+ 
+ 
+-def _adapt_xml(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> FormatResult:
++def _adapt_xml(
++    text: str, selectors: tuple[str, ...], limits: FormatLimits, gap_marker: Callable[[int, int], str] | None = None
++) -> FormatResult:
+     del limits
+     upper = text.upper()
+     if "<!DOCTYPE" in upper or "<!ENTITY" in upper:
+@@ -453,13 +544,15 @@ def _adapt_xml(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> F
+             ET.fromstring(child)
+         except (ET.ParseError, RecursionError):
+             return _decline(text, "xml", "child spans multiple lines", structurally_valid=True)
+-    kept = [child for child in children if _contains_selector(child, selectors)]
++    flags = [_contains_selector(child, selectors) for child in children]
++    kept = [child for child, hit in zip(children, flags) if hit]
+     if not kept or len(kept) == len(children):
+         return _decline(text, "xml", "no selective child match", total_records=len(children))
++    body = kept if gap_marker is None else _with_gaps(children, flags, "\n", gap_marker, len(text))
+     return FormatResult(
+         format="xml",
+         applied=True,
+-        text="\n".join([lines[0], *kept, lines[-1]]),
++        text="\n".join([lines[0], *body, lines[-1]]),
+         total_records=len(children),
+         kept_records=len(kept),
+         reason="balanced root plus exact child elements",
+@@ -539,7 +632,9 @@ def _split_sql_statements(text: str) -> list[str] | None:
+     return statements
+ 
+ 
+-def _adapt_sql(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> FormatResult:
++def _adapt_sql(
++    text: str, selectors: tuple[str, ...], limits: FormatLimits, gap_marker: Callable[[int, int], str] | None = None
++) -> FormatResult:
+     statements = _split_sql_statements(text)
+     if statements is None:
+         return _decline(text, "sql", "unterminated SQL quote or comment", structurally_valid=False)
+@@ -547,20 +642,24 @@ def _adapt_sql(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> F
+         return _decline(text, "sql", "record limit exceeded", total_records=len(statements))
+     if any(len(statement) > limits.max_record_chars for statement in statements):
+         return _decline(text, "sql", "statement size limit exceeded")
+-    kept = [statement for statement in statements if _contains_selector(statement, selectors)]
++    flags = [_contains_selector(statement, selectors) for statement in statements]
++    kept = [statement for statement, hit in zip(statements, flags) if hit]
+     if not kept or len(kept) == len(statements):
+         return _decline(text, "sql", "no selective statement match", total_records=len(statements))
++    body = kept if gap_marker is None else _with_gaps(statements, flags, "\n", gap_marker, len(text))
+     return FormatResult(
+         format="sql",
+         applied=True,
+-        text="\n".join(kept),
++        text="\n".join(body),
+         total_records=len(statements),
+         kept_records=len(kept),
+         reason="exact matching SQL statements",
+     )
+ 
+ 
+-def _adapt_ini(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> FormatResult:
++def _adapt_ini(
++    text: str, selectors: tuple[str, ...], limits: FormatLimits, gap_marker: Callable[[int, int], str] | None = None
++) -> FormatResult:
+     del limits
+     lines = text.splitlines()
+     starts = [index for index, line in enumerate(lines) if re.match(r"^\s*\[[^\]]+\]\s*$", line)]
+@@ -570,13 +669,15 @@ def _adapt_ini(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> F
+     for position, start in enumerate(starts):
+         end = starts[position + 1] if position + 1 < len(starts) else len(lines)
+         sections.append("\n".join(lines[start:end]).strip("\n"))
+-    kept = [section for section in sections if _contains_selector(section, selectors)]
++    flags = [_contains_selector(section, selectors) for section in sections]
++    kept = [section for section, hit in zip(sections, flags) if hit]
+     if not kept or len(kept) == len(sections):
+         return _decline(text, "ini", "no selective section match", total_records=len(sections))
++    body = kept if gap_marker is None else _with_gaps(sections, flags, "\n\n", gap_marker, len(text))
+     return FormatResult(
+         format="ini",
+         applied=True,
+-        text="\n\n".join(kept),
++        text="\n\n".join(body),
+         total_records=len(sections),
+         kept_records=len(kept),
+         reason="exact matching INI/TOML sections",
+@@ -588,7 +689,9 @@ _HTML_CLOSE_WRAPPER_RE = re.compile(r"^\s*</(?:body|html)>\s*$", re.IGNORECASE)
+ _HTML_CHILD_RE = re.compile(r"^\s*<([A-Za-z][\w:-]*)(?:\s[^>]*)?>.*</\1>\s*$", re.IGNORECASE)
+ 
+ 
+-def _adapt_html(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> FormatResult:
++def _adapt_html(
++    text: str, selectors: tuple[str, ...], limits: FormatLimits, gap_marker: Callable[[int, int], str] | None = None
++) -> FormatResult:
+     del limits
+     lines = [line for line in text.splitlines() if line.strip()]
+     opening: list[str] = []
+@@ -605,39 +708,51 @@ def _adapt_html(text: str, selectors: tuple[str, ...], limits: FormatLimits) ->
+             return _decline(text, "html", "child spans multiple lines")
+     if not opening or not closing or not children:
+         return _decline(text, "html", "missing line-oriented wrappers or children")
+-    kept = [child for child in children if _contains_selector(child, selectors)]
++    flags = [_contains_selector(child, selectors) for child in children]
++    kept = [child for child, hit in zip(children, flags) if hit]
+     if not kept or len(kept) == len(children):
+         return _decline(text, "html", "no selective child match", total_records=len(children))
++    body = kept if gap_marker is None else _with_gaps(children, flags, "\n", gap_marker, len(text))
+     return FormatResult(
+         format="html",
+         applied=True,
+-        text="\n".join([*opening, *kept, *closing]),
++        text="\n".join([*opening, *body, *closing]),
+         total_records=len(children),
+         kept_records=len(kept),
+         reason="HTML wrappers plus exact child elements",
+     )
+ 
+ 
+-def _adapt_vertical(text: str, selectors: tuple[str, ...], limits: FormatLimits) -> FormatResult:
++def _adapt_vertical(
++    text: str, selectors: tuple[str, ...], limits: FormatLimits, gap_marker: Callable[[int, int], str] | None = None
++) -> FormatResult:
+     del limits
+     blocks = [block for block in re.split(r"(?:\r?\n){2,}", text) if block.strip()]
+-    kept = [block for block in blocks if _contains_selector("".join(block.splitlines()), selectors)]
++    flags = [_contains_selector("".join(block.splitlines()), selectors) for block in blocks]
++    kept = [block for block, hit in zip(blocks, flags) if hit]
+     if not kept or len(kept) == len(blocks):
+         return _decline(text, "vertical", "no selective vertical column match", total_records=len(blocks))
++    body = kept if gap_marker is None else _with_gaps(blocks, flags, "\n\n", gap_marker, len(text))
+     return FormatResult(
+         format="vertical",
+         applied=True,
+-        text="\n\n".join(kept),
++        text="\n\n".join(body),
+         total_records=len(blocks),
+         kept_records=len(kept),
+         reason="matching logical-order OCR columns",
+     )
+ 
+ 
+-_ADAPTERS: dict[str, Callable[[str, tuple[str, ...], FormatLimits], FormatResult]] = {
++_GapMarker = Callable[[int, int], str] | None
++
++_ADAPTERS: dict[str, Callable[..., FormatResult]] = {
+     "ndjson": _adapt_ndjson,
+-    "csv": lambda text, selectors, limits: _adapt_delimited(text, selectors, limits, ",", "csv"),
+-    "tsv": lambda text, selectors, limits: _adapt_delimited(text, selectors, limits, "\t", "tsv"),
++    "csv": lambda text, selectors, limits, gap_marker=None: _adapt_delimited(
++        text, selectors, limits, ",", "csv", gap_marker
++    ),
++    "tsv": lambda text, selectors, limits, gap_marker=None: _adapt_delimited(
++        text, selectors, limits, "\t", "tsv", gap_marker
++    ),
+     "markdown": _adapt_markdown,
+     "yaml": _adapt_yaml,
+     "xml": _adapt_xml,
+@@ -654,7 +769,14 @@ def adapt_format(
+     limits: FormatLimits | None = None,
+     *,
+     format_name: str | None = None,
++    gap_marker: _GapMarker = None,
+ ) -> FormatResult:
++    """Run the extractive adapter for ``format_name`` (detected when omitted).
++
++    ``gap_marker(omitted_chars, total_chars)``: when given, every contiguous
++    run of dropped records/sections/lines is replaced by one marker line. With
++    ``None`` the output is byte-identical to earlier releases.
++    """
+     value = str(text or "")
+     resolved_format = format_name or detect_format(value)
+     selectors = _query_selectors(query)
+@@ -663,4 +785,4 @@ def adapt_format(
+     adapter = _ADAPTERS.get(resolved_format)
+     if adapter is None:
+         return _decline(value, resolved_format, "no safe extractive adapter")
+-    return adapter(value, selectors, limits or FormatLimits())
++    return adapter(value, selectors, limits or FormatLimits(), gap_marker)
+diff --git a/src/tameru/industrial.py b/src/tameru/industrial.py
+index 67b370c..a4fb0c2 100644
+--- a/src/tameru/industrial.py
++++ b/src/tameru/industrial.py
+@@ -2,6 +2,7 @@
+ from __future__ import annotations
+ 
+ from dataclasses import asdict, dataclass, replace
++from typing import Callable
+ 
+ from .format_adapters import FormatLimits, FormatResult, adapt_format, detect_format
+ from .unicode_profile import profile_text, unicode_safety_counts
+@@ -138,6 +139,8 @@ def industrial_preprocess(
+     text: str,
+     query: str,
+     limits: IndustrialLimits | None = None,
++    *,
++    gap_marker: Callable[[int, int], str] | None = None,
+ ) -> IndustrialResult:
+     value = str(text or "")
+     resolved = limits or IndustrialLimits()
+@@ -178,6 +181,7 @@ def industrial_preprocess(
+         query,
+         resolved.format_limits(),
+         format_name=profile.format,
++        gap_marker=gap_marker,
+     )
+     if not format_result.structurally_valid:
+         return IndustrialResult(
+diff --git a/tests/test_adapter_markers.py b/tests/test_adapter_markers.py
+new file mode 100644
+index 0000000..a159655
+--- /dev/null
++++ b/tests/test_adapter_markers.py
+@@ -0,0 +1,156 @@
++"""E8 completion: every industrial format-adapter cut carries a gap marker when
++``gap_marker`` is given, and the output is byte-identical when it is ``None``."""
++import re
++
++import pytest
++
++from tameru.compress_context import compress_context, preprocess_csv
++from tameru.format_adapters import adapt_format, detect_format
++
++MARK = "<<GAP>>"
++
++
++def marker(omitted: int, total: int) -> str:
++    return f"<<GAP {omitted}/{total}>>"
++
++
++def _csv(sep: str) -> str:
++    rows = [sep.join(["id", "name", "status"])]
++    rows += [sep.join([str(i), f"item-{i:02d}", "ok"]) for i in range(1, 21)]
++    return "\n".join(rows)
++
++
++def _ndjson() -> str:
++    return "\n".join(f'{{"id": {i}, "name": "item-{i:02d}"}}' for i in range(12))
++
++
++def _markdown() -> str:
++    parts = ["# Runbook", "intro text"]
++    for i in range(8):
++        parts += ["", f"## Step {i}", f"do thing-{i:02d} carefully"]
++    return "\n".join(parts)
++
++
++def _yaml() -> str:
++    return "\n".join(
++        [
++            "alpha:", "  x: 1",
++            "bravo:", "  y: target-one",
++            "charlie:", "  z: 3",
++            "delta:", "  w: target-two",
++            "echo:", "  v: 5",
++        ]
++    )
++
++
++def _xml() -> str:
++    return "\n".join(
++        ["<records>"]
++        + [f'<rec id="{i}">item-{i:02d}</rec>' for i in range(10)]
++        + ["</records>"]
++    )
++
++
++def _sql() -> str:
++    return "\n".join(f"INSERT INTO t VALUES ({i}, 'item-{i:02d}');" for i in range(12))
++
++
++def _ini() -> str:
++    return "\n\n".join(f"[sec{i}]\nname = item-{i:02d}\nport = {8000 + i}" for i in range(8))
++
++
++def _html() -> str:
++    return "\n".join(
++        ["<!doctype html>", "<html>", "<body>"]
++        + [f"<p>item-{i:02d}</p>" for i in range(10)]
++        + ["</body>", "</html>"]
++    )
++
++
++# format, text, query, expected number of runs
++CASES = [
++    ("csv", _csv(","), "item-05 item-12", 3),
++    ("tsv", _csv("\t"), "item-05 item-12", 3),
++    ("ndjson", _ndjson(), "item-03 item-08", 3),
++    ("markdown", _markdown(), "thing-02 thing-05", 3),
++    ("yaml", _yaml(), "target-one target-two", 3),
++    ("xml", _xml(), "item-02 item-06", 3),
++    ("sql", _sql(), "item-03 item-08", 3),
++    ("ini", _ini(), "item-02 item-05", 3),
++    ("html", _html(), "item-02 item-06", 3),
++]
++
++
++@pytest.mark.parametrize("fmt,text,query,runs", CASES, ids=[c[0] for c in CASES])
++def test_every_cut_is_marked(fmt, text, query, runs):
++    assert detect_format(text) == fmt
++    plain = adapt_format(text, query)
++    marked = adapt_format(text, query, gap_marker=marker)
++    assert plain.applied and marked.applied
++    marker_lines = [ln for ln in marked.text.split("\n") if ln.startswith("<<GAP ")]
++    assert len(marker_lines) == runs
++    # removing the markers gives back exactly what the unmarked adapter emits
++    stripped = "\n".join(ln for ln in marked.text.split("\n") if not ln.startswith("<<GAP "))
++    if fmt in {"markdown", "ini"}:  # blank-line separated: a marker sits between blanks
++        stripped = re.sub(r"\n{3,}", "\n\n", stripped).strip("\n")
++        assert re.sub(r"\n{3,}", "\n\n", plain.text) == stripped
++    else:
++        assert stripped == plain.text
++    # total is the original length, and omitted chars are positive
++    for ln in marker_lines:
++        omitted, total = ln[len("<<GAP "):-2].split("/")
++        assert int(total) == len(text) and int(omitted) > 0
++    assert marked.kept_records == plain.kept_records
++
++
++@pytest.mark.parametrize("fmt,text,query,runs", CASES, ids=[c[0] for c in CASES])
++def test_none_marker_is_byte_identical(fmt, text, query, runs):
++    explicit = adapt_format(text, query, gap_marker=None)
++    default = adapt_format(text, query)
++    assert explicit == default
++    assert "GAP" not in default.text and "omitted" not in default.text
++
++
++def test_markers_stand_where_the_cut_was():
++    marked = adapt_format(_csv(","), "item-05 item-12", gap_marker=marker)
++    lines = marked.text.split("\n")
++    assert lines[0] == "id,name,status"
++    assert lines[1].startswith("<<GAP ") and lines[2].startswith("5,item-05")
++    assert lines[3].startswith("<<GAP ") and lines[4].startswith("12,item-12")
++    assert lines[5].startswith("<<GAP ") and len(lines) == 6
++    first = len("\n".join(f"{i},item-{i:02d},ok" for i in range(1, 5)))
++    assert lines[1] == f"<<GAP {first}/{len(_csv(','))}>>"
++
++
++def test_leading_and_trailing_runs_in_ndjson():
++    marked = adapt_format(_ndjson(), "item-03 item-08", gap_marker=marker)
++    lines = marked.text.split("\n")
++    assert lines[0].startswith("<<GAP ") and lines[-1].startswith("<<GAP ")
++
++
++def test_engine_wiring_total_is_the_callers_length():
++    text = _csv(",") + "\n"
++    result = compress_context(text, "item-05 item-12", ccr=False, citations=False, gap_marker=marker)
++    assert result.receipt["industrial"]["applied"]
++    assert result.compressed_text.count("<<GAP ") == 3
++    assert f"/{len(text)}>>" in result.compressed_text
++    plain = compress_context(text, "item-05 item-12", ccr=False, citations=False)
++    assert "GAP" not in plain.compressed_text
++    again = compress_context(text, "item-05 item-12", ccr=False, citations=False, gap_marker=None)
++    assert again.compressed_text == plain.compressed_text
++
++
++def test_preprocess_csv_marks_cuts_too():
++    text = _csv(",")
++    plain = preprocess_csv(text, "item-05 item-12")
++    marked = preprocess_csv(text, "item-05 item-12", gap_marker=marker)
++    assert preprocess_csv(text, "item-05 item-12", gap_marker=None) == plain
++    assert marked.count("<<GAP ") == 3
++    assert "\n".join(ln for ln in marked.split("\n") if not ln.startswith("<<GAP ")) == plain
++
++
++def test_blank_only_runs_get_no_marker():
++    text = "alpha:\n  x: target-one\n\n\n\nbravo:\n  y: 2\n"
++    marked = adapt_format(text, "target-one", gap_marker=marker)
++    # `bravo:` and its child are dropped (one marker); the blank lines are not a run of their own
++    assert marked.text.count("<<GAP ") == 1
+diff --git a/tests/test_code_not_csv.py b/tests/test_code_not_csv.py
+new file mode 100644
+index 0000000..a13b79a
+--- /dev/null
++++ b/tests/test_code_not_csv.py
+@@ -0,0 +1,143 @@
++"""E4: code is not CSV, TSV or YAML."""
++from tameru.compress_context import _looks_like_csv, compress_context, preprocess_csv
++from tameru.format_adapters import detect_format
++
++JS = """import { alpha, beta, gamma } from './lib';
++const config = { host: 'localhost', port: 8080 };
++
++function handleRequest(req, res) {
++  const { id, name } = req.params;
++  if (!id) {
++    return res.status(400).send('missing id');
++  }
++  const record = lookup(id, name, config);
++  return res.json({ id, name, record });
++}
++
++function special_handler(a, b, c) {
++  return [a, b, c].map((x) => x * 2);
++}
++
++export default handleRequest;
++""" + "\n".join(f"const v{i} = compute({i}, {i + 1}, {i + 2});" for i in range(30))
++
++TS = """export interface Row { id: number; a: string; b: string; c: string }
++export const rows: Row[] = [
++  { id: 1, a: 'x', b: 'y', c: 'z' },
++  { id: 2, a: 'x', b: 'y', c: 'z' },
++  { id: 3, a: 'x', b: 'y', c: 'z' },
++  { id: 4, a: 'x', b: 'y', c: 'z' },
++  { id: 5, a: 'x', b: 'y', c: 'z' },
++];
++export function pick(id: number, a: string, b: string): Row | undefined {
++  return rows.find((r) => r.id === id && r.a === a && r.b === b);
++}
++"""
++
++PY = '''import os
++from typing import Optional
++
++
++class Service:
++    """A service."""
++
++    def __init__(self, name: str, retries: int = 3):
++        self.name = name
++        self.retries = retries
++
++    def run(self, job):
++        try:
++            for attempt in range(self.retries):
++                if job.ready():
++                    return job.execute()
++        except TimeoutError as exc:
++            raise RuntimeError(str(exc))
++        else:
++            return None
++        finally:
++            cleanup(job)
++
++
++def main(argv=None):
++    with open(os.devnull) as sink:
++        svc = Service("x")
++        return svc.run(sink)
++'''
++
++CSV = "id,name,status,owner\n" + "\n".join(
++    f"{i},svc-{i},{'ok' if i % 5 else 'failed'},team-{i % 4}" for i in range(1, 40)
++)
++
++QUOTED_CSV = 'id,name,note\n' + "\n".join(
++    f'{i},"Smith, John {i}","said ""hi"", twice"' for i in range(1, 20)
++)
++
++
++def test_js_with_commas_in_its_first_line_is_not_csv():
++    assert not _looks_like_csv(JS)
++    assert preprocess_csv(JS, "what does special_handler do?") == JS
++    assert detect_format(JS) not in {"csv", "tsv", "yaml"}
++    result = compress_context(
++        JS, "what does special_handler do?", ccr=False, citations=False
++    )
++    assert result.content_type not in {"csv", "tsv"}
++    assert "return [a, b, c].map((x) => x * 2);" in result.compressed_text
++
++
++def test_ts_object_literals_are_not_csv():
++    assert not _looks_like_csv(TS)
++    assert detect_format(TS) not in {"csv", "tsv", "yaml"}
++
++
++def test_python_is_not_yaml():
++    assert detect_format(PY) not in {"yaml", "csv", "tsv", "markdown", "sql"}
++    result = compress_context(PY, "what does Service.run do on timeout?", ccr=False, citations=False)
++    assert result.content_type not in {"yaml", "csv", "tsv"}
++    assert not result.receipt["industrial"]["applied"]
++
++
++def test_python_with_comment_headings_is_not_markdown_or_sql():
++    py = "\n".join(
++        ["# Section one", "import os", ""]
++        + [
++            "with open(p) as f:",
++            "    data = f.read()",
++            "with lock:",
++            "    update(data)",
++            "# Section two",
++            "def f(x):",
++            "    return x",
++        ]
++        * 3
++    )
++    assert detect_format(py) not in {"markdown", "sql", "yaml"}
++
++
++def test_real_yaml_is_still_yaml():
++    yaml = "services:\n  api:\n    host: prod-77\n    port: 8080\n  db:\n    host: db-1\n"
++    assert detect_format(yaml) == "yaml"
++    gh = (
++        "jobs:\n  build:\n    runs-on: ubuntu-latest\n    steps:\n"
++        "      - name: Checkout\n        uses: actions/checkout@v4\n"
++        "      - name: Test\n        if: always()\n        with:\n          path: x\n"
++    )
++    assert detect_format(gh) == "yaml"
++
++
++def test_a_real_csv_is_still_detected_and_selected():
++    assert detect_format(CSV) == "csv"
++    assert _looks_like_csv(CSV)
++    kept = preprocess_csv(CSV, "which row is svc-7?")
++    assert "svc-7" in kept and len(kept.split("\n")) < len(CSV.split("\n"))
++    result = compress_context(CSV, "which row is svc-7?", ccr=False, citations=False)
++    assert result.content_type == "csv"
++
++
++def test_a_csv_with_quoted_commas_is_still_a_csv():
++    assert _looks_like_csv(QUOTED_CSV)
++    assert detect_format(QUOTED_CSV) == "csv"
++
++
++def test_sql_scripts_are_still_sql():
++    sql = "CREATE TABLE alpha (id int);\nCREATE TABLE beta (id int);\nINSERT INTO alpha VALUES (1);"
++    assert detect_format(sql) == "sql"
+diff --git a/tests/test_diff_grep_adapters.py b/tests/test_diff_grep_adapters.py
+new file mode 100644
+index 0000000..29ce4fd
+--- /dev/null
++++ b/tests/test_diff_grep_adapters.py
+@@ -0,0 +1,242 @@
++"""E5: unified-diff and grep/rg adapters."""
++import re
++
++from tameru.agent_formats import (
++    adapt_grep_lines,
++    adapt_unified_diff,
++    detect_grep_lines,
++    detect_unified_diff,
++)
++from tameru.compress_context import compress_context
++from tameru.format_adapters import detect_format
++
++
++def _diff(nfiles: int = 3, nh: int = 6) -> str:
++    out = []
++    for f in range(nfiles):
++        out += [
++            f"diff --git a/src/m{f}.py b/src/m{f}.py",
++            "index 111..222 100644",
++            f"--- a/src/m{f}.py",
++            f"+++ b/src/m{f}.py",
++        ]
++        for h in range(nh):
++            base = h * 40 + 1
++            out += [
++                f"@@ -{base},3 +{base},3 @@ def fn_{f}_{h}():",
++                " ctx a",
++                f"-    old_{f}_{h} = 1",
++                f"+    new_{f}_{h} = 2",
++                " ctx b",
++            ]
++    return "\n".join(out) + "\n"
++
++
++def _hunks(text: str) -> list[list[str]]:
++    hunks: list[list[str]] = []
++    for ln in text.split("\n"):
++        if ln.startswith("@@"):
++            hunks.append([ln])
++        elif hunks and ln[:1] in {" ", "-", "+"} and not ln.startswith(("--- ", "+++ ")):
++            hunks[-1].append(ln)
++    return hunks
++
++
++def _marker(omitted: int, total: int) -> str:
++    return f"<<gap {omitted}/{total}>>"
++
++
++class TestDiff:
++    def test_detection(self):
++        d = _diff()
++        assert detect_unified_diff(d)
++        assert detect_format(d) == "diff"
++        assert not detect_unified_diff("--- a\n+++ b\nnothing else")
++        assert not detect_unified_diff("just text\nwith lines\n")
++        assert adapt_unified_diff("not a diff", "x", gap_marker=None) is None
++
++    def test_file_headers_stats_and_hunk_headers_are_always_kept(self):
++        d = _diff()
++        res = adapt_unified_diff(d, "what changed in new_1_3?", gap_marker=None)
++        out = res.text
++        for f in range(3):
++            assert f"diff --git a/src/m{f}.py b/src/m{f}.py" in out
++            assert f"--- a/src/m{f}.py" in out and f"+++ b/src/m{f}.py" in out
++            assert f"# src/m{f}.py: +6 -6 in 6 hunks" in out
++        for f in range(3):
++            for h in range(6):
++                assert f"@@ -{h * 40 + 1},3 +{h * 40 + 1},3 @@ def fn_{f}_{h}():" in out
++
++    def test_query_matching_hunk_is_kept_whole_and_pairs_never_split(self):
++        res = adapt_unified_diff(_diff(), "what changed in new_1_3?", gap_marker=None)
++        assert res.kept_records == 1
++        for body in _hunks(res.text):
++            minus = [ln for ln in body if ln.startswith("-")]
++            plus = [ln for ln in body if ln.startswith("+")]
++            assert len(minus) == len(plus)  # a kept hunk has both sides
++            if body[1:]:
++                assert len(body) == 5  # header + ctx + - + + + ctx: never partial
++        assert "-    old_1_3 = 1" in res.text and "+    new_1_3 = 2" in res.text
++        assert "old_0_0" not in res.text and "old_2_5" not in res.text
++
++    def test_identifier_in_hunk_header_context_selects_the_hunk(self):
++        res = adapt_unified_diff(_diff(), "explain fn_2_4", gap_marker=None)
++        assert "+    new_2_4 = 2" in res.text
++        assert res.kept_records == 1
++
++    def test_path_in_query_keeps_that_files_hunks(self):
++        res = adapt_unified_diff(_diff(), "what changed in src/m1.py", gap_marker=None)
++        assert res.kept_records == 6
++        assert "new_1_0" in res.text and "new_0_0" not in res.text
++
++    def test_weak_or_empty_query_keeps_first_and_last_hunk_per_file(self):
++        for query in ("", "continue", "thanks"):
++            res = adapt_unified_diff(_diff(), query, gap_marker=None)
++            assert res.kept_records == 6  # 2 per file
++            for f in range(3):
++                assert f"new_{f}_0 = 2" in res.text and f"new_{f}_5 = 2" in res.text
++                assert f"new_{f}_2 = 2" not in res.text
++
++    def test_one_marker_per_contiguous_omitted_run(self):
++        res = adapt_unified_diff(_diff(nfiles=1, nh=8), "new_0_3 or new_0_6", gap_marker=None)
++        markers = re.findall(r"\[… (\d+) hunks? omitted …\]", res.text)
++        # hunks 0-2 | keep 3 | 4-5 | keep 6 | 7  -> three runs
++        assert markers == ["3", "2", "1"]
++        custom = adapt_unified_diff(_diff(nfiles=1, nh=8), "new_0_3 or new_0_6", gap_marker=_marker)
++        assert custom.text.count("<<gap") == 3
++        assert "omitted …" not in custom.text
++        total = len(_diff(nfiles=1, nh=8))
++        assert all(f"/{total}>>" in m for m in re.findall(r"<<gap [^>]*>>", custom.text))
++
++    def test_marker_counts_the_dropped_bodies(self):
++        d = _diff(nfiles=1, nh=3)
++        res = adapt_unified_diff(d, "new_0_1", gap_marker=_marker)
++        counts = [int(m) for m in re.findall(r"<<gap (\d+)/", res.text)]
++        hunks = _hunks(d)
++        assert counts == [len("\n".join(hunks[0][1:])), len("\n".join(hunks[2][1:]))]
++
++    def test_removed_dashes_line_is_not_a_file_header(self):
++        d = (
++            "diff --git a/q.sql b/q.sql\n--- a/q.sql\n+++ b/q.sql\n"
++            "@@ -1,3 +1,2 @@\n select 1;\n--- old comment\n+-- new comment\n"
++            "diff --git a/r.sql b/r.sql\n--- a/r.sql\n+++ b/r.sql\n"
++            "@@ -1,1 +1,1 @@\n-a\n+b\n"
++        )
++        res = adapt_unified_diff(d, "", gap_marker=None)
++        assert res.total_records == 2  # not 3: "--- old comment" belongs to hunk 1
++
++    def test_nothing_dropped_returns_text_unchanged(self):
++        d = _diff(nfiles=1, nh=2)
++        res = adapt_unified_diff(d, "", gap_marker=None)
++        assert res.text == d
++
++    def test_idempotent_on_its_own_output(self):
++        res = adapt_unified_diff(_diff(), "new_1_3", gap_marker=None)
++        again = adapt_unified_diff(res.text, "new_1_3", gap_marker=None)
++        assert again is not None and again.text.count("# src/m1.py") == 1
++
++    def test_through_compress_context(self):
++        d = _diff(nfiles=4, nh=12)
++        result = compress_context(
++            d, "what changed in new_2_7?", ccr=False, citations=False,
++            gap_marker=_marker,
++        )
++        assert not result.fail_open
++        assert result.receipt["adapter"]["name"] == "diff"
++        assert "+    new_2_7 = 2" in result.compressed_text
++        assert "<<gap" in result.compressed_text
++        assert len(result.compressed_text) < len(d) * 0.6
++        for f in range(4):
++            assert f"diff --git a/src/m{f}.py b/src/m{f}.py" in result.compressed_text
++        hinted = compress_context(
++            d, "what changed in new_2_7?", ccr=False, citations=False,
++            content_hint="diff",
++        )
++        assert hinted.receipt["adapter"]["name"] == "diff"
++        assert hinted.receipt["content_hint"] == "diff"
++        assert "[… " in hinted.compressed_text and "hunk" in hinted.compressed_text
++
++    def test_weak_query_makes_no_cut_through_the_engine(self):
++        d = _diff(nfiles=1, nh=60)
++        for query in ("continue", "thanks", ""):
++            result = compress_context(d, query, ccr=False, citations=False)
++            assert result.fail_open and result.compressed_text == d
++            assert result.receipt["adapter"] is None
++
++
++GREP = "\n".join(
++    [f"src/core/engine.py:{10 + i * 7}:    handler_{i} = lookup(key_{i})" for i in range(30)]
++    + [f"src/core/util.py:{3 + i}:    helper_{i}()" for i in range(5)]
++    + ["tests/test_engine.py:12:def test_handler_4():"]
++)
++
++
++class TestGrep:
++    def test_detection(self):
++        assert detect_grep_lines(GREP)
++        assert detect_format(GREP) == "grep"
++        assert not detect_grep_lines("12:00:03 INFO started\n12:00:04 INFO ok\n12:00:05 WARN x")
++        assert not detect_grep_lines("2026-03-14 12:00:00,123 INFO a\n2026-03-14 12:00:01,000 INFO b")
++        assert adapt_grep_lines("plain text\nmore text", "x") is None
++        ctx = "a/b.py-4-ctx\na/b.py:5:hit\na/b.py-6-ctx\n--\na/c.py:9:hit"
++        assert detect_grep_lines(ctx)
++
++    def test_query_matches_are_kept_grouped_with_counts(self):
++        res = adapt_grep_lines(GREP, "where is handler_4 used?", gap_marker=None)
++        lines = res.text.split("\n")
++        assert lines[0] == "src/core/engine.py  (30 matches)"
++        assert "  L38: " + "    handler_4 = lookup(key_4)" in lines
++        assert "tests/test_engine.py  (1 match)" in lines
++        assert "  L12: def test_handler_4():" in lines
++        assert "src/core/util.py  (5 matches)" in lines
++        # util.py has no hit: its first matches (up to the cap) stand in
++        assert sum(ln.startswith("  L") for ln in lines) <= 1 + 1 + 5 + 1
++
++    def test_per_file_cap_and_one_marker_per_omitted_run(self):
++        res = adapt_grep_lines(GREP, "unrelated_zzz", gap_marker=None, per_file_cap=8)
++        eng = [ln for ln in res.text.split("\n") if ln.startswith("  L")]
++        assert len([ln for ln in eng if "lookup(" in ln]) == 8
++        assert res.text.count("[… 22 matches omitted …]") == 1
++        res2 = adapt_grep_lines(GREP, "handler_3 handler_9", gap_marker=_marker)
++        engine_part = res2.text.split("src/core/util.py")[0]
++        assert engine_part.count("<<gap") == 3  # 0-2 | 3 | 4-8 | 9 | 10-29
++        assert "omitted …" not in res2.text
++
++    def test_no_query_is_a_lossless_regroup_when_shorter(self):
++        long_path = "services/billing/internal/handlers/invoices.py"
++        text = "\n".join(f"{long_path}:{i}:    value_{i} = {i}" for i in range(1, 40))
++        res = adapt_grep_lines(text, "", gap_marker=None)
++        assert len(res.text) < len(text)
++        assert res.kept_records == 39 and "omitted" not in res.text
++        body = [ln for ln in res.text.split("\n") if ln.startswith("  L")]
++        assert body == [f"  L{i}:     value_{i} = {i}" for i in range(1, 40)]
++        assert res.text.split("\n")[0] == f"{long_path}  (39 matches)"
++
++    def test_context_lines_follow_their_kept_match(self):
++        text = (
++            "a/b.py-4-before\na/b.py:5:needle here\na/b.py-6-after\n--\n"
++            "a/b.py-40-far before\na/b.py:41:other thing\na/b.py-42-far after"
++        )
++        res = adapt_grep_lines(text, "needle", gap_marker=None, per_file_cap=1)
++        assert "  L4- before" in res.text and "  L6- after" in res.text
++        assert "far before" not in res.text and "other thing" not in res.text
++
++    def test_weak_query_only_allows_the_lossless_regroup(self):
++        long_path = "services/billing/internal/handlers/invoices.py"
++        lossless = "\n".join(f"{long_path}:{i}:    value_{i} = {i}" for i in range(1, 40))
++        result = compress_context(lossless, "continue", ccr=False, citations=False)
++        assert result.receipt["adapter"] is None or result.receipt["adapter"]["kept_records"] == 39
++        capped = compress_context(GREP, "thanks", ccr=False, citations=False)
++        assert capped.fail_open and capped.compressed_text == GREP
++
++    def test_through_compress_context(self):
++        big = "\n".join(
++            f"src/pkg/module_{i % 7}.py:{i}:    call_{i}(arg)  # item {i}" for i in range(600)
++        )
++        result = compress_context(
++            big, "where is call_321 invoked?", ccr=False, citations=False
++        )
++        assert result.receipt["adapter"]["name"] == "grep"
++        assert "call_321(arg)" in result.compressed_text
++        assert len(result.compressed_text) < len(big) / 3
++        assert not result.fail_open
+diff --git a/tests/test_engine_helpers.py b/tests/test_engine_helpers.py
+index ea7329f..b30e660 100644
+--- a/tests/test_engine_helpers.py
++++ b/tests/test_engine_helpers.py
+@@ -140,7 +140,7 @@ def test_fingerprint_masks_digits_hex_and_uuids():
+     assert list(error_fingerprints(a)) == list(error_fingerprints(b))
+     assert list(error_fingerprints(u1)) == list(error_fingerprints(u2))
+     (fp,) = error_fingerprints(a)
+-    assert "<hex>" in fp and "worker-#" in fp and "#ms" in fp
++    assert "<hex>" in fp and "worker-#" in fp and "<dur>" in fp and "<ts>" in fp
+     (fp,) = error_fingerprints(u1)
+     assert "<uuid>" in fp
+     assert error_fingerprints("ERROR disk full on sda")  # different text: different key
+@@ -478,12 +478,14 @@ def test_code_hints_keep_function_bodies_and_the_gutter(fmt, hint):
+ 
+ 
+ @pytest.mark.parametrize("fmt", ["pipe", "tab"])
+-def test_without_the_hint_numbered_code_is_shredded(fmt):
+-    """The 1.3.0 failure the hint exists for: code read through a gutter is
+-    detected as a table and the function body is lost."""
++def test_without_the_hint_numbered_code_is_detected_not_shredded(fmt):
++    """The 1.3.0 failure: code read through a gutter was detected as a table and
++    the function body was lost. Since 1.4.0 (E4) the gutter itself is detected."""
+     text = _numbered_code(fmt)
+     result = compress_context(text, "what does func_26 do?", ccr=False, citations=False)
+-    assert "total = a + b * 26, c" not in result.compressed_text
++    assert "total = a + b * 26, c" in result.compressed_text
++    assert result.content_type not in {"csv", "tsv", "yaml"}
++    assert result.receipt["content_hint"] is None
+ 
+ 
+ def _code_with_a_later_override_comment() -> str:
+diff --git a/tests/test_fold_lossless.py b/tests/test_fold_lossless.py
+new file mode 100644
+index 0000000..b6c1962
+--- /dev/null
++++ b/tests/test_fold_lossless.py
+@@ -0,0 +1,104 @@
++"""E9: fold_lossless loses nothing, is idempotent and never grows the text."""
++from __future__ import annotations
++
++import json
++import random
++
++import pytest
++
++from tameru.compress_context import fold_lossless as reexported
++from tameru.folding import fold_lossless
++
++
++def test_reexported_from_compress_context():
++    assert reexported is fold_lossless
++
++
++def test_cr_redraws_keep_only_the_last_frame():
++    text = "Downloading 10%\rDownloading 55%\rDownloading 100%\ndone\r\nnext"
++    out, st = fold_lossless(text)
++    assert out == "Downloading 100%\ndone\nnext"
++    assert st["cr_redraws"] == 1
++
++
++def test_ansi_stripped():
++    text = "\x1b[31mERROR\x1b[0m boom \x1b]0;title\x07ok\x1b[2K"
++    out, st = fold_lossless(text)
++    assert out == "ERROR boom ok"
++    assert st["ansi"] == 4
++
++
++def test_trailing_whitespace_and_runs():
++    text = "a  \n" + "same line here\n" * 5 + "b\t"
++    out, st = fold_lossless(text)
++    assert out == "a\nsame line here\n[×4 identical lines]\nb"
++    assert st["trailing_ws"] == 2 and st["runs_collapsed"] == 1
++
++
++def test_short_runs_not_collapsed_when_longer():
++    text = "\n\n\n\nx"  # four blank lines: the marker would be longer
++    assert fold_lossless(text)[0] == text
++
++
++def test_json_minified_round_trip():
++    obj = {"a": [1, 2.5, {"b": None, "c": "é"}], "d": True}
++    text = json.dumps(obj, indent=4, ensure_ascii=False)
++    out, st = fold_lossless(text)
++    assert st["json_minified"] and len(out) < len(text)
++    assert json.loads(out) == obj
++
++
++def test_json_with_duplicate_keys_not_minified():
++    text = '{\n  "a": 1,\n  "a": 2\n}'
++    out, st = fold_lossless(text)
++    assert out == text or json.loads(out, object_pairs_hook=list) == json.loads(
++        text, object_pairs_hook=list
++    )
++
++
++def test_json_with_repeated_pretty_lines_stays_valid():
++    text = json.dumps([0] * 6, indent=2)
++    out, _ = fold_lossless(text)
++    assert json.loads(out) == [0] * 6
++
++
++def _random_texts():
++    rng = random.Random(3)
++    alphabet = ["a", "b", " ", "\r", "\n", "\x1b[1m", "\x1b[0m", "x\n", "[", "]", "\t"]
++    for _ in range(300):
++        yield "".join(rng.choice(alphabet) for _ in range(rng.randint(0, 60)))
++    yield json.dumps({"k": list(range(30))}, indent=2)
++    yield "\x1b[32m" + json.dumps([1, 2, 3], indent=1) + "\x1b[0m"
++
++
++@pytest.mark.parametrize("text", list(_random_texts()))
++def test_idempotent_never_longer_deterministic(text):
++    once, st = fold_lossless(text)
++    assert fold_lossless(once)[0] == once
++    assert len(once) <= len(text)
++    assert st["saved_chars"] == len(text) - len(once)
++    assert fold_lossless(text) == (once, st)
++
++
++def test_empty():
++    out, st = fold_lossless("")
++    assert out == "" and st["saved_chars"] == 0
++
++
++def test_ansi_strip_is_idempotent_when_removal_splices_a_new_escape():
++    from tameru.folding import fold_lossless
++
++    for raw in ("a\x1b[3\x1b[0m1mred", "\x1b\x1b[0m[0m x", "33b\x1b]\x1b]\x1b\x1b[31m]"):
++        once, _ = fold_lossless(raw)
++        twice, _ = fold_lossless(once)
++        assert once == twice
++        assert len(once) <= len(raw)
++
++
++def test_json_minify_refuses_to_turn_an_overflowing_number_into_infinity():
++    from tameru.folding import fold_lossless
++
++    raw = '{\n  "a": 1e400,\n  "b": 2\n}'
++    folded, stats = fold_lossless(raw)
++    assert "Infinity" not in folded
++    assert not stats["json_minified"]
+diff --git a/tests/test_formats_review.py b/tests/test_formats_review.py
+new file mode 100644
+index 0000000..461de6f
+--- /dev/null
++++ b/tests/test_formats_review.py
+@@ -0,0 +1,128 @@
++"""Regression tests from the WS-FORMATS adversarial review."""
++from __future__ import annotations
++
++import time
++import unittest
++
++from tameru.agent_formats import (
++    adapt_grep_lines,
++    adapt_unified_diff,
++    apply_agent_adapters,
++    detect_test_runner,
++    is_numbered_code,
++    preprocess_test_output,
++)
++from tameru.compress_context import compress_context
++from tameru.format_adapters import detect_format
++
++
++def _diff(nfiles: int = 3, nhunks: int = 12) -> str:
++    out: list[str] = []
++    for f in range(nfiles):
++        out += [f"diff --git a/m{f}.py b/m{f}.py", f"--- a/m{f}.py", f"+++ b/m{f}.py"]
++        for h in range(nhunks):
++            s = h * 20 + 1
++            out += [f"@@ -{s},3 +{s},3 @@", " a", f"-old_{f}_{h}", f"+new_{f}_{h}", " b"]
++    return "\n".join(out) + "\n"
++
++
++def _grep(files: int = 10, per: int = 30) -> str:
++    return "\n".join(
++        f"src/mod{f}.py:{m * 3 + 1}:    value_{f}_{m} = compute(x)  # TODO"
++        for f in range(files)
++        for m in range(per)
++    )
++
++
++class TestRunnerDetectionIsLinear(unittest.TestCase):
++    def test_long_line_of_passed_fragments_is_not_cubic(self):
++        # `=== ` + many "N passed in Ns" made the old whole-text regex cubic
++        # (16 KB took 11 s).
++        text = "=== " + "1 passed in 1s " * 4000
++        started = time.perf_counter()
++        self.assertIsNone(detect_test_runner(text))
++        self.assertLess(time.perf_counter() - started, 1.0)
++
++    def test_wide_pytest_banner_still_detected(self):
++        head = "=" * 40 + " test session starts " + "=" * 40
++        self.assertEqual(detect_test_runner(head + "\ncollected 1 item\n"), "pytest")
++
++
++class PytestProgressFailures(unittest.TestCase):
++    def test_progress_lines_with_f_or_e_are_kept(self):
++        text = (
++            "=" * 30 + " test session starts " + "=" * 30 + "\n"
++            "collected 40 items\n\n"
++            "tests/test_a.py ....F.....   [ 25%]\n"
++            "tests/test_b.py ..........E.   [ 50%]\n"
++            "tests/test_c.py ..........   [ 75%]\n"
++            "tests/test_d.py ..........   [100%]\n\n"
++            "=" * 20 + " 1 failed, 1 error, 38 passed in 0.50s " + "=" * 20 + "\n"
++        )
++        out = preprocess_test_output(text, "")
++        self.assertIsNotNone(out)
++        self.assertIn("tests/test_a.py ....F", out)
++        self.assertIn("tests/test_b.py ..........E", out)
++        self.assertIn("20 passing tests omitted", out)
++
++
++class NoSelectorHitLicensesNoCut(unittest.TestCase):
++    def test_diff_with_absent_query_term_fails_open(self):
++        text = _diff()
++        res = compress_context(text, "frobnicate_widget zzz_missing", ccr=False)
++        self.assertEqual(res.compressed_text, text)
++        self.assertIsNone((res.receipt or {}).get("adapter"))
++
++    def test_grep_with_absent_query_term_fails_open(self):
++        text = _grep()
++        res = compress_context(text, "frobnicate_widget zzz_missing", ccr=False)
++        self.assertEqual(res.compressed_text, text)
++
++    def test_adapters_still_orient_direct_callers(self):
++        out = adapt_unified_diff(_diff(), "frobnicate_widget")
++        self.assertIsNotNone(out)
++        self.assertFalse(out.hit)
++        self.assertLess(out.kept_records, out.total_records)
++        text, info = apply_agent_adapters(_diff(), "frobnicate_widget")
++        self.assertIsNone(info)
++        g = adapt_grep_lines(_grep(), "frobnicate_widget")
++        self.assertIsNotNone(g)
++        self.assertFalse(g.hit)
++
++    def test_hit_still_cuts(self):
++        res = compress_context(_diff(), "new_1_5", ccr=False)
++        self.assertLess(len(res.compressed_text), len(_diff()))
++        self.assertIn("+new_1_5", res.compressed_text)
++        self.assertEqual((res.receipt or {})["adapter"]["name"], "diff")
++
++
++class NumberedReadEdges(unittest.TestCase):
++    def test_tab_indented_code_is_not_a_tsv(self):
++        flat = "\n".join(f"{i + 1:6d}\t\tx{i} := call(a)" for i in range(300))
++        self.assertTrue(is_numbered_code(flat))
++        self.assertEqual(detect_format(flat), "numbered_code")
++
++    def test_real_numbered_tsv_is_still_a_table(self):
++        tsv = "\n".join(f"{i}\tuser{i}\t{20 + i % 50}" for i in range(50))
++        self.assertFalse(is_numbered_code(tsv))
++
++    def test_colon_gutter_read_is_not_high_risk(self):
++        code = "\n".join(
++            f"def handler_{i}(req):\n    return req.get('k{i}', {i})\n" for i in range(150)
++        )
++        read = "\n".join(f"{i + 1}: {ln}" for i, ln in enumerate(code.split("\n")))
++        res = compress_context(read, "what does handler_100 do?", ccr=False)
++        self.assertIn("handler_100", res.compressed_text)
++        self.assertNotEqual(res.compression_risk, "high")
++        self.assertLess(res.verifier["critical_lines_total"], 50)
++
++
++class CsvKeywordColumn(unittest.TestCase):
++    def test_csv_whose_first_column_is_a_keyword_is_still_csv(self):
++        rows = "\n".join(f"public,{i},{i * 2}" for i in range(40))
++        text = "scope,a,b\n" + rows
++        self.assertEqual(detect_format(text), "csv")
++
++
++if __name__ == "__main__":
++    unittest.main()
+diff --git a/tests/test_json_brief.py b/tests/test_json_brief.py
+new file mode 100644
+index 0000000..592557c
+--- /dev/null
++++ b/tests/test_json_brief.py
+@@ -0,0 +1,98 @@
++"""E11: json_brief is valid JSON with correct counts and respects the budget."""
++from __future__ import annotations
++
++import json
++
++from tameru.compress_context import brief_context
++from tameru.folding import json_brief
++
++
++def _rows(n=300):
++    return [
++        {"id": i, "name": f"user-{i}", "status": "error" if i == 137 else "ok", "n": i * 3}
++        for i in range(n)
++    ]
++
++
++def test_array_brief_is_valid_json_and_counts_add_up():
++    text = json.dumps(_rows(), indent=1)
++    out = json_brief(text, budget_chars=1500)
++    assert out is not None and len(out) <= 1500
++    b = json.loads(out)
++    assert b["_count"] == 300
++    assert b["_keys"] == ["id", "name", "status", "n"]
++    shown = len(b["_head"]) + len(b["_tail"]) + len(b["_notable"])
++    assert b["_omitted"] == 300 - shown
++    assert b["_head"][0]["id"] == 0 and b["_tail"][-1]["id"] == 299
++    assert len(b["_head"]) == len(b["_tail"]) >= 1
++    assert len(b["_notable"]) <= 5
++
++
++def test_notable_includes_outlier_by_low_cardinality_field():
++    out = json_brief(json.dumps(_rows()), budget_chars=1500)
++    assert 137 in [it["id"] for it in json.loads(out)["_notable"]]
++
++
++def test_notable_includes_query_hits():
++    out = json_brief(json.dumps(_rows()), budget_chars=1500, query="user-211")
++    assert 211 in [it["id"] for it in json.loads(out)["_notable"]]
++
++
++def test_budget_respected_and_k_adapts():
++    text = json.dumps(_rows())
++    small = json_brief(text, budget_chars=700)
++    big = json_brief(text, budget_chars=4000)
++    assert len(small) <= 700 and len(big) <= 4000
++    assert len(json.loads(big)["_head"]) > len(json.loads(small)["_head"]) >= 1
++
++
++def test_returns_none_when_it_cannot_fit_or_not_applicable():
++    assert json_brief(json.dumps(_rows()), budget_chars=50) is None
++    assert json_brief("[1,2,3]", budget_chars=500) is None
++    assert json_brief("not json", budget_chars=500) is None
++    assert json_brief(json.dumps({"a": [1, 2]}), budget_chars=500) is None
++
++
++def test_object_wrapper_keeps_scalars():
++    obj = {"total": 300, "page": "1", "items": _rows(), "meta": {"x": 1}}
++    out = json_brief(json.dumps(obj), budget_chars=1800)
++    b = json.loads(out)
++    assert list(b)[0] == "items" and b["total"] == 300 and b["page"] == "1"
++    assert "meta" not in b
++    assert b["items"]["_count"] == 300 and len(out) <= 1800
++
++
++def test_object_needs_ten_rows():
++    assert json_brief(json.dumps({"items": _rows(9)}), budget_chars=5000) is None
++
++
++def test_brief_context_uses_json_brief_first():
++    text = json.dumps(_rows(), indent=2)
++    out = brief_context(text, budget_chars=1200)
++    assert json.loads(out)["_count"] == 300
++    # non-JSON input still goes through the line brief
++    assert not out.startswith("[… ")
++    assert brief_context("x\n" * 2000, budget_chars=100).count("[…") >= 1
++
++
++def test_deterministic():
++    text = json.dumps(_rows())
++    assert json_brief(text, budget_chars=1500) == json_brief(text, budget_chars=1500)
++
++
++def test_brief_is_none_rather_than_invalid_json_for_nan():
++    import json
++    from tameru.folding import json_brief
++
++    assert json_brief('[{"a":NaN},{"a":1}]', budget_chars=500) is None
++    rows = json.dumps([{"id": i, "v": 1.5} for i in range(40)])
++    json.loads(json_brief(rows, budget_chars=600))  # finite input still works
++
++
++def test_query_term_present_in_every_row_does_not_crowd_out_anomalies():
++    import json
++    from tameru.folding import json_brief
++
++    rows = [{"id": i, "status": "ok" if i != 777 else "error"} for i in range(1000)]
++    out = json.loads(json_brief(json.dumps(rows), budget_chars=1200, query="status"))
++    assert any(r["id"] == 777 for r in out["_notable"])
+diff --git a/tests/test_log_order.py b/tests/test_log_order.py
+index f6d1f88..8fda8c3 100644
+--- a/tests/test_log_order.py
++++ b/tests/test_log_order.py
+@@ -20,6 +20,8 @@ def _original_positions(original: list[str], processed: list[str]) -> list[int]:
+     """Index in `original` of each non-synthetic processed line, in output order."""
+     positions = []
+     for line in processed:
++        if line.startswith("[last] "):  # v1.4.0: the repeated template's last instance
++            continue
+         bare = COUNT_PREFIX.sub("", line)
+         if bare.lstrip().startswith("... ") and "frames omitted" in bare:
+             continue
+@@ -33,10 +35,10 @@ def test_collapsed_duplicates_are_not_re_added():
+         lines.append(f"2026-03-14 12:00:{i % 60:02d} ERROR [worker-{i}] upstream timeout after {i}ms")
+         lines.append(f"2026-03-14 12:00:{i % 60:02d} INFO  heartbeat ok node={i}")
+     out = preprocess_logs(lines)
+-    errors = [ln for ln in out if "ERROR" in ln]
++    errors = [ln for ln in out if "ERROR" in ln and not ln.startswith("[last] ")]
+     assert len(errors) == 1
+     assert errors[0].startswith("[×500] ")
+-    assert len(out) == 2  # one error exemplar, one info exemplar
++    assert len(out) == 4  # per template: one [×N] exemplar + its [last] instance
+ 
+ 
+ def test_progress_looking_error_lines_return_in_place():
+diff --git a/tests/test_log_templates.py b/tests/test_log_templates.py
+new file mode 100644
+index 0000000..46817c2
+--- /dev/null
++++ b/tests/test_log_templates.py
+@@ -0,0 +1,79 @@
++"""E10: masked log templates collapse; [last] instance and error exemplars kept."""
++from __future__ import annotations
++
++import time
++
++from tameru.compress_context import error_fingerprints, preprocess_logs
++from tameru.folding import mask_template
++
++
++def test_masking_placeholders():
++    m = mask_template
++    assert m("id 550e8400-e29b-41d4-a716-446655440000 x") == "id <uuid> x"
++    assert m("from 10.1.2.3:8080 and fe80:0:0:0:1:2:3:4") == "from <ip> and <ip>"
++    assert m("at 2026-03-14t12:00:01.123z") == "at <ts>"
++    assert m("12:00:01.5 took 12ms, 3.5s") == "<ts> took <dur>, <dur>"
++    assert m("sha deadbeef01 end") == "sha <hex> end"
++    assert m("open 'a b' and \"c d\"") == 'open "<str>" and "<str>"'
++    assert m("read /var/log/app/x.log now") == "read <path> now"
++    assert m("worker-12") == "worker-#"
++    assert m("don't stop, it's fine") == "don't stop, it's fine"
++
++
++def _lines(n=60):
++    out = []
++    for i in range(n):
++        out.append(
++            f"INFO conn 10.0.{i % 7}.{i} id={i:08x}-{i:04x}-4000-8000-{i:012x} took {i}ms"
++        )
++    return out
++
++
++def test_masked_templates_collapse_with_count_and_last():
++    lines = _lines()
++    out = preprocess_logs(lines)
++    assert len(out) == 2
++    assert out[0].startswith("[×60] ") and out[0].endswith(lines[0])
++    assert out[1] == "[last] " + lines[-1]
++
++
++def test_two_repeats_have_no_last_line():
++    out = preprocess_logs(_lines(2))
++    assert len(out) == 1 and out[0].startswith("[×2] ")
++
++
++def test_idempotent():
++    once = preprocess_logs(_lines())
++    assert preprocess_logs(once) == once
++
++
++def test_error_exemplar_per_fingerprint_and_last_prefix_stable():
++    lines = []
++    for i in range(80):
++        lines.append(f"2026-03-14 12:00:{i % 60:02d} INFO ping {i} ok from 10.0.0.{i}")
++        if i % 10 == 0:
++            lines.append(f"2026-03-14 12:00:{i % 60:02d} ERROR upstream timeout after {i}ms")
++        if i % 17 == 0:
++            lines.append(f"2026-03-14 12:00:{i % 60:02d} ERROR db 'orders' down {i}")
++    out = preprocess_logs(lines)
++    assert set(error_fingerprints("\n".join(lines))) <= set(error_fingerprints("\n".join(out)))
++    last = [ln for ln in out if ln.startswith("[last] ")]
++    assert last
++    for ln in last:
++        assert list(error_fingerprints(ln)) == list(error_fingerprints(ln[len("[last] "):]))
++
++
++def test_distinct_errors_not_merged():
++    lines = [f"ERROR disk {c} full on /dev/sd{c}" for c in "abc"]
++    assert len(error_fingerprints("\n".join(lines))) == 3 or len(
++        error_fingerprints("\n".join(lines))
++    ) == 1  # letters are not masked; see next assertion
++    assert error_fingerprints("ERROR timeout") != error_fingerprints("ERROR refused")
++
++
++def test_masking_is_linear_on_pathological_lines():
++    line = "a" * 20000 + "/" + "b" * 20000
++    t0 = time.perf_counter()
++    for _ in range(50):
++        mask_template(line[:2000])
++    assert time.perf_counter() - t0 < 2.0
+diff --git a/tests/test_numbered_code_reads.py b/tests/test_numbered_code_reads.py
+new file mode 100644
+index 0000000..59f8c43
+--- /dev/null
++++ b/tests/test_numbered_code_reads.py
+@@ -0,0 +1,102 @@
++"""E4: numbered reads (`cat -n`, Hermes `N|`, `N: `) are code, not tables."""
++import json
++import re
++
++import pytest
++
++from tameru.compress_context import compress_context
++from tameru.format_adapters import detect_format
++
++
++def _source(n: int = 300) -> list[str]:
++    out = ["import os, sys, json", ""]
++    for i in range(n):
++        out += [
++            f"def handler_{i}(request, context=None):",
++            f'    """Handle route {i}."""',
++            f"    value = request.get('key_{i}', {i}), context",
++            "    if context is None:",
++            f"        return value[0] + {i}",
++            f"    return value, context, 'handler_{i}-done'",
++            "",
++        ]
++    return out
++
++
++def _render(fmt: str) -> str:
++    lines = _source()
++    if fmt == "tab":  # cat -n
++        return "\n".join(f"{i + 1:6d}\t{ln}" for i, ln in enumerate(lines))
++    if fmt == "pipe":  # Hermes read_file
++        return "\n".join(f"{i + 1}|{ln}" for i, ln in enumerate(lines))
++    return "\n".join(f"{i + 1}: {ln}" for i, ln in enumerate(lines))
++
++
++BODY = [
++    "def handler_240(request, context=None):",
++    "value = request.get('key_240', 240), context",
++    "return value[0] + 240",
++    "return value, context, 'handler_240-done'",
++]
++
++
++@pytest.mark.parametrize("fmt", ["tab", "pipe", "colon"])
++def test_numbered_read_keeps_the_whole_function_body(fmt):
++    text = _render(fmt)
++    assert detect_format(text) == "numbered_code"
++    result = compress_context(
++        text, "what does handler_240 do?", ccr=False, citations=False
++    )
++    assert not result.fail_open
++    assert result.content_type not in {"csv", "tsv", "yaml"}
++    assert len(result.compressed_text) < len(text) / 4
++    out = result.compressed_text
++    for fragment in BODY:
++        assert fragment in out
++    # the gutter is kept: the output lines are original lines
++    assert re.search(r"^\s*\d+(?:\t|\||: )\s*def handler_240", out, re.M)
++    assert not result.receipt["industrial"]["applied"]
++
++
++def test_numbered_read_inside_a_hermes_tool_wrapper():
++    lines = _render("pipe")
++    payload = json.dumps({"content": lines, "total_lines": lines.count("\n") + 1})
++    result = compress_context(
++        payload, "what does handler_240 do?", ccr=False, citations=False
++    )
++    assert not result.fail_open
++    assert result.content_type not in {"csv", "tsv", "yaml"}
++    for fragment in BODY:
++        assert fragment in result.compressed_text
++    assert '"total_lines"' in result.compressed_text  # envelope metadata kept (G9)
++
++
++def test_numbered_read_is_never_routed_to_a_table_even_with_a_generic_query():
++    text = _render("tab")
++    result = compress_context(text, "continue", ccr=False, citations=False)
++    assert result.content_type not in {"csv", "tsv", "yaml"}
++    assert "csv" not in " ".join(result.reasons).lower()
++
++
++def test_numbered_read_scores_without_the_gutter():
++    # "126" appears only as a line number: it must not select that line.
++    text = _render("tab")
++    result = compress_context(text, "show handler_77", ccr=False, citations=False)
++    assert "def handler_77(request, context=None):" in result.compressed_text
++
++
++def test_a_tsv_with_an_id_column_is_still_a_tsv():
++    tsv = "id\tname\tstatus\n" + "\n".join(
++        f"{i}\tuser{i}\t{'ok' if i % 3 else 'bad'}" for i in range(1, 40)
++    )
++    assert detect_format(tsv) == "tsv"
++    pipes = "\n".join(f"{i}|user{i}|ok|admin" for i in range(1, 30))
++    assert detect_format(pipes) != "numbered_code"
++
++
++def test_prose_with_numbered_lines_minority_is_not_numbered_code():
++    text = "\n".join(
++        ["Release notes for the quarter, in no particular order."] * 6
++        + [f"{i}: item" for i in range(1, 3)]
++    )
++    assert detect_format(text) != "numbered_code"
+diff --git a/tests/test_release_artifacts.py b/tests/test_release_artifacts.py
+index fcb2374..6909801 100644
+--- a/tests/test_release_artifacts.py
++++ b/tests/test_release_artifacts.py
+@@ -50,6 +50,40 @@ class ReleaseArtifactTests(unittest.TestCase):
+         self.assertRegex(_project_version(), r"^\d+\.\d+\.\d+")
+         self.assertEqual(_init_version(), _project_version())
+ 
++    def test_engine_version_and_changelog_match_project_version(self):
++        """ENGINE_VERSION (stamped into plugin receipts) and the newest
++        CHANGELOG entry must track the release version."""
++        from tameru.compress_context import ENGINE_VERSION
++
++        self.assertEqual(ENGINE_VERSION, _project_version())
++        changelog = (ROOT / "CHANGELOG.md").read_text(encoding="utf-8")
++        newest = re.search(r"^## \[(\d+\.\d+\.\d+)\]", changelog, re.M)
++        self.assertIsNotNone(newest)
++        self.assertEqual(newest.group(1), _project_version())
++
++    def test_package_import_does_not_preload_the_engine_module(self):
++        """`python -m tameru.compress_context` must not run a second copy of an
++        already-imported module (runpy RuntimeWarning); the engine exports are
++        lazy."""
++        import os
++        import subprocess
++        import sys
++
++        env = dict(os.environ, PYTHONPATH=str(ROOT / "src"))
++        probe = (
++            "import sys, tameru; "
++            "assert 'tameru.compress_context' not in sys.modules; "
++            "from tameru import ENGINE_VERSION, brief_context; "
++            "assert ENGINE_VERSION == tameru.__version__"
++        )
++        done = subprocess.run([sys.executable, "-c", probe], env=env, capture_output=True, text=True)
++        self.assertEqual(done.returncode, 0, done.stderr)
++        done = subprocess.run(
++            [sys.executable, "-W", "error", "-m", "tameru.compress_context", "--help"],
++            env=env, capture_output=True, text=True,
++        )
++        self.assertEqual(done.returncode, 0, done.stderr)
++
+     def test_installed_command_is_declared(self):
+         project = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+         self.assertEqual(
+diff --git a/tests/test_reviewer_feedback_v101.py b/tests/test_reviewer_feedback_v101.py
+index f362e08..aa31bc5 100644
+--- a/tests/test_reviewer_feedback_v101.py
++++ b/tests/test_reviewer_feedback_v101.py
+@@ -61,7 +61,8 @@ class ProgressRegexRegressionTests(unittest.TestCase):
+             for i in range(4000)
+         ]
+         processed = cc.preprocess_logs(lines, "which region completed stage 17?")
+-        self.assertLessEqual(len(processed), cc.MAX_QUERY_TEMPLATE_MATCHES + 1)
++        # +2: the collapsed template's [×N] exemplar and its [last] instance
++        self.assertLessEqual(len(processed), cc.MAX_QUERY_TEMPLATE_MATCHES + 2)
+         self.assertTrue(any("stage 17" in line for line in processed))
+ 
+ 
+diff --git a/tests/test_test_runner_preprocess.py b/tests/test_test_runner_preprocess.py
+new file mode 100644
+index 0000000..0610502
+--- /dev/null
++++ b/tests/test_test_runner_preprocess.py
+@@ -0,0 +1,272 @@
++"""E5: pytest / jest / go test / cargo test output keeps failures + summary."""
++import re
++
++from tameru.agent_formats import detect_test_runner, preprocess_test_output
++from tameru.compress_context import compress_context, preprocess_test_runner
++
++
++def _pytest(n_pass: int = 300, verbose: bool = False) -> str:
++    head = [
++        "============================= test session starts ==============================",
++        "platform linux -- Python 3.11.15, pytest-9.1.1, pluggy-1.6.0",
++        "rootdir: /work/proj",
++        f"collected {n_pass + 2} items",
++        "",
++    ]
++    if verbose:
++        body = [f"tests/test_mod.py::test_case_{i} PASSED{' ' * 20}[{i % 100:3d}%]" for i in range(n_pass)]
++        body.insert(40, "tests/test_mod.py::test_broken FAILED                          [ 13%]")
++    else:
++        body = [f"tests/test_mod_{k}.py " + "." * 50 for k in range(n_pass // 50)]
++        body.append("tests/test_mod_x.py .F.F" + "." * 20 + "  [100%]")
++    tail = [
++        "",
++        "=================================== FAILURES ===================================",
++        "________________________________ test_broken ________________________________",
++        "",
++        ">   def test_broken(): assert compute(41) == 42",
++        "E   assert 41 == 42",
++        "E    +  where 41 = compute(41)",
++        "",
++        "tests/test_mod_x.py:9: AssertionError",
++        "________________________________ test_other _________________________________",
++        "",
++        "E   KeyError: 'session_token_77'",
++        "",
++        "tests/test_mod_x.py:21: KeyError",
++        "=============================== warnings summary ===============================",
++        "tests/test_mod_0.py::test_deprecated",
++        "  /work/proj/tests/test_mod_0.py:3: DeprecationWarning: old api",
++        "",
++        "-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html",
++        "=========================== short test summary info ============================",
++        "FAILED tests/test_mod_x.py::test_broken - assert 41 == 42",
++        "FAILED tests/test_mod_x.py::test_other - KeyError: 'session_token_77'",
++        f"=================== 2 failed, {n_pass} passed, 1 warning in 3.21s ====================",
++    ]
++    return "\n".join(head + body + tail)
++
++
++JEST = "\n".join(
++    [f"PASS src/suite_{i}.test.js\n  ✓ case a of suite {i} (2 ms)\n  ✓ case b of suite {i} (1 ms)" for i in range(60)]
++    + [
++        "FAIL src/billing.test.js",
++        "  ● invoices › rounds half up",
++        "",
++        "    expect(received).toBe(expected) // Object.is equality",
++        "",
++        "    Expected: 10.13",
++        "    Received: 10.12",
++        "",
++        "      14 |   expect(round(10.125)).toBe(10.13);",
++        "",
++        "      at Object.<anonymous> (src/billing.test.js:14:29)",
++        "",
++        "  ● Console",
++        "",
++        "    console.log",
++        "      noisy debug output",
++        "",
++        "PASS src/last.test.js",
++        "",
++        "Test Suites: 1 failed, 61 passed, 62 total",
++        "Tests:       1 failed, 120 passed, 121 total",
++        "Snapshots:   0 total",
++        "Time:        4.2 s",
++        "Ran all test suites.",
++    ]
++)
++
++GO = "\n".join(
++    ["=== RUN   TestAlpha", "    a_test.go:3: fine", "--- PASS: TestAlpha (0.00s)"]
++    + [
++        line
++        for i in range(120)
++        for line in (
++            f"=== RUN   TestCase{i}",
++            f"    case_test.go:{i}: log line {i}",
++            f"--- PASS: TestCase{i} (0.00s)",
++        )
++    ]
++    + [
++        "=== RUN   TestBad",
++        "    a_test.go:4: want 1 got 2",
++        "--- FAIL: TestBad (0.00s)",
++        "=== RUN   TestSub",
++        "=== RUN   TestSub/a",
++        "--- PASS: TestSub (0.00s)",
++        "    --- PASS: TestSub/a (0.00s)",
++        "FAIL",
++        "FAIL\texample.com/ex\t0.012s",
++        "ok  \texample.com/other\t0.004s",
++        "FAIL",
++    ]
++)
++
++CARGO = "\n".join(
++    [
++        "   Compiling ex v0.1.0 (/work/ex)",
++        "    Finished `test` profile [unoptimized + debuginfo] target(s) in 5.92s",
++        "     Running unittests src/lib.rs (target/debug/deps/ex-1d5eddbe27cf7782)",
++        "",
++        "running 152 tests",
++    ]
++    + [f"test tests::ok_{i} ... ok" for i in range(150)]
++    + [
++        "test tests::bad_one ... FAILED",
++        "test tests::skipped ... ignored",
++        "",
++        "failures:",
++        "",
++        "---- tests::bad_one stdout ----",
++        "",
++        "thread 'tests::bad_one' panicked at src/lib.rs:5:28:",
++        "assertion `left == right` failed: numbers differ",
++        "  left: 1",
++        " right: 2",
++        "",
++        "",
++        "failures:",
++        "    tests::bad_one",
++        "",
++        "test result: FAILED. 150 passed; 1 failed; 1 ignored; 0 measured; 0 filtered out; finished in 0.01s",
++    ]
++)
++
++
++def test_runner_detection():
++    assert detect_test_runner(_pytest()) == "pytest"
++    assert detect_test_runner(JEST) == "jest"
++    assert detect_test_runner(GO) == "go"
++    assert detect_test_runner(CARGO) == "cargo"
++    assert detect_test_runner("just some\nplain log lines\n") is None
++    assert detect_test_runner("Test Files  1 passed (1)\nTests  5 passed (5)") is None
++
++
++def test_pytest_keeps_failures_short_summary_and_final_line():
++    for verbose in (False, True):
++        text = _pytest(verbose=verbose)
++        out = preprocess_test_output(text, "")
++        assert out is not None and len(out) < len(text) / 2
++        assert "= FAILURES =" in out
++        assert "E   assert 41 == 42" in out
++        assert "KeyError: 'session_token_77'" in out
++        assert "short test summary info" in out
++        assert "FAILED tests/test_mod_x.py::test_other - KeyError: 'session_token_77'" in out
++        assert out.rstrip().endswith("2 failed, 300 passed, 1 warning in 3.21s ====================")
++        assert "DeprecationWarning" not in out and "platform linux" not in out
++        assert re.search(r"\[… \d+ passing tests? omitted …\]", out)
++
++
++def test_pytest_passing_count_in_marker_matches():
++    out = preprocess_test_output(_pytest(n_pass=300, verbose=True), "")
++    counts = [int(n) for n in re.findall(r"\[… (\d+) passing tests? omitted …\]", out)]
++    assert sum(counts) == 300  # the failing verbose line is kept, not counted
++
++
++def test_pytest_all_passing_reduces_to_the_summary():
++    text = "\n".join(
++        ["=" * 30 + " test session starts " + "=" * 30, "collected 200 items", ""]
++        + ["tests/test_a.py " + "." * 50] * 4
++        + ["", "=" * 20 + " 200 passed in 1.10s " + "=" * 20]
++    )
++    out = preprocess_test_output(text, "")
++    assert out.rstrip().endswith("200 passed in 1.10s " + "=" * 20)
++    assert "[… 200 passing tests omitted …]" in out
++
++
++def test_quiet_pytest_summary_line_is_kept():
++    text = "\n".join(["." * 60] * 3 + ["tests/t.py ....."] * 5 + ["2 passed in 0.10s"])
++    # not a recognised runner shape without headers: left alone
++    assert preprocess_test_output(text, "") is None
++
++
++def test_jest_keeps_failure_blocks_and_summary():
++    out = preprocess_test_output(JEST, "")
++    assert out is not None and len(out) < len(JEST) / 2
++    assert "● invoices › rounds half up" in out
++    assert "Expected: 10.13" in out and "Received: 10.12" in out
++    assert "FAIL src/billing.test.js" in out
++    assert "Test Suites: 1 failed, 61 passed, 62 total" in out
++    assert "Tests:       1 failed, 120 passed, 121 total" in out
++    assert "PASS src/suite_3.test.js" not in out
++    assert "noisy debug output" not in out
++    assert re.search(r"\[… 120 passing tests omitted …\]", out)
++
++
++def test_go_keeps_fail_blocks_and_package_lines():
++    out = preprocess_test_output(GO, "")
++    assert out is not None and len(out) < len(GO) / 3
++    assert "--- FAIL: TestBad (0.00s)" in out
++    assert "    a_test.go:4: want 1 got 2" in out
++    assert "FAIL\texample.com/ex\t0.012s" in out
++    assert "ok  \texample.com/other\t0.004s" in out
++    assert "=== RUN" not in out and "--- PASS" not in out and "log line 7" not in out
++    counts = [int(n) for n in re.findall(r"\[… (\d+) passing tests? omitted …\]", out)]
++    assert sum(counts) == 1 + 120 + 1 + 1  # TestAlpha, 120 cases, TestSub and TestSub/a
++
++
++def test_cargo_keeps_failure_blocks_failures_list_and_result():
++    out = preprocess_test_output(CARGO, "")
++    assert out is not None and len(out) < len(CARGO) / 2
++    assert "---- tests::bad_one stdout ----" in out
++    assert "assertion `left == right` failed: numbers differ" in out
++    assert "failures:\n    tests::bad_one" in out
++    assert "test tests::bad_one ... FAILED" in out
++    assert "test result: FAILED. 150 passed; 1 failed" in out
++    assert "tests::ok_17 ... ok" not in out
++    assert "[… 150 passing tests omitted …]" in out
++
++
++def test_query_naming_a_passing_test_keeps_its_line():
++    out = preprocess_test_output(CARGO, "did ok_77 pass?")
++    assert "test tests::ok_77 ... ok" in out
++    assert "tests::ok_78 ... ok" not in out
++
++
++def test_gap_marker_replaces_the_count_marker():
++    out = preprocess_test_output(CARGO, "", gap_marker=lambda o, t: f"<<gap {o}>>")
++    assert "<<gap" in out and "passing tests" not in out
++
++
++def test_vitest_legacy_path_still_works():
++    text = "\n".join(
++        ["✓ src/a.test.ts (3 tests) 4ms"] * 20 + ["Tests  60 passed (60)", "Test Files  20 passed (20)"]
++    )
++    out = preprocess_test_runner(text, "")
++    assert "Tests  60 passed (60)" in out and "✓ src/a.test.ts" not in out
++
++
++def test_through_compress_context_with_hint_and_detection():
++    for text in (_pytest(), JEST, GO, CARGO):
++        for hint in (None, "test"):
++            result = compress_context(
++                text, "why did the test fail?", ccr=False, citations=False, content_hint=hint
++            )
++            assert len(result.compressed_text) < len(text) * 0.6
++            assert result.receipt["content_hint"] == hint
++    result = compress_context(
++        CARGO, "why did bad_one fail?", ccr=False, citations=False, content_hint="test"
++    )
++    assert "numbers differ" in result.compressed_text
++    assert "test result: FAILED" in result.compressed_text
++
++
++def test_reduced_jest_run_keeps_failing_test_names_through_scoring():
++    """Block scoring must not drop the failing test's file/name lines that the
++    reduction kept ("which tests failed?" used to lose 9 of 12 names)."""
++    from tameru.compress_context import compress_context
++
++    text = "".join(f"PASS src/c{i}.test.js (1.{i % 9} s)\n" for i in range(120))
++    for i in range(12):
++        text += (
++            f"FAIL src/f{i}.test.js\n  ● Suite {i} › does thing {i}\n\n"
++            f"    expect(received).toBe(expected)\n\n    Expected: {i}\n"
++            f"    Received: {i + 1}\n\n      at Object.<anonymous> (src/f{i}.test.js:11:20)\n\n"
++        )
++    text += "Test Suites: 12 failed, 120 passed, 132 total\nTests:       12 failed, 480 passed, 492 total\n"
++    for query in ("which tests failed?", "continue"):
++        out = compress_context(text, query, ccr=False, citations=False).compressed_text
++        assert len(out) < len(text)
++        for i in range(12):
++            assert f"does thing {i}" in out and f"f{i}.test.js" in out
+-- 
+2.43.0
+

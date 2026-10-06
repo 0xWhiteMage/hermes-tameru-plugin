@@ -1,6 +1,6 @@
 # Context compaction research: survey, gaps and plan
 
-**Status:** Phase R draft, written 2026-10-04. Section 7 (results) is a placeholder until the Phase 5 replay.
+**Status:** Phase R draft, written 2026-10-04. Section 7 holds the Phase 5 replay results (re-recorded 2026-10-06).
 **Scope:** this plugin (`hermes-tameru-plugin`, 1.3.0 at the time of writing) and the upstream engine
 [`0xWhiteMage/tameru-compaction-system`](https://github.com/0xWhiteMage/tameru-compaction-system).
 
@@ -15,7 +15,7 @@ Contents:
 4. [Gap matrix](#4-gap-matrix)
 5. [Adoption map](#5-adoption-map)
 6. [Not adopted, and why](#6-not-adopted-and-why)
-7. [Results (filled after Phase 5 replay)](#7-results-filled-after-phase-5-replay)
+7. [Results](#7-results)
 8. [Sources](#8-sources)
 
 ---
@@ -476,24 +476,59 @@ optional offline job.
 
 ---
 
-## 7. Results (filled after Phase 5 replay)
+## 7. Results
 
-> **Placeholder.** This section is filled with measured numbers after the Phase 5 replay. Nothing below is a
-> result yet.
+Measured with the deterministic replay in `tests/eval` (definitions, metrics and caveats in
+`tests/eval/README.md`): one scripted 30-turn session (62 model requests, about 380 KB of tool output), a fake lossy
+summarizer, Hermes' rough token estimator, seed 0, Hermes pinned at `1298c8e`. Numbers are from the saved baselines
+`tests/eval/baselines/{stock,tameru_1_4,tameru_1_4_product}.json`, re-recorded on plugin commit `5b9e198` plus the
+working-tree changes of the 1.4.0 release candidate (vendored engine 1.4.0, `VENDORED_FROM` `fd8c5b0`; the
+baselines pin the engine's output and must be re-recorded after every re-sync). Reproduce:
 
-What will go here:
+```bash
+HERMES_REPO_ROOT=/path/to/hermes-agent python tests/eval/compare.py
+HERMES_REPO_ROOT=/path/to/hermes-agent python -m pytest -q tests/eval      # includes the acceptance checks
+```
 
-- The replay metrics for stock Hermes, Tameru 1.3.0 and Tameru 1.4.0 from `tests/eval` (definitions in
-  `tests/eval/README.md`; Phase 0 baselines are recorded in `tests/eval/baselines/stock.json` and
-  `tests/eval/baselines/tameru_1_3.json`): requests, input chars, cost after cache pricing (cache read 0.1×,
-  cache write 1.25×), full compactions, prune commits, prefix chars invalidated, gold retention per probe
-  category, error-fingerprint retention, re-fetch opportunities, pairing violations and engine time.
-- The Phase 5 acceptance checks, each pass or fail: cost after cache pricing ≤ stock; full compactions ≤
-  stock; gold and error retention ≥ stock in every probe category; committed rows byte-stable across later
-  turns; tool-call pairs intact; re-fetch rate ≤ stock.
-- The tuned defaults and how they were chosen: `max_extract_chars` (start 6000), `brief_chars` (1200),
-  `retained_extract_budget_chars`, `max_risk` ("medium"), `ledger` on or off.
-- Upstream battery and threshold-sweep changes between 1.3.0 and 1.4.0.
+`tameru_1_4` uses the same Hermes prune gates as stock (48K tokens, 8,000-character minimum result);
+`tameru_1_4_product` is the plugin as shipped (2,000-character minimum result).
+
+| | stock Hermes | plugin, equal gates | plugin, as shipped |
+|---|---|---|---|
+| cost after cache pricing (char-eq) | 1,273,007 | 1,015,225 (-20.3%) | 983,687 (-22.7%) |
+| input chars, total | 6,361,016 | 5,457,084 | 5,257,665 |
+| input chars, final request | 84,080 | 122,789 (1.46x) | 122,042 (1.45x) |
+| compactions that shrank the list | 1 | 1 | 1 |
+| prune commits (rows demoted) | 2 (8) | 1 (7) | 1 (9) |
+| prefix chars invalidated | 469,751 | 285,486 | 276,150 |
+| gold retained, of 17 | 10 | 13 | 12 |
+| recall / artifact / continuation / decision | 0/6, 3/4, 3/3, 4/4 | 2/6, 4/4, 3/3, 4/4 | 1/6, 4/4, 3/3, 4/4 |
+| error fingerprints retained | 0/7 | 7/7 | 7/7 |
+| needed facts missing / calls to redo | 4 / 3 | 2 / 2 | 2 / 2 |
+| committed rows rewritten between commits | 0 | 0 | 0 |
+| tool-call pairing violations | 0 | 0 | 0 |
+| engine time | about 0.15 s | about 2.1 s | about 2.0 s |
+
+Tameru 1.3.0 on the same session (recorded in Phase 0, `baselines/tameru_1_3.json`): cost 2,215,464 (+74% over
+stock), 13 prune commits, 6 summarizer calls, 0 shrinking compactions in 6 `compress()` calls, 5/7 fingerprints.
+
+**Acceptance checks** (`test_acceptance_*` in `tests/eval/test_session_replay.py`; the release blocks on any
+failure). All pass for both plugin configurations: cost after cache pricing <= stock; shrinking compactions <=
+stock; gold retention >= stock in every probe category; error-fingerprint retention >= stock; re-fetch rate and
+calls <= stock; committed rows byte-stable between commits; tool-call pairs intact. Over seeds 0 to 5 the cost
+advantage stays between about -20% and -25%.
+
+**What is not a win, stated plainly.** The final request is 1.45x to 1.46x stock's, because two large late results
+arrive after the plugin's last cache-breaking rewrite and stay verbatim. The recall category beats stock only
+narrowly (1 to 2 of 6 against 0 of 6). The replay is one story with a fake summarizer; it supports "cheaper at
+equal or better retention in this scenario", not a claim about live sessions.
+
+**Tuned defaults and how they were chosen** (details and rejected alternatives in `tests/eval/README.md`):
+`retained_extract_budget_chars` 6,000 (swept 3,000 to 12,000; 3,000 lost fingerprints on one seed, 8,000 and up cost
+about 1% more); `prune_tail` `tokens` (removes the dependence on where the one commit falls relative to a 20-message
+tail and carries most of the cost win); `ledger` on (an `Errors:` block turned fingerprints from 0/7 to 7/7 for
+about 1 KB once); `brief_chars` 1,200, `max_extract_chars` 6,000 and `max_risk` `medium` unchanged (moved cost by
+under 1% or made it worse).
 
 ---
 
