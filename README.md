@@ -23,8 +23,11 @@ Where Hermes writes a one-line summary, the plugin runs a deterministic ladder:
    output, which would only make the engine keep everything). Accepted only if it is not fail-open, its risk is within `max_risk`, it saves at
    least `min_savings`, fits `max_extract_chars`, and **keeps at least one exemplar line of every distinct
    ERROR/FAIL fingerprint the original had**.
-3. **Brief.** Otherwise a structural brief of at most `brief_chars` (errors and warnings, head and tail;
-   JSON-aware for JSON).
+   An extract over the cap is retried at fixed budgets; a forced cut must still keep one of the lines the
+   query points at.
+3. **Brief.** Otherwise a structural brief (error exemplars, query lines, warnings, head and tail; JSON-aware for
+   JSON). It starts at `brief_chars` and grows in steps, up to the extract cap, until it holds an exemplar of
+   every error fingerprint of the original.
 4. **Header.** Otherwise, or for old rows once the retained-extract budget is spent, a header-only row.
 5. **Hermes' own line** as the last resort.
 
@@ -136,7 +139,8 @@ plugins:
 | `enabled` | `true` | Kill switch. `false` makes the engine behave as stock Hermes (see below). |
 | `min_tool_chars` | `800` | Results shorter than this take Hermes' own one-line path. |
 | `max_extract_chars` | `6000` | Cap on a rendered extract row, header and markers included. |
-| `brief_chars` | `1200` | Cap on a brief row. |
+| `brief_chars` | `1200` | Starting size of a brief row (it grows up to `max_extract_chars` while an error fingerprint is missing). |
+| `brief_share` | `0.0` | Start the brief at this share of the result instead, when larger (0 to <1). `0.25` keeps more answers per row but, in the replay, fewer older rows keep a body. |
 | `max_risk` | `high` | Highest engine `compression_risk` an extract may have (`low`, `medium`, `high`). The engine rates almost any cut past about 80% "high", so a lower ceiling mostly pushes rows to the query-blind brief. |
 | `min_savings` | `0.10` | An extract must be at most `(1 - min_savings)` of the original (0 to <1). |
 | `exempt_tools` | `[]` | Extra tool names left to Hermes' own handling (added to the built-in exempt set). |
@@ -145,7 +149,7 @@ plugins:
 | `store_max_entries` | `512` | Originals kept in memory for `tameru_expand` (LRU). |
 | `store_max_chars` | `32000000` | Total characters of originals kept in memory (LRU). |
 | `pass_char_budget` | `4000000` | Original characters the ladder may process in one pass; rows beyond it use Hermes' line. |
-| `retained_extract_budget_chars` | `6000` | Total size of extract/brief bodies the newest rendered rows may keep; older ones step down to a header (ref kept), only inside a pass Hermes already commits. |
+| `retained_extract_budget_chars` | `6000` | Total size of extract/brief bodies rendered rows may keep. Committed rows keep theirs newest first; a new row gets what is left, else a header. Rows beyond it step down to a header (ref kept), only inside a pass Hermes already commits. |
 | `prune_tail` | `tokens` | Tail protected by the proactive prune: `tokens` (the shorter of `protect_last_n` and the full compaction's tail token budget, and pass 4 also runs) or `count` (Hermes' `protect_last_n` messages, stock behaviour). |
 | `supersession` | `true` | Enable structural supersession. |
 | `ledger` | `true` | Add the artifact trail to Hermes' compaction summary. |
@@ -253,8 +257,12 @@ the pass is retried once with header-only rungs, which reclaim more.
 - Replay numbers come from one scripted 30-turn session with a fake lossy summarizer and Hermes' rough token
   estimator, not from live models. See [tests/eval/README.md](tests/eval/README.md) and
   [docs/compaction-research.md](docs/compaction-research.md) section 7 for the measured results and their limits.
-- The engine's risk rating is coarse (any deep cut on a large log reads as `high`), so most large rows end up as
-  briefs rather than extracts.
+- Output whose extract cannot shrink under `max_extract_chars` (big logs, `grep` output where every line matches,
+  a pytest failure with a long captured log) ends as a brief. The brief keeps every error template, but a
+  specific matching line can be cut: in the QA set of agent outputs, 2 of 14 answer strings were lost (a `grep`
+  hit, a pytest assertion line), against 1 for plugin 1.3.0 and all 14 for stock Hermes
+  ([report](docs/REPORT-1.4.0.md)).
+- Results under `min_tool_chars` (800) get Hermes' own one-line summary, as in stock Hermes.
 - Re-sync of the vendored engine invalidates the saved replay baselines on purpose; they must be re-recorded.
 
 ## Compatibility
@@ -294,6 +302,7 @@ After a sync, update `VENDORED_FROM`, re-record the replay baselines and read th
 ## More
 
 - [CHANGELOG.md](CHANGELOG.md)
+- [docs/REPORT-1.4.0.md](docs/REPORT-1.4.0.md): what changed from 1.3.0, measured against 1.3.0 and stock Hermes, QA findings.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, real-Hermes setup, replay harness, CI.
 - [docs/compaction-research.md](docs/compaction-research.md): survey, gap analysis (G1 to G16) and results.
 

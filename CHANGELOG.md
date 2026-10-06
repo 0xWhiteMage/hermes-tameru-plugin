@@ -5,6 +5,30 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.4.0] - 2026-10-06
 
+### Fixed (QA round 2, same release; see [docs/REPORT-1.4.0.md](docs/REPORT-1.4.0.md))
+- **Oversized results lost the answer.** An extract over `max_extract_chars` got one fixed-budget retry. Log, grep
+  and pytest output cannot shrink under it, so those rows fell to a fixed 1,200-char brief. Over 13 agent outputs,
+  5 of 14 answers and 6 of 20 error templates were lost. Now:
+  - fixed-budget retries iterate;
+  - a forced cut must keep one of the engine's top query-evidence lines;
+  - the brief grows in steps up to the cap until it holds every error template.
+
+  After the fix: 12/14 answers, 20/20 error templates. New opt-in `brief_share`.
+- `tameru_expand` refuses catastrophic-backtracking `grep` patterns (`(x|x)*y` hung the agent).
+- Supersession no longer hides a result that answered a different question:
+  - quoted spacing differs (`grep "a  b"` vs `grep "a b"`);
+  - the same relative command before and after a `cd`;
+  - `ls -R` followed by `ls`.
+- Telemetry no longer counts renders for passes Hermes declined to commit.
+- The status message honours Hermes' suppress flag and the kill switch.
+- A note quoting `[tameru:` cannot hijack header parsing.
+- Engine re-vendored at `11b9e5e`:
+  - test-runner reduction keeps errors printed around a run;
+  - log templates no longer merge messages that differ by a quoted name or path;
+  - zero-count failure lines keep error protection;
+  - JSON fold is byte-exact;
+  - recursion markers are found inside JSON payloads.
+
 ### Fixed (QA round, same release)
 - **Benchmark parity.** The task query included the tool's own command (`cat report.txt`); the engine reads a
   file name that is absent from the output as "the answer is not here" and keeps the whole result, so 11 of 14
