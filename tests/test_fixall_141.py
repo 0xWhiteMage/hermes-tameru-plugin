@@ -6,6 +6,9 @@ import time
 
 import pytest
 
+from engine_support import make_engine, prune_pass
+
+from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.recovery import OriginalStore, expand
 
 REF = "ab12cd34"
@@ -55,3 +58,28 @@ def test_the_engine_passes_its_grep_settings_to_expand():
     engine._store.put(REF, "a" * 3000 + "\n" + "b" * 30)
     out = json.loads(engine.handle_tool_call("tameru_expand", {"ref": REF, "grep": "b"}))
     assert out["matched_lines"] == [2] and out["lines_capped"] == 2
+
+
+# ---- R5: the pass-2 reservation covers briefs too --------------------------------------------------------------
+def test_r5_an_old_brief_does_not_starve_the_newest_rows():
+    """Red-team R5: 1.4.1 reserved room for later rows against an old row's *extract* only; its brief still
+    took the room, so with a tight budget the oldest rows kept briefs and the newest fell to headers."""
+    from test_retained_budget import ROWS, _bodies, _rungs, _session
+
+    messages, idxs = _session()
+    budget = 3000
+    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
+    rungs = _rungs(out, idxs)
+    assert rungs[-1] != "header" and rungs[0] == "header", rungs
+    assert _bodies(out, idxs) <= budget
+    assert len(rungs) == ROWS
+
+
+def test_r5_brief_estimate_is_deterministic_and_bounded():
+    engine = make_engine(TameruSettings())
+    plain = "x" * 20_000
+    failing = "Traceback (most recent call last):\n  File \"a.py\", line 1\nValueError: bad\n" + "y" * 20_000
+    a, b = engine._brief_estimate(plain), engine._brief_estimate(failing)
+    assert a == engine._brief_estimate(plain)
+    assert a >= engine._settings.brief_chars and b > a
+    assert engine._brief_estimate("z" * 900) <= int((1 - engine._settings.min_savings) * 900)

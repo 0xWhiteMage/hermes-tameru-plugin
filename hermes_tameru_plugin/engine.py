@@ -167,6 +167,7 @@ class _Pass:
     room: int = 0                                 # retained-extract chars left for new rows
     boundary: int | None = None                   # Hermes' prune boundary of this pass (pass 2 runs below it)
     pending: list[int] | None = None              # pass-2 rows the ladder may still render, oldest first
+    reserve_tail: list[int] | None = None         # reserve_tail[k]: estimated brief chars of pending[k:]
     gone: list[str] = field(default_factory=list)  # refs of rows this pass cut down to a body-less header
 
 
@@ -506,19 +507,23 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         ]
         capped = min(settings.max_extract_chars, int((1 - settings.min_savings) * len(content)))
         limit = min(capped, scope.room)
-        # Hermes walks pass 2 oldest first, while the retained budget favours the newest rows: an old
-        # row's extract may not take the room the rows still to come in this pass need for a brief.
-        extract_limit = min(limit, scope.room - self._reserved_after(scope, result, idx, call_id_to_tool, min_prune_chars))
+        # Hermes walks pass 2 oldest first, while the retained budget favours the newest rows: an old row's
+        # extract or brief may not take the room the rows still to come in this pass need for their briefs.
+        free = scope.room - self._reserved_after(scope, result, idx, call_id_to_tool, min_prune_chars)
+        own_limit = min(limit, free)
+        # A brief squeezed below half its start size keeps little more than its header: a header row (ref kept)
+        # leaves that room to the newer rows instead.
+        brief_limit = own_limit if own_limit >= settings.brief_chars // 2 else 0
         hint = content_hint(tool, args, pl.inner)
         for rung, build in (
-            ("extract", lambda: self._extract_row(line, pl, ref, query, hint, extract_limit)),
-            ("brief", lambda: self._brief_row(line, pl, ref, query, limit)),
+            ("extract", lambda: self._extract_row(line, pl, ref, query, hint, own_limit)),
+            ("brief", lambda: self._brief_row(line, pl, ref, query, brief_limit) if brief_limit > 0 else None),
         ):
             rendered = build()   # lazily: the brief is only computed when the extract was refused
             if rendered is not None:
                 scope.room -= len(rendered)
                 return self._commit(result, idx, content, tool, ref, pl, scope, rung, rendered)
-        if scope.room < capped:   # the retained budget, not the savings rule, ruled the extract out
+        if free < capped:   # the retained budget (and its reservation), not the savings rule, ruled the body out
             return self._commit(
                 result, idx, content, tool, ref, pl, scope, "header",
                 self._header_row(line, pl, ref, "header"),
@@ -530,8 +535,10 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
     ) -> int:
         """Retained-budget chars to leave for the rows pass 2 has still to visit after ``idx``.
 
-        ``brief_chars`` per row that the ladder could render (unrendered tool rows over both size floors,
-        not exempt) between ``idx`` and the prune boundary; 0 outside pass 2.
+        The estimated brief of each row the ladder could render (unrendered tool rows over both size floors,
+        not exempt, not a spill) between ``idx`` and the prune boundary; 0 outside pass 2. A brief starts at
+        ``max(brief_chars, brief_share * len)`` and grows by half while an error template is missing, so a row with
+        an error fingerprint is estimated one step up; never above the row's own extract cap.
         """
         boundary = scope.boundary
         if boundary is None or idx >= boundary or scope.pressure:
@@ -548,9 +555,20 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                     and call_id_to_tool.get(msg.get("tool_call_id") or "", ("unknown", ""))[0] not in self._exempt
                 ):
                     pending.append(j)
-            scope.pending = pending
-        later = len(scope.pending) - bisect.bisect_right(scope.pending, idx)
-        return later * self._settings.brief_chars
+            tail = [0] * (len(pending) + 1)
+            for k in range(len(pending) - 1, -1, -1):
+                tail[k] = tail[k + 1] + self._brief_estimate(result[pending[k]]["content"])
+            scope.pending, scope.reserve_tail = pending, tail
+        return scope.reserve_tail[bisect.bisect_right(scope.pending, idx)]
+
+    def _brief_estimate(self, content: str) -> int:
+        """Deterministic estimate of the brief row ``content`` would get (see ``_reserved_after``)."""
+        settings = self._settings
+        inner = parse_payload(content).inner
+        size = max(settings.brief_chars, int(settings.brief_share * len(inner)))
+        if error_fingerprints(inner):
+            size = size * 3 // 2
+        return min(size, settings.max_extract_chars, int((1 - settings.min_savings) * len(content)))
 
     # ---- ladder rungs -------------------------------------------------------------------------
     @staticmethod

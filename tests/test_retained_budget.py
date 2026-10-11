@@ -56,13 +56,14 @@ def test_rows_beyond_the_budget_step_down_newest_first():
 
 
 def test_one_pass_keeps_its_bodies_within_the_budget():
-    """Rows get bodies in the order Hermes visits them (oldest first) until the budget is spent."""
+    """Within one pass the budget goes to the newest rows first (fix-all R5: briefs honour the pass-2
+    reservation too), and the older rows fall back to headers."""
     messages, idxs = _session()
     budget = 4000
     out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
     bodied = [_rungs(out, idxs)[k] != "header" for k in range(ROWS)]
     assert any(bodied) and not all(bodied)
-    assert bodied == sorted(bodied, reverse=True), bodied
+    assert bodied == sorted(bodied), bodied
     assert _bodies(out, idxs) <= budget
     for i in idxs:   # every row stays recoverable
         assert parse_header(out[i]["content"])["ref"]
@@ -125,13 +126,14 @@ def _old_failure_then_logs() -> tuple[list[dict], int, list[int]]:
 def test_an_old_extract_leaves_room_for_the_briefs_still_to_come():
     """Hermes visits pass 2 oldest first. 1.4.1: an old row's extract may only use the room left after a
     ``brief_chars`` reservation for each later row of the pass, so one big early extract no longer starves the
-    newer rows down to headers (the tameru_1_4 replay regression)."""
+    newer rows down to headers (the tameru_1_4 replay regression). Fix-all R5: the brief honours the
+    reservation too, so here the old row only keeps its header and every newer log keeps a brief."""
     messages, old, idxs = _old_failure_then_logs()
     budget = 6000
     out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
     rungs = _rungs(out, [old, *idxs])
-    assert rungs[0] == "brief", rungs                      # the extract (~3.3k) would not leave room
-    assert sum(r != "header" for r in rungs[1:]) >= 3, rungs
+    assert rungs[0] == "header", rungs          # neither its extract (~3.3k) nor its brief leaves the room
+    assert rungs[1:] == ["brief"] * len(idxs), rungs
     assert _bodies(out, [old, *idxs]) <= budget
 
 
