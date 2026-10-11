@@ -3,7 +3,8 @@
     HERMES_REPO_ROOT=<hermes checkout> python tests/eval/compare.py [engine ...] [--json]
 
 Defaults to every engine in ``engines.BASELINE_ENGINES`` plus any extra registered ones named on the command
-line. Not collected by pytest.
+line. Not collected by pytest. Runs against a throwaway ``HERMES_HOME`` unless ``TAMERU_EVAL_HERMES_HOME=<dir>``
+or ``TAMERU_EVAL_KEEP_HERMES_HOME=1`` (keep the one in the environment).
 """
 from __future__ import annotations
 
@@ -23,9 +24,14 @@ def _bootstrap() -> None:
     root = os.environ.get("HERMES_REPO_ROOT", "").strip()
     if not root:
         sys.exit("set HERMES_REPO_ROOT to a Hermes Agent checkout")
+    # Always a throwaway HERMES_HOME, even when one is set in the environment: replays write state (memory,
+    # sessions, plugin store), and a developer's shell often exports their real home. Opt-outs:
+    # TAMERU_EVAL_HERMES_HOME=<dir> picks the directory, TAMERU_EVAL_KEEP_HERMES_HOME=1 keeps $HERMES_HOME.
     chosen = os.environ.get("TAMERU_EVAL_HERMES_HOME", "").strip()
     if chosen:
         os.environ["HERMES_HOME"] = chosen
+    elif os.environ.get("TAMERU_EVAL_KEEP_HERMES_HOME", "").strip() == "1" and os.environ.get("HERMES_HOME"):
+        pass
     else:
         home = tempfile.mkdtemp(prefix="tameru-eval-home-")
         os.environ["HERMES_HOME"] = home

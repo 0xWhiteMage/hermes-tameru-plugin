@@ -105,6 +105,7 @@ def test_inline_short_gaps_in_extract() -> None:
 
 def test_compare_bootstrap_isolates_hermes_home(tmp_path, monkeypatch) -> None:
     monkeypatch.delenv("TAMERU_EVAL_HERMES_HOME", raising=False)
+    monkeypatch.delenv("TAMERU_EVAL_KEEP_HERMES_HOME", raising=False)
     monkeypatch.setenv("HERMES_REPO_ROOT", str(tmp_path))
     monkeypatch.setenv("HERMES_HOME", str(tmp_path / "user_home"))
     monkeypatch.setattr(sys, "path", list(sys.path))
@@ -117,3 +118,12 @@ def test_compare_bootstrap_isolates_hermes_home(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TAMERU_EVAL_HERMES_HOME", str(tmp_path / "chosen"))
     module._bootstrap()
     assert os.environ["HERMES_HOME"] == str(tmp_path / "chosen")
+    monkeypatch.delenv("TAMERU_EVAL_HERMES_HOME")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "user_home"))
+    monkeypatch.setenv("TAMERU_EVAL_KEEP_HERMES_HOME", "0")
+    module._bootstrap()
+    assert os.environ["HERMES_HOME"] != str(tmp_path / "user_home")
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "user_home"))
+    monkeypatch.setenv("TAMERU_EVAL_KEEP_HERMES_HOME", "1")
+    module._bootstrap()
+    assert os.environ["HERMES_HOME"] == str(tmp_path / "user_home")
