@@ -272,3 +272,22 @@ def test_a_zero_brief_size_terminates():
                              settings=TameruSettings(brief_chars=0, max_risk="low", max_extract_chars=2000))
     changed, out = demote(engine, msgs, idx)
     assert changed and len(out[idx]["content"]) <= 2000
+
+
+@pytest.mark.parametrize("tool, args", [("terminal", {"command": "pytest -v"}), ("read_file", {"path": "tests/test_orders.py"})])
+def test_the_query_leaves_out_the_bare_tool_name(monkeypatch, tool, args):
+    """1.4.1: the engine's task query includes the call's function name. Every row of one tool shares that word
+    ("terminal"), so it only selects incidental lines (measured: engine-alone git_log 93.9% -> 81.0% saved with
+    it). The call's argument values stay in the query."""
+    from hermes_tameru_plugin import engine as engine_module
+
+    seen: list[list[str]] = []
+    real = engine_module.TameruContextEngine._extract_row
+    monkeypatch.setattr(
+        engine_module.TameruContextEngine, "_extract_row",
+        lambda self, line, pl, ref, query, *a: seen.append(list(query)) or real(self, line, pl, ref, query, *a),
+    )
+    engine, msgs, idx = _one(TASK_NAMING_THE_TEST, tool, args, pytest_failure_with_passes())
+    demote(engine, msgs, idx)
+    assert seen and all(tool not in q for q in seen)
+    assert any(any(str(v) in part for part in q) for q in seen for v in args.values())

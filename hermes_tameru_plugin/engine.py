@@ -494,9 +494,14 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 self._header_row(line, pl, ref, "header"),
             )
 
-        query = usable_query(
-            build_query(view, idx, focus=scope.focus, cache=scope.query_cache), pl.inner,
-        )
+        # The engine's task query names the tool itself ("terminal", "read_file"): in an agent transcript every
+        # row shares that word and it selects incidental lines, so the plugin leaves it out.
+        query = [
+            part for part in usable_query(
+                build_query(view, idx, focus=scope.focus, cache=scope.query_cache), pl.inner,
+            )
+            if part != tool
+        ]
         capped = min(settings.max_extract_chars, int((1 - settings.min_savings) * len(content)))
         limit = min(capped, scope.room)
         # Hermes walks pass 2 oldest first, while the retained budget favours the newest rows: an old
