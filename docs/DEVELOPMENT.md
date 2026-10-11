@@ -44,7 +44,11 @@ Metrics and caveats are defined in [tests/eval/README.md](../tests/eval/README.m
 HERMES_REPO_ROOT=... python -m pytest -q tests/eval         # tests and acceptance checks
 HERMES_REPO_ROOT=... python tests/eval/compare.py           # side-by-side table
 HERMES_REPO_ROOT=... python tests/eval/compare.py --json
+HERMES_REPO_ROOT=... python tests/eval/per_result.py        # one demotion per agent output; plugin vs engine alone
 ```
+
+`compare.py` and `per_result.py` run against a throwaway `HERMES_HOME`; set `TAMERU_EVAL_HERMES_HOME=<dir>` to choose
+one (compare.py) or `TAMERU_EVAL_KEEP_HERMES_HOME=1` to keep the one in the environment.
 
 Re-record the saved baselines (`tests/eval/baselines/*.json`) after an intended change (Hermes bump, scenario or
 metric change, or a re-sync of the vendored engine, whose output the `tameru_1_4*` baselines pin):

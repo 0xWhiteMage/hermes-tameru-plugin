@@ -3,6 +3,47 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased] (1.4.1 candidate, local branch `locally/finish-1.4`)
+
+Fixes from the first live Hermes sessions and for the two answers 1.4.0 still lost. Numbers are in
+[docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md). The vendored engine is the local 1.4.1 candidate (`e099d10`, not upstream
+yet; patches in [docs/upstream-patches/](docs/upstream-patches/README.md)).
+
+### Fixed
+- **A result that quoted `<persisted-output>` was taken for a Hermes spill.** A live 29.5K `git log` that mentioned
+  the tag was reduced to the spill one-liner. A result is a spill only when it starts with the tag
+  (`hermes_compat.is_persisted_block`); Hermes may append subdirectory hints after the closing tag, so "ends with"
+  would be wrong.
+- **Both answers 1.4.0 lost are kept** (per-result QA set, `tests/eval/per_result.py`: 12/14 answers in 1.4.0,
+  14/14 now, 22/22 error templates both):
+  - a pytest failure with a long captured log now takes the extract (the engine collapses the captured section);
+  - a saturated `rg -n Name` keeps the definition line (the engine no longer treats `-n` as the query's selector,
+    and one host marker covers a run of fully omitted files instead of one ~100-char marker each).
+- **Replay regression in the 1.4.1 work, before release.** With the larger pytest extract, one old row used the
+  whole retained budget in pass 2 (Hermes visits oldest first) and the newer rows fell to headers: `tameru_1_4`
+  gold 13/17 went to 10/17. An extract in pass 2 now leaves `brief_chars` per later row that could still be
+  rendered. Gold is back to 13/17 (equal gates) and 12/17 (product), as in 1.4.0.
+- `tests/eval/compare.py` always uses a throwaway `HERMES_HOME` (a replay writes Hermes state). Opt out with
+  `TAMERU_EVAL_HERMES_HOME=<dir>` or `TAMERU_EVAL_KEEP_HERMES_HOME=1`.
+
+### Changed
+- The extract query no longer includes the bare tool name (`terminal`, `read_file`): every row of a tool shares it,
+  so it only selected incidental lines. Engine corpus through the plugin: mean 65.9% to 67.5% saved, `git_log`
+  69.1% to 87.6%, gold 15/15 before and after.
+- Short gaps are inlined when Hermes' ~100-char marker would be longer than the text it replaces (engine
+  `inline_short_gaps`). Engine corpus: `travis_yaml` 13.5% to 23.4%, `jp_musubi` 26.5% to 29.4%.
+- Product-arm replay cost: 986,072 to 990,003 cache-priced (+0.4%), baseline re-recorded.
+
+### Added
+- `tests/eval/per_result.py`: one demotion per agent output (rung, saved %, answers, error templates) and the
+  engine corpus through the plugin and through the engine alone.
+
+### Notes
+- `tameru_expand` is only offered when Hermes injects context-engine tools: no `-t`/`enabled_toolsets` restriction,
+  or one that includes `context_engine`. `hermes chat -t terminal,file` hides it.
+- Newer Hermes logs `capability_check ... capability=tools.override decision=deny evidence=not granted` at every
+  plugin load. That is Hermes probing the tool-override policy; it is not about `tameru_expand` and needs no action.
+
 ## [1.4.0] - 2026-10-06
 
 ### Fixed (QA round 2, same release; see [docs/REPORT-1.4.0.md](docs/REPORT-1.4.0.md))

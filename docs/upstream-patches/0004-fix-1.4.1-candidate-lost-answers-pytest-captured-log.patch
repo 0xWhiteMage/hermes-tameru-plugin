@@ -1,0 +1,1025 @@
+From 173a94861d7ee54068a88d34daa049b1051cb48b Mon Sep 17 00:00:00 2001
+From: Benjamin Ang <hello@benjaminang.tv>
+Date: Mon, 12 Oct 2026 00:04:27 +0800
+Subject: [PATCH 4/5] fix: 1.4.1 candidate - lost answers (pytest captured
+ logs, saturated rg), opt-in short-gap inlining, secrets screen
+
+Code written by the local model (Qwen3.8 27B Kearuga ThinkingCap, xhigh), reviewed
+and tested here; mechanical review fixes noted below.
+
+- agent_formats: collapse long pytest Captured log/stdout/stderr sections (keep
+  first/last 2, error-fingerprint and WARNING+ lines) instead of keeping them
+  whole, so a failure block with a 60-line captured log no longer fails open.
+- agent_formats: grep/rg saturation mode (query hits >= 80% of matches): keep
+  definitions/assignments, other query words and distinct lines per file.
+- compress_context/format_adapters: InliningGapMarker + compress_context
+  inline_short_gaps=False: inline a dropped span when the marker is not shorter.
+  Default path byte-identical (battery 15/15, sweep unchanged).
+- secrets screen: AIza, sk_live_/rk_live_, bearer tokens, unquoted KEY=value.
+- tests: new test files for all of the above; the Python-3.12+-dependent
+  deep-malformed cache test accepts either sweep outcome (no raise, no retrieval).
+
+Review fixes by hand: regex constants moved next to the pytest regexes, grep
+regexes hoisted to module level, a dropped comment restored, the model's
+sweep_ccr_cache change reverted (it broke 4 privacy/cleanup tests; docstring
+corrected instead), test fixture text for the inline test and one assertion
+in the captured-section test corrected.
+---
+ CHANGELOG.md                           |  19 +++
+ src/tameru/agent_formats.py            | 167 +++++++++++++++++++--
+ src/tameru/compress_context.py         |  64 +++++++-
+ src/tameru/format_adapters.py          |  34 +++--
+ tests/test_gap_marker_inline.py        | 194 +++++++++++++++++++++++++
+ tests/test_grep_saturated_query.py     |  64 ++++++++
+ tests/test_production_reliability.py   |   5 +-
+ tests/test_pytest_captured_sections.py | 133 +++++++++++++++++
+ tests/test_secrets_screen_141.py       |  38 +++++
+ 9 files changed, 689 insertions(+), 29 deletions(-)
+ create mode 100644 tests/test_gap_marker_inline.py
+ create mode 100644 tests/test_grep_saturated_query.py
+ create mode 100644 tests/test_pytest_captured_sections.py
+ create mode 100644 tests/test_secrets_screen_141.py
+
+diff --git a/CHANGELOG.md b/CHANGELOG.md
+index 81fe1f8..f8630a4 100644
+--- a/CHANGELOG.md
++++ b/CHANGELOG.md
+@@ -6,6 +6,25 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
+ 
+ ---
+ 
++## [Unreleased] (1.4.1 candidate, local branch `locally/1.4.0-patches`)
++
++Fixes for the two answers the 1.4.0 plugin report listed as lost, an opt-in
++gap-marker change for hosts with long markers, and two small correctness items.
++With default arguments (`gap_marker=None`, `inline_short_gaps=False`) output is
++byte-identical to 1.4.0: `run_battery` 15/15 and `threshold_sweep`
++77.3 / 68.4 / 61.2 / 41.5 / 24.9 % are unchanged.
++
++### Added
++- `compress_context(..., inline_short_gaps=False)` and `InliningGapMarker`: with a caller `gap_marker`, a dropped span whose marker would not be shorter than the span is kept verbatim (renderer and adapter cuts). Off by default.
++
++### Changed
++- pytest reduction: a `Captured log/stdout/stderr` section of more than 6 lines inside a failure block is collapsed to its first 2 and last 2 lines plus every error-fingerprint line and every WARNING/ERROR/CRITICAL/FATAL line (`[… N captured lines omitted …]` without a caller marker). Before, the whole section was kept and a long captured log made the run fail open.
++- grep/rg adapter: when the query hits at least 80% of all matches (and there are more than `2 * per_file_cap`), it keeps per file the definition/assignment lines that hit, lines hitting the other query words, and distinct match texts (deduplicated across files, capped per file). Before, an all-matching `rg -n Name` kept everything and the definition line was lost in the plugin's brief.
++- Secrets screen also matches Google API keys (`AIza...`), Stripe live keys (`sk_live_`/`rk_live_`), bearer tokens and unquoted `KEY=value` assignments of 16+ chars.
++
++### Fixed
++- `test_deep_malformed_cache_record_does_not_raise` failed on Python 3.12+ (a 1000-deep list now parses and is removed as a non-record; older versions raised RecursionError and kept it). The test now accepts either outcome and still requires no exception and no retrieval; `sweep_ccr_cache`'s docstring now says that parseable non-records are removed (that was already the behaviour other tests pin).
++
+ ## [1.4.0] - 2026-10-06
+ 
+ Agent tool-output quality (Phase 1a/1b) and a plugin-facing API for
+diff --git a/src/tameru/agent_formats.py b/src/tameru/agent_formats.py
+index 965a1f5..53a9c89 100644
+--- a/src/tameru/agent_formats.py
++++ b/src/tameru/agent_formats.py
+@@ -519,6 +519,14 @@ class _GrepRec:
+     group: int  # `--` separator group
+ 
+ 
++# v1.4.1: a saturated grep query (it hits nearly every match) keeps the lines
++# that define or assign the searched name.
++_GREP_DEFINITION_RE = re.compile(
++    r"^\s*(?:export\s+)?(?:pub(?:\([^)]*\))?\s+)?(?:async\s+)?(?:class|def|function|func|fn|interface|struct|enum|trait|type|impl|module|const|let|var)\b"
++)
++_GREP_ASSIGNMENT_RE = re.compile(r"^\s*[A-Za-z_][\w.]*\s*(?::[^=]+)?=\s*")
++
++
+ def adapt_grep_lines(
+     text: str,
+     query: str,
+@@ -530,7 +538,13 @@ def adapt_grep_lines(
+     ``  L<line>: <text>`` for the kept matches. Matches that mention the query
+     are kept; a file with none keeps its first ``per_file_cap``. One marker per
+     run of omitted matches. With no query the regroup is lossless whenever it
+-    is shorter than the input (otherwise the per-file cap applies)."""
++    is shorter than the input (otherwise the per-file cap applies).
++
++    When the query is saturated (it hits >=80% of all matches and there are
++    more than ``2 * per_file_cap`` matches), keep per file definition lines,
++    lines hitting the remaining query words, and the first occurrence of each
++    distinct match text (capped at ``per_file_cap`` new distinct lines).
++    """
+     if not detect_grep_lines(text):
+         return None
+     per_file: dict[str, list[_GrepRec]] = {}
+@@ -553,6 +567,55 @@ def adapt_grep_lines(
+     matcher = _matcher_for(query)
+     total_matches = sum(1 for recs in per_file.values() for r in recs if r.kind == "m")
+ 
++    saturated = False
++    saturated_keep: dict[str, set[int]] = {}
++    if not matcher.empty and total_matches > 2 * per_file_cap:
++        match_texts = [r.text for recs in per_file.values() for r in recs if r.kind == "m"]
++        hits_count = sum(1 for t in match_texts if matcher.hit(t))
++        if hits_count > 0 and hits_count * 5 >= total_matches * 4:
++            saturated = True
++            from .format_adapters import _query_selectors
++
++            selectors = tuple(_query_selectors(query or ""))
++            remaining: list[str] = []
++            for selector in selectors:
++                selector_matcher = _Matcher((selector,))
++                selector_hits = sum(1 for t in match_texts if selector_matcher.hit(t))
++                if selector_hits * 5 < total_matches * 4:
++                    remaining.append(selector)
++            other_matcher = _Matcher(tuple(remaining)) if remaining else _Matcher(())
++            seen_texts: set[str] = set()
++            for path, recs in per_file.items():
++                selected: set[int] = set()
++                for i, r in enumerate(recs):
++                    if (
++                        r.kind == "m"
++                        and matcher.hit(r.text)
++                        and (_GREP_DEFINITION_RE.match(r.text) or _GREP_ASSIGNMENT_RE.match(r.text))
++                    ):
++                        selected.add(i)
++                if not other_matcher.empty:
++                    for i, r in enumerate(recs):
++                        if r.kind == "m" and other_matcher.hit(r.text):
++                            selected.add(i)
++                distinct_kept = 0
++                for i, r in enumerate(recs):
++                    if r.kind != "m":
++                        continue
++                    key = r.text.strip()
++                    if not key or key in seen_texts:
++                        continue
++                    if i in selected:
++                        seen_texts.add(key)
++                        distinct_kept += 1
++                    elif distinct_kept < per_file_cap:
++                        selected.add(i)
++                        seen_texts.add(key)
++                        distinct_kept += 1
++                    else:
++                        seen_texts.add(key)
++                saturated_keep[path] = selected
++
+     any_hit = [False]
+ 
+     def render(keep_all: bool) -> tuple[str, int]:
+@@ -563,10 +626,15 @@ def adapt_grep_lines(
+             keep = [True] * len(recs)
+             if not keep_all:
+                 keep = [False] * len(recs)
+-                hits = [i for i in matches if matcher.hit(recs[i].text)] if not matcher.empty else []
+-                any_hit[0] = any_hit[0] or bool(hits)
+-                for i in hits or matches[:per_file_cap]:
+-                    keep[i] = True
++                if saturated:
++                    any_hit[0] = True
++                    for i in saturated_keep.get(path, ()):
++                        keep[i] = True
++                else:
++                    hits = [i for i in matches if matcher.hit(recs[i].text)] if not matcher.empty else []
++                    any_hit[0] = any_hit[0] or bool(hits)
++                    for i in hits or matches[:per_file_cap]:
++                        keep[i] = True
+                 # Context lines survive next to a kept match (same `--` group).
+                 near = False
+                 last_group = -1
+@@ -626,6 +694,16 @@ def adapt_grep_lines(
+             return AdapterResult(
+                 "grep", lossless, total_matches, kept, "lossless regroup by file"
+             )
++    if saturated:
++        body, kept = render(False)
++        return AdapterResult(
++            "grep",
++            body,
++            total_matches,
++            kept,
++            "matches grouped by file; saturated query: definitions, other query words, distinct lines",
++            hit=True,
++        )
+     body, kept = render(False)
+     return AdapterResult(
+         "grep",
+@@ -712,6 +790,7 @@ def _render_kept(
+     suites: list[int],
+     gap_marker: GapMarker | None,
+     total: int,
++    captured: list[int] | None = None,
+ ) -> str:
+     out: list[str] = []
+     run: list[int] = []
+@@ -729,6 +808,10 @@ def _render_kept(
+             out.append(f"[… {n_tests} passing {'test' if n_tests == 1 else 'tests'} omitted …]")
+         elif n_suites:
+             out.append(f"[… {n_suites} passing {'suite' if n_suites == 1 else 'suites'} omitted …]")
++        elif captured is not None and any(captured[i] for i in run):
++            n_captured = sum(1 for i in run if lines[i].strip())
++            if n_captured:
++                out.append(f"[… {n_captured} captured lines omitted …]")
+         run.clear()
+ 
+     for i, ln in enumerate(lines):
+@@ -757,17 +840,28 @@ _PYTEST_FAILURE_WORD_RE = re.compile(
+     re.IGNORECASE,
+ )
+ 
++# v1.4.1: captured-output sub-sections inside a pytest failure block.
++_PYTEST_CAPTURED_HDR_RE = re.compile(
++    r"^-{3,} Captured (?:log|stdout|stderr) (?:setup|call|teardown) -{3,}$"
++)
++_PYTEST_RULE_HDR_RE = re.compile(r"^[=-]{3,}\s.*\s[=-]{3,}$|^[=-]{3,}$")
++_PYTEST_TEST_BLOCK_HDR_RE = re.compile(r"^_{3,} .+ _{3,}$")
++_PYTEST_LOG_LEVEL_RE = re.compile(r"^(WARNING|ERROR|CRITICAL|FATAL)\b")
++
+ 
+-def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
++def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int], list[int]]:
+     n = len(lines)
+     keep = [False] * n
+     tests = [0] * n
+     suites = [0] * n
++    captured = [0] * n
+     # "" (before the first header, and after the final summary) keeps what it
+     # does not recognise: `make`/`tox`/compiler output around a pytest run
+     # carries the errors that explain the run ("make: *** [test] Error 1").
+     section = ""
+-    for i, ln in enumerate(lines):
++    i = 0
++    while i < n:
++        ln = lines[i]
+         m = _PYTEST_HDR_RE.match(ln)
+         if m:
+             name = m.group(1).lower()
+@@ -781,12 +875,51 @@ def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int]
+                 keep[i] = True  # captured output inside a failure block
+             else:
+                 section = "drop"
++            i += 1
+             continue
+         if section == "keep":
++            if _PYTEST_CAPTURED_HDR_RE.match(ln):
++                keep[i] = True
++                j = i + 1
++                while j < n:
++                    nxt = lines[j]
++                    if (
++                        not nxt.strip()
++                        or _PYTEST_RULE_HDR_RE.match(nxt)
++                        or _PYTEST_TEST_BLOCK_HDR_RE.match(nxt)
++                    ):
++                        break
++                    j += 1
++                body_start = i + 1
++                body_end = j
++                if body_end - body_start > 6:
++                    from .compress_context import error_fingerprints
++
++                    keep_idx = set()
++                    for k in (body_start, body_start + 1, body_end - 2, body_end - 1):
++                        if body_start <= k < body_end:
++                            keep_idx.add(k)
++                    for k in range(body_start, body_end):
++                        if k in keep_idx:
++                            keep[k] = True
++                        else:
++                            line = lines[k]
++                            if error_fingerprints(line) or _PYTEST_LOG_LEVEL_RE.match(line):
++                                keep[k] = True
++                            else:
++                                keep[k] = False
++                                captured[k] = 1
++                else:
++                    for k in range(body_start, body_end):
++                        keep[k] = True
++                i = j
++                continue
+             keep[i] = True
++            i += 1
+             continue
+         if _PYTEST_Q_SUMMARY_RE.match(ln.strip()):
+             keep[i] = True
++            i += 1
+             continue
+         v = _PYTEST_VERBOSE_RE.match(ln)
+         if v:
+@@ -794,6 +927,7 @@ def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int]
+                 keep[i] = True
+             else:
+                 tests[i] = 1
++            i += 1
+             continue
+         p = _PYTEST_PROGRESS_RE.match(ln)
+         if p:
+@@ -801,12 +935,14 @@ def _classify_pytest(lines: list[str]) -> tuple[list[bool], list[int], list[int]
+                 keep[i] = True  # names the file a failure is in (--tb=no has no block)
+             else:
+                 tests[i] = p.group(1).count(".")
++            i += 1
+             continue
+         if section == "" and ln.strip():
+             keep[i] = True
+         elif section == "drop" and _PYTEST_FAILURE_WORD_RE.search(ln):
+             keep[i] = True
+-    return keep, tests, suites
++        i += 1
++    return keep, tests, suites, captured
+ 
+ 
+ def _classify_jest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+@@ -945,7 +1081,12 @@ def preprocess_test_output(
+     if runner is None:
+         return None
+     lines = text.split("\n")
+-    keep, tests, suites = _RUNNERS[runner](lines)
++    result = _RUNNERS[runner](lines)
++    captured = None
++    if len(result) == 4:
++        keep, tests, suites, captured = result
++    else:
++        keep, tests, suites = result
+     matcher = _matcher_for(query)
+     if not matcher.empty:
+         dropped = [i for i, ln in enumerate(lines) if not keep[i] and ln.strip()]
+@@ -958,7 +1099,13 @@ def preprocess_test_output(
+     if all(keep):
+         return None
+     out = _render_kept(
+-        lines, keep, tests, suites, gap_marker, total_chars if total_chars else len(text)
++        lines,
++        keep,
++        tests,
++        suites,
++        gap_marker,
++        total_chars if total_chars else len(text),
++        captured=captured,
+     )
+     return out if len(out) < len(text) else None
+ 
+diff --git a/src/tameru/compress_context.py b/src/tameru/compress_context.py
+index 2a20261..d2140bb 100644
+--- a/src/tameru/compress_context.py
++++ b/src/tameru/compress_context.py
+@@ -95,6 +95,11 @@ _SECRETS_RE = re.compile(
+     r"|\beyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}"
+     r"|(?i:\b(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\b"
+     r"\s*[:=]\s*[\"'][^\"'\s]{16,}[\"'])"
++    r"|\bAIza[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])"
++    r"|\b(?:sk|rk)_live_[A-Za-z0-9]{16,}"
++    r"|(?i:\b(?:authorization\s*:\s*)?bearer\s+[A-Za-z0-9._~+/=-]{20,})"
++    r"|(?i:\b(?:[A-Za-z0-9_]+_)?(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)\b"
++    r"\s*[:=]\s*[^\s\"']{16,})"
+ )
+ 
+ # Recursion guard markers: output Tameru itself produced.
+@@ -2788,6 +2793,27 @@ def _span_chars(lines: list[str], lo: int, hi: int) -> int:
+     return sum(len(ln) for ln in lines[lo:hi]) + (hi - lo - 1)
+ 
+ 
++class InliningGapMarker:
++    """Wrap a gap marker so renderers may inline short dropped spans.
++
++    Renderers which see it emit a dropped span verbatim when the rendered
++    marker is not shorter than the span.
++    """
++
++    __slots__ = ("fn",)
++    inline_short = True
++
++    def __init__(self, fn: Callable[[int, int], str]) -> None:
++        self.fn = fn
++
++    def __call__(self, omitted: int, total: int) -> str:
++        return self.fn(omitted, total)
++
++
++def _inlines_short(marker) -> bool:
++    return bool(getattr(marker, "inline_short", False))
++
++
+ def _render(
+     lines: list[str],
+     blocks: list[dict[str, Any]],
+@@ -2825,14 +2851,23 @@ def _render(
+     # non-empty in `lines`, and would earn a bogus marker between two
+     # adjacent kept blocks.
+     probe_lines = content_lines if content_lines is not None else lines
++    inline_short = _inlines_short(marker_fn) if marker_fn is not None else False
+ 
+-    def _gap(lo: int, hi: int) -> str | None:
++    def _gap(lo: int, hi: int) -> list[str] | None:
+         if marker_fn is None:
+             return None
+         if not any(ln.strip() for ln in probe_lines[lo:hi]):
+             return None
++        span_text = "\n".join(lines[lo:hi]) if inline_short else None
+         text = marker_fn(_span_chars(lines, lo, hi), total)
+-        return str(text) if text else None
++        marker = str(text) if text is not None else ""
++        if not marker:
++            return None
++        # 1.4.1 opt-in: only InliningGapMarker emits the dropped lines
++        # verbatim when the rendered marker is not shorter than the span.
++        if inline_short and span_text is not None and len(marker) >= len(span_text):
++            return lines[lo:hi]
++        return [marker]
+ 
+     parts: list[str] = []
+     prev_end = -1
+@@ -2841,11 +2876,11 @@ def _render(
+             if prev_end < 0 and chronological and b["start"] > 0:
+                 lead = _gap(0, b["start"])
+                 if lead is not None:
+-                    parts.append(lead)
++                    parts.extend(lead)
+             elif prev_end >= 0 and b["start"] > prev_end + 1:
+                 between = _gap(prev_end + 1, b["start"])
+                 if between is not None:
+-                    parts.append(between)
++                    parts.extend(between)
+         elif prev_end >= 0 and b["start"] > prev_end + 1:
+             if citations:
+                 # ARC-style citation: name every dropped block so the model
+@@ -2909,7 +2944,7 @@ def _render(
+     if marker_fn is not None and chronological and parts and prev_end < len(lines) - 1:
+         trail = _gap(prev_end + 1, len(lines))
+         if trail is not None:
+-            parts.append(trail)
++            parts.extend(trail)
+     return "\n".join(parts)
+ 
+ 
+@@ -3118,8 +3153,9 @@ def sweep_ccr_cache(
+ ) -> int:
+     """Delete expired valid CCR records and return the removal count.
+ 
+-    Malformed or unreadable files are left untouched: retention maintenance is
+-    best-effort and must not destroy data it cannot validate.
++    Files that cannot be read or parsed are left untouched: retention
++    maintenance is best-effort. A file that parses but is not a valid record
++    (bad metadata, a non-object payload) is removed like an expired one.
+     """
+     global _CCR_SWEEP_CURSOR
+     root = Path(ccr_dir)
+@@ -4257,6 +4293,7 @@ def compress_context(
+     gap_marker: Callable[[int, int], str] | None = None,
+     recursion_markers: Iterable[str] = (),
+     content_hint: str | None = None,
++    inline_short_gaps: bool = False,
+ ) -> CompressResult:
+     """Query-aware extractive compression of ``context``.
+ 
+@@ -4286,6 +4323,11 @@ def compress_context(
+         force that routing. ``"diff"``/``"grep"``/``"test"`` are recorded in
+         the receipt and otherwise behave like ``None``. The hint is always
+         recorded in ``receipt["content_hint"]``.
++
++    ``inline_short_gaps`` (1.4.1)
++        With ``gap_marker`` set, a dropped span whose marker would not be
++        shorter than the span itself is kept verbatim instead. Off by
++        default: 1.4.0 output is unchanged byte for byte.
+     """
+     caller_text = str(context or "")
+     if not isinstance(query, str):
+@@ -4301,6 +4343,8 @@ def compress_context(
+         )
+     if gap_marker is not None and not callable(gap_marker):
+         raise TypeError("gap_marker must be callable as gap_marker(omitted_chars, total_chars)")
++    if inline_short_gaps and gap_marker is not None and not _inlines_short(gap_marker):
++        gap_marker = InliningGapMarker(gap_marker)
+     code_hint = content_hint in _CODE_HINTS
+     no_table = content_hint in _NO_TABLE_HINTS
+     recursion_markers = _marker_tuple(recursion_markers)  # a generator is read once
+@@ -4382,7 +4426,11 @@ def compress_context(
+     adapter_gap = (
+         None
+         if gap_marker is None
+-        else (lambda omitted, _total: gap_marker(omitted, len(caller_text)))
++        else (
++            InliningGapMarker(lambda omitted, _total: gap_marker(omitted, len(caller_text)))
++            if _inlines_short(gap_marker)
++            else (lambda omitted, _total: gap_marker(omitted, len(caller_text)))
++        )
+     )
+     industrial = industrial_preprocess(
+         caller_text, industrial_query, limits, gap_marker=adapter_gap
+diff --git a/src/tameru/format_adapters.py b/src/tameru/format_adapters.py
+index 5ef3a82..966dd40 100644
+--- a/src/tameru/format_adapters.py
++++ b/src/tameru/format_adapters.py
+@@ -142,23 +142,37 @@ def _with_gaps(
+ ) -> list[str]:
+     """``units`` that are kept, with ONE marker per contiguous omitted run
+     (leading and trailing runs included). All-blank runs carry nothing and get
+-    no marker. ``gap_marker(omitted_chars, total_chars)``."""
++    no marker. ``gap_marker(omitted_chars, total_chars)``. A caller marker that
++    is not shorter than the omitted run is replaced by the run verbatim only
++    when the marker opts in via ``inline_short``; otherwise the marker is
++    always used."""
+     out: list[str] = []
+     run: list[str] = []
++
++    def flush() -> None:
++        nonlocal run
++        if not run:
++            return
++        dropped = sep.join(run)
++        if dropped.strip():
++            if gap_marker is not None:
++                marker = str(gap_marker(len(dropped), total_chars))
++                if (
++                    getattr(gap_marker, "inline_short", False)
++                    and len(marker) >= len(dropped)
++                ):
++                    out.extend(run)
++                else:
++                    out.append(marker)
++        run = []
++
+     for unit, kept in zip(units, keep):
+         if kept:
+-            if run:
+-                dropped = sep.join(run)
+-                if dropped.strip():
+-                    out.append(str(gap_marker(len(dropped), total_chars)))
+-                run = []
++            flush()
+             out.append(unit)
+         else:
+             run.append(unit)
+-    if run:
+-        dropped = sep.join(run)
+-        if dropped.strip():
+-            out.append(str(gap_marker(len(dropped), total_chars)))
++    flush()
+     return out
+ 
+ 
+diff --git a/tests/test_gap_marker_inline.py b/tests/test_gap_marker_inline.py
+new file mode 100644
+index 0000000..adb52b6
+--- /dev/null
++++ b/tests/test_gap_marker_inline.py
+@@ -0,0 +1,194 @@
++from tameru.compress_context import InliningGapMarker, _render, compress_context
++from tameru.format_adapters import _with_gaps
++
++
++def test_with_gaps_plain_marker_short_span_uses_marker():
++    units = ["a", "bb", "c"]
++    keep = [True, False, True]
++    marker = "X" * 90
++    out = _with_gaps(units, keep, "\n", lambda omitted, total: marker, 100)
++    assert out == ["a", marker, "c"]
++
++
++def test_with_gaps_inlining_marker_short_span_is_verbatim():
++    units = ["a", "bb", "c"]
++    keep = [True, False, True]
++    marker = InliningGapMarker(lambda omitted, total: "X" * 90)
++    out = _with_gaps(units, keep, "\n", marker, 100)
++    assert out == ["a", "bb", "c"]
++
++
++def test_with_gaps_inlining_marker_long_span_uses_marker():
++    middle = "y" * 2000
++    units = ["a", middle, "c"]
++    keep = [True, False, True]
++    marker = InliningGapMarker(lambda omitted, total: "X" * 90)
++    out = _with_gaps(units, keep, "\n", marker, 100)
++    assert out == ["a", "X" * 90, "c"]
++
++
++def test_with_gaps_inlining_marker_equal_length_is_verbatim():
++    middle = "y" * 90
++    units = ["a", middle, "c"]
++    keep = [True, False, True]
++    marker = InliningGapMarker(lambda omitted, total: "X" * 90)
++    out = _with_gaps(units, keep, "\n", marker, 100)
++    assert out == ["a", middle, "c"]
++
++
++def test_with_gaps_blank_run_gets_nothing():
++    plain = _with_gaps(
++        ["a", "", "c"],
++        [True, False, True],
++        "\n",
++        lambda omitted, total: "X" * 90,
++        100,
++    )
++    inlining = _with_gaps(
++        ["a", "", "c"],
++        [True, False, True],
++        "\n",
++        InliningGapMarker(lambda omitted, total: "X" * 90),
++        100,
++    )
++    assert plain == ["a", "c"]
++    assert inlining == ["a", "c"]
++
++
++def test_with_gaps_no_marker_is_quiet():
++    out = _with_gaps(["a", "bb", "c"], [True, False, True], "\n", None, 100)
++    assert out == ["a", "c"]
++
++
++def test_render_plain_marker_short_span_uses_marker():
++    lines = ["a", "b", "c", "d", "e"]
++    blocks = [{"id": 0, "start": 2, "end": 2, "score": 1.0}]
++    marker = "X" * 90
++    out = _render(
++        lines,
++        blocks,
++        {0},
++        gap_marker=lambda omitted, total: marker,
++        total_chars=10,
++    )
++    assert out == f"{marker}\nc\n{marker}"
++
++
++def test_render_inlining_marker_short_span_is_verbatim():
++    lines = ["a", "b", "c", "d", "e"]
++    blocks = [{"id": 0, "start": 2, "end": 2, "score": 1.0}]
++    marker = InliningGapMarker(lambda omitted, total: "X" * 90)
++    out = _render(
++        lines,
++        blocks,
++        {0},
++        gap_marker=marker,
++        total_chars=10,
++    )
++    assert out == "a\nb\nc\nd\ne"
++
++
++def test_render_inlining_marker_equal_length_is_verbatim():
++    lines = ["a", "b", "c", "d", "e"]
++    blocks = [{"id": 0, "start": 2, "end": 2, "score": 1.0}]
++    marker = InliningGapMarker(lambda omitted, total: "X" * 3)
++    out = _render(
++        lines,
++        blocks,
++        {0},
++        gap_marker=marker,
++        total_chars=10,
++    )
++    assert out == "a\nb\nc\nd\ne"
++
++
++def test_render_inlining_marker_long_span_uses_marker():
++    lines = ["a", "y" * 2000, "c"]
++    blocks = [
++        {"id": 0, "start": 0, "end": 0, "score": 1.0},
++        {"id": 1, "start": 2, "end": 2, "score": 1.0},
++    ]
++    marker = "X" * 90
++    out = _render(
++        lines,
++        blocks,
++        {0, 1},
++        gap_marker=InliningGapMarker(lambda omitted, total: marker),
++        total_chars=10,
++    )
++    assert out == f"a\n{marker}\nc"
++
++
++def _build_compress_text() -> str:
++    # Paragraphs (blank-line separated) are the engine's blocks: the 10-char
++    # paragraph between the two query hits is a block of its own, dropped by
++    # default and inlined with ``inline_short_gaps``.
++    paras: list[str] = []
++    for i in range(30):
++        if i in (10, 12):
++            paras.append(f"needle {i:03d} the payment gateway timed out on order {i}")
++        elif i == 11:
++            paras.append("shortline1")
++        else:
++            paras.append(f"filler paragraph {i:03d} " + "lorem ipsum dolor sit amet " * 2)
++    return "\n\n".join(paras)
++
++
++def test_compress_context_inline_short_gaps_flag():
++    text = _build_compress_text()
++    query = "needle"
++    marker = "Z" * 90
++
++    default = compress_context(
++        text,
++        query,
++        citations=False,
++        ccr=False,
++        gap_marker=lambda omitted, total: marker,
++    )
++    assert default is not None
++    assert not default.fail_open
++    assert marker in default.compressed_text
++    assert "shortline1" not in default.compressed_text
++
++    inlined = compress_context(
++        text,
++        query,
++        citations=False,
++        ccr=False,
++        gap_marker=lambda omitted, total: marker,
++        inline_short_gaps=True,
++    )
++    assert inlined is not None
++    assert not inlined.fail_open
++    assert "shortline1" in inlined.compressed_text
++    assert len(inlined.compressed_text) <= len(text)
++
++
++def test_inlining_gap_marker_passes_calls_through():
++    calls: list[tuple[int, int]] = []
++
++    def fn(omitted: int, total: int) -> str:
++        calls.append((omitted, total))
++        return "M"
++
++    marker = InliningGapMarker(fn)
++    assert marker.inline_short is True
++    assert marker(3, 10) == "M"
++    assert calls == [(3, 10)]
++
++
++def test_compress_context_does_not_double_wrap_inlining_marker():
++    text = _build_compress_text()
++    marker = InliningGapMarker(lambda omitted, total: "Z" * 90)
++    out = compress_context(
++        text,
++        "needle",
++        citations=False,
++        ccr=False,
++        gap_marker=marker,
++        inline_short_gaps=True,
++    )
++    assert out is not None
++    assert not out.fail_open
++    assert "shortline1" in out.compressed_text
+diff --git a/tests/test_grep_saturated_query.py b/tests/test_grep_saturated_query.py
+new file mode 100644
+index 0000000..538b2e8
+--- /dev/null
++++ b/tests/test_grep_saturated_query.py
+@@ -0,0 +1,64 @@
++from tameru.agent_formats import adapt_grep_lines
++from tameru.compress_context import compress_context, error_fingerprints  # noqa: F401
++
++
++def _saturated_grep_text() -> str:
++    templates = [
++        "class InsufficientStock(RuntimeError):",
++        "raise InsufficientStock('no stock')",
++        "if InsufficientStock is raised:",
++        "except InsufficientStock as exc:",
++        "log.error('InsufficientStock: %s', exc)",
++        "assert isinstance(exc, InsufficientStock)",
++        "return InsufficientStock()",
++    ]
++    lines: list[str] = []
++    for idx in range(25):
++        path = f"src/pkg{idx:02d}/mod{idx:02d}.py"
++        count = 6 if idx < 15 else 5
++        for j in range(count):
++            if idx == 0 and j == 0:
++                body = templates[0]
++            else:
++                body = templates[(j + idx) % 7]
++                if body == templates[0]:
++                    body = templates[1]
++            lines.append(f"{path}:{10 + j}:{body}")
++    return "\n".join(lines)
++
++
++def test_saturated_grep_query_keeps_definition_and_few_matches():
++    text = _saturated_grep_text()
++    assert len(text.splitlines()) == 140
++    assert len({line.split(":", 2)[0] for line in text.splitlines()}) == 25
++    assert text.count("class InsufficientStock(RuntimeError):") == 1
++
++    result = adapt_grep_lines(text, "where is InsufficientStock defined?")
++    assert result is not None
++    assert result.total_records == 140
++    assert result.hit is True
++    assert result.kept_records < 50
++    assert "class InsufficientStock(RuntimeError):" in result.text
++    assert "saturated query" in result.reason
++
++
++def test_non_saturated_grep_query_keeps_hits():
++    lines: list[str] = []
++    path = "src/many.py"
++    for i in range(140):
++        if i in (10, 50, 90):
++            body = "zebraquantum rare"
++        else:
++            body = f"ordinary line {i}"
++        lines.append(f"{path}:{i + 1}:{body}")
++    text = "\n".join(lines)
++
++    result = adapt_grep_lines(text, "zebraquantum")
++    assert result is not None
++    assert result.total_records == 140
++    assert result.hit is True
++    assert result.kept_records == 3
++    assert result.reason == "matches grouped by file, capped per file"
++    assert "L11: zebraquantum rare" in result.text
++    assert "L51: zebraquantum rare" in result.text
++    assert "L91: zebraquantum rare" in result.text
+diff --git a/tests/test_production_reliability.py b/tests/test_production_reliability.py
+index 319f132..eab2b50 100644
+--- a/tests/test_production_reliability.py
++++ b/tests/test_production_reliability.py
+@@ -200,7 +200,10 @@ class LocalCacheFileTests(unittest.TestCase):
+             digest = "f" * 24
+             record = Path(td) / f"{digest}.json"
+             record.write_text(("[" * 1_000) + "0" + ("]" * 1_000), encoding="utf-8")
+-            self.assertEqual(sweep_ccr_cache(td), 0)
++            # Python <= 3.11 raises RecursionError parsing this (file kept, 0);
++            # 3.12+ parses it as a non-record and removes it (1). Either way the
++            # sweep must not raise and the record must never be served.
++            self.assertIn(sweep_ccr_cache(td), (0, 1))
+             self.assertIsNone(retrieve(digest, td))
+             stored = _ccr_store("fresh payload", td)
+             self.assertEqual(retrieve(stored["hash"], td), "fresh payload")
+diff --git a/tests/test_pytest_captured_sections.py b/tests/test_pytest_captured_sections.py
+new file mode 100644
+index 0000000..822d222
+--- /dev/null
++++ b/tests/test_pytest_captured_sections.py
+@@ -0,0 +1,133 @@
++from tameru.agent_formats import _classify_pytest, _render_kept, preprocess_test_output
++from tameru.compress_context import compress_context, error_fingerprints
++
++
++def _long_info(i: int) -> str:
++    return f"INFO app.order message number {i} with some extra padding to make the line longer"
++
++
++def _pytest_output(body: list[str]) -> str:
++    lines = [
++        "============================= test session starts ==============================",
++        "platform linux -- Python 3.11.0, pytest-8.0.0, pluggy-1.5.0",
++        "rootdir: /repo",
++        "collected 1 item",
++        "",
++        "tests/test_orders.py F                                                    [100%]",
++        "",
++        "=================================== FAILURES ===================================",
++        "___________________________________ test_order ___________________________________",
++        "    def test_order():",
++        "        assert order.total == 10",
++        ">       assert order.status == 'paid'",
++        "E       AssertionError: assert 'pending' == 'paid'",
++        "tests/test_orders.py:41: AssertionError",
++        "------------------------------ Captured log call -------------------------------",
++    ]
++    lines.extend(body)
++    lines.extend(
++        [
++            "=========================== short test summary info ============================",
++            "FAILED tests/test_orders.py::test_order - AssertionError",
++            "============================== 1 failed in 0.01s ===============================",
++        ]
++    )
++    return "\n".join(lines)
++
++
++def test_pytest_captured_log_call_collapses():
++    body = []
++    for i in range(1, 61):
++        if i == 30:
++            body.append(
++                "ERROR app.order boom with some extra padding to make the line longer"
++            )
++        else:
++            body.append(_long_info(i))
++
++    text = _pytest_output(body)
++    out = preprocess_test_output(text, query="", gap_marker=None)
++
++    assert out is not None
++    assert len(out) < 0.5 * len(text)
++
++    assert "------------------------------ Captured log call -------------------------------" in out
++    assert _long_info(1) in out
++    assert _long_info(2) in out
++    assert _long_info(59) in out
++    assert _long_info(60) in out
++    assert "ERROR app.order boom" in out
++    assert "E       AssertionError" in out
++    assert "tests/test_orders.py:41: AssertionError" in out
++    # the ERROR line splits the dropped lines into two runs (27 + 28)
++    assert out.count("captured lines omitted …]") == 2
++
++
++def test_pytest_short_captured_section_stays_whole():
++    lines = [
++        "=================================== FAILURES ===================================",
++        "___________________________________ test_order ___________________________________",
++        "E       AssertionError",
++        "tests/test_orders.py:41: AssertionError",
++        "------------------------------ Captured log call -------------------------------",
++        "INFO app.order 1",
++        "INFO app.order 2",
++        "INFO app.order 3",
++        "INFO app.order 4",
++        "=========================== short test summary info ============================",
++    ]
++
++    keep, tests, suites, captured = _classify_pytest(lines)
++
++    assert all(keep[4:9])
++    assert all(c == 0 for c in captured)
++
++
++def test_pytest_failure_block_without_captured_section_keeps_all():
++    lines = [
++        "=================================== FAILURES ===================================",
++        "___________________________________ test_order ___________________________________",
++        "    def test_order():",
++        "        assert order.total == 10",
++        ">       assert order.status == 'paid'",
++        "E       AssertionError: assert 'pending' == 'paid'",
++        "tests/test_orders.py:41: AssertionError",
++        "=========================== short test summary info ============================",
++    ]
++
++    keep, tests, suites, captured = _classify_pytest(lines)
++
++    assert all(keep)
++    assert all(c == 0 for c in captured)
++
++
++def test_render_kept_default_marker_only_for_captured_runs():
++    lines = ["a", "b", "c", "d", "e", "f", "g", "h"]
++    keep = [True, False, False, False, False, False, False, True]
++    tests = [0] * len(lines)
++    suites = [0] * len(lines)
++    total = len("\n".join(lines))
++
++    captured = [0, 1, 1, 1, 1, 1, 1, 0]
++    out = _render_kept(lines, keep, tests, suites, None, total, captured=captured)
++    assert "[… 6 captured lines omitted …]" in out
++
++    captured_none = [0] * len(lines)
++    out_plain = _render_kept(lines, keep, tests, suites, None, total, captured=captured_none)
++    assert "[…" not in out_plain
++
++    out_marker = _render_kept(
++        lines,
++        keep,
++        tests,
++        suites,
++        lambda omitted, total_chars: "CALLER-MARKER",
++        total,
++        captured=captured,
++    )
++    assert "CALLER-MARKER" in out_marker
++
++
++def test_fix1_imports_are_callable():
++    assert callable(compress_context)
++    assert callable(error_fingerprints)
+diff --git a/tests/test_secrets_screen_141.py b/tests/test_secrets_screen_141.py
+new file mode 100644
+index 0000000..a1425e8
+--- /dev/null
++++ b/tests/test_secrets_screen_141.py
+@@ -0,0 +1,38 @@
++from tameru.compress_context import contains_secret
++
++
++def test_google_api_key_matches():
++    assert contains_secret("key=AIza" + "0" * 35)
++
++
++def test_stripe_live_keys_match():
++    assert contains_secret("sk_live_" + "0" * 16)
++    assert contains_secret("rk_live_" + "0" * 16)
++
++
++def test_bearer_tokens_match():
++    assert contains_secret("Authorization: Bearer " + "a" * 20)
++    assert contains_secret("Bearer " + "a" * 20)
++
++
++def test_unquoted_assignments_match():
++    assert contains_secret("API_KEY=" + "a" * 16)
++    assert contains_secret("OPENAI_API_KEY=" + "a" * 16)
++    assert contains_secret("password=" + "a" * 16)
++
++
++def test_old_patterns_still_match():
++    assert contains_secret("AKIA" + "A" * 16)
++    assert contains_secret("ghp_" + "a" * 20)
++    assert contains_secret("sk-ant-" + "a" * 20)
++    assert contains_secret('password="abcdefghijklmnop"')
++
++
++def test_negative_prose_does_not_match():
++    for text in (
++        "the secret is out",
++        "password: see docs",
++        "api_key = None",
++        "token=abc",
++    ):
++        assert not contains_secret(text)
+-- 
+2.47.3
+

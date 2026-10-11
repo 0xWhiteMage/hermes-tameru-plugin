@@ -257,11 +257,17 @@ the pass is retried once with header-only rungs, which reclaim more.
 - Replay numbers come from one scripted 30-turn session with a fake lossy summarizer and Hermes' rough token
   estimator, not from live models. See [tests/eval/README.md](tests/eval/README.md) and
   [docs/compaction-research.md](docs/compaction-research.md) section 7 for the measured results and their limits.
-- Output whose extract cannot shrink under `max_extract_chars` (big logs, `grep` output where every line matches,
-  a pytest failure with a long captured log) ends as a brief. The brief keeps every error template, but a
-  specific matching line can be cut: in the QA set of agent outputs, 2 of 14 answer strings were lost (a `grep`
-  hit, a pytest assertion line), against 1 for plugin 1.3.0 and all 14 for stock Hermes
-  ([report](docs/REPORT-1.4.0.md)).
+- Output whose extract cannot shrink under `max_extract_chars` (big logs, very large `grep` output) ends as a
+  brief. The brief keeps every error template, but a specific matching line can be cut. In the QA set of agent
+  outputs (`tests/eval/per_result.py`) 14 of 14 answer strings are kept (1.4.0: 12 of 14).
+- Savings are lower than the engine alone on the same text: 67.5% against 81.0% mean on the engine's corpus.
+  Hermes' elision marker is about 100 characters per gap (the engine's own is `[…]`) and each row carries a
+  header. Worst: `travis_yaml` 23.4% against 64.1%, `jp_musubi` 29.4% against 46.1%
+  ([report](docs/REPORT-1.4.1.md)).
+- `tameru_expand` is only offered when Hermes injects context-engine tools: with no toolset restriction, or one
+  that includes `context_engine` (`hermes chat -t terminal,file,context_engine`). `-t terminal,file` hides it.
+  Newer Hermes also logs `capability_check ... capability=tools.override decision=deny evidence=not granted` at
+  every plugin load; that is Hermes probing its tool-override policy and is not an error.
 - Results under `min_tool_chars` (800) get Hermes' own one-line summary, as in stock Hermes.
 - Re-sync of the vendored engine invalidates the saved replay baselines on purpose; they must be re-recorded.
 

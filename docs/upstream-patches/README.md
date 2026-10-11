@@ -1,4 +1,4 @@
-# Upstream patches (tameru-compaction-system 1.4.0)
+# Upstream patches (tameru-compaction-system 1.4.0 and the 1.4.1 candidate)
 
 The engine fixes behind plugin 1.4.0 were made in
 [`0xWhiteMage/tameru-compaction-system`](https://github.com/0xWhiteMage/tameru-compaction-system) and vendored
@@ -11,9 +11,15 @@ applied upstream: the vendored copy in `hermes_tameru_plugin/tameru/` already co
 | `0001-feat-engine-fixes-for-agent-tool-output-plugin-facin.patch` | Engine fixes for agent tool output and the plugin-facing API (critical-line regex flag, quadratic hot spots, per-fingerprint error exemplars, filler queries, `gap_marker` / `recursion_markers` / `content_hint`, `error_fingerprints`, `brief_context`, `extract_evidence_lines`, `contains_secret`, payload unwrap/rewrap, `ENGINE_VERSION`, `task_query`, `sync_to_harness.py --check`; the `integration/hermes` bundle is removed) |
 | `0002-feat-1.4.0-agent-output-formats-lossless-folding-log.patch` | 1.4.0: agent-output format adapters, lossless folding, log templates, JSON brief; version bump, CHANGELOG, RESEARCH takeaways |
 | `0003-fix-1.4.0-QA-round-2-test-runner-errors-template-ove.patch` | QA round 2 fixes: test-runner errors kept, log-template over-masking, zero-count negation, recursion markers in JSON payloads, byte-exact JSON fold, numbered-code hint, big-integer crash |
+| `0004-fix-1.4.1-candidate-lost-answers-pytest-captured-log.patch` | 1.4.1 candidate: pytest captured-section collapse, saturated grep/rg mode, opt-in `inline_short_gaps`, wider secrets screen, Python 3.12+ cache-test fix |
+| `0005-fix-1.4.1-candidate-follow-up-CLI-flags-in-queries-g.patch` | 1.4.1 candidate follow-up: CLI flags are not query selectors, one host marker per run of omitted grep files, captured section ends at the next header |
+
+`0004` and `0005` come from the local engine branch `locally/1.4.0-patches` (`a541e92..e099d10`; `a541e92` is the
+local 1.4.0 commit, upstream `v1.4.0` is `11b9e5e`). The vendored copy is `e099d10` (`VENDORED_FROM`). They are not
+upstream yet. Generated with `git format-patch a541e92..e099d10 --start-number 4`; apply them after `0001`-`0003`.
 
 Range exported: `b480ab3..v1.4.0` (upstream `v1.4.0` is commit `11b9e5ed336c51a35f43cf9ec438023b2e0ca277`, the
-commit recorded in `VENDORED_FROM`). Generated with:
+commit `VENDORED_FROM` recorded for 1.4.0). Generated with:
 
 ```bash
 cd tameru-compaction-system
