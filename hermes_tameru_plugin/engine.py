@@ -495,12 +495,14 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             )
 
         # The engine's task query names the tool itself ("terminal", "read_file"): in an agent transcript every
-        # row shares that word and it selects incidental lines, so the plugin leaves it out.
+        # row shares that word and it selects incidental lines, so the plugin leaves it out, unless the user's
+        # ``/compress <topic>`` is that very word (the query de-duplicates the two into one part).
+        focus = " ".join(scope.focus.split()) if isinstance(scope.focus, str) else ""
         query = [
             part for part in usable_query(
                 build_query(view, idx, focus=scope.focus, cache=scope.query_cache), pl.inner,
             )
-            if part != tool
+            if part != tool or part == focus
         ]
         capped = min(settings.max_extract_chars, int((1 - settings.min_savings) * len(content)))
         limit = min(capped, scope.room)
