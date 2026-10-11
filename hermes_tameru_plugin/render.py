@@ -11,7 +11,7 @@ The header is frozen, because committed rows persist in session history for good
     HEADER := PARENT_LINE " [tameru:" RUNG " kept " K "/" N " lines (" KC " of " TC " chars)"
               [" omitted: " CATS] [" " NOTE] " ref=" REF "]"
     RUNG   := fold | extract | brief | header | superseded
-    REF    := 8 lowercase hex
+    REF    := 16 lowercase hex (8 before the 1.4.1 fix-all round; both parse, forever)
 
 ``PARENT_LINE`` is Hermes' own one-line summary of the original result (``[terminal] ran ... -> exit
 1 ...``), so the header on its own is what Hermes calls a summary stub (starts with ``[``, contains
@@ -39,14 +39,14 @@ RUNGS = ("fold", "extract", "brief", "header", "superseded")
 # Anchored at the start of the content, first line only: a row that merely quotes a header on a later
 # line (or source code that contains this pattern) is not a rendered row.
 HEADER_RE = re.compile(
-    r"^\[[^\n]*? \[tameru:(fold|extract|brief|header|superseded) [^\n]*? ref=([0-9a-f]{8})\]"
+    r"^\[[^\n]*? \[tameru:(fold|extract|brief|header|superseded) [^\n]*? ref=([0-9a-f]{16}|[0-9a-f]{8})\]"
 )
 # The whole grammar of one header line, for parsing and rewriting. The parent line is greedy: the real
 # tag is the last one on the line, so a parent line that quotes a header cannot hijack the parse.
 _ROW_RE = re.compile(
     r"(?P<parent>\[[^\n]*) \[tameru:(?P<rung>fold|extract|brief|header|superseded) "
     r"(?P<counts>kept (?P<kept>\d+)/(?P<total>\d+) lines \([\d,]+ of [\d,]+ chars\))"
-    r"(?P<extra>[^\n]*?) ref=(?P<ref>[0-9a-f]{8})\](?=\n|\Z)"
+    r"(?P<extra>[^\n]*?) ref=(?P<ref>[0-9a-f]{16}|[0-9a-f]{8})\](?=\n|\Z)"
 )
 # The 1.3.0 plugin joined kept blocks with a line that is exactly ``[…]``.
 _LEGACY_GAP = "[…]"
@@ -109,15 +109,27 @@ def parse_header(content: str) -> dict | None:
 
 
 # ---- refs and statistics ---------------------------------------------------------------------
+REF_CHARS = 16          # 64 bits (fix-all R7); LEGACY_REF_CHARS-long refs of older rows are a prefix of these
+LEGACY_REF_CHARS = 8
+
+
+def ref_matches(ref: str, key: str) -> bool:
+    """True when the header ref ``ref`` names the stored ``key`` (equal, or a legacy 8-hex prefix of it)."""
+    return ref == key or (len(ref) == LEGACY_REF_CHARS and len(key) == REF_CHARS and key.startswith(ref))
+
+
 def make_ref(msg: dict, original: str) -> str:
-    """8 hex chars naming ``original`` in ``msg``: ``sha256(uid|sha256(original))[:8]``.
+    """16 hex chars naming ``original`` in ``msg``: ``sha256(uid|sha256(original))[:16]``.
+
+    Rows rendered before the 1.4.1 fix-all round carry the first 8 of these 16 chars; lookups accept both
+    (``ref_matches``), so an old ref still finds its original.
 
     ``uid`` is the first non-empty of ``_tool_call_uid``, ``message_uid``, ``tool_call_id`` (Hermes
     keeps the first two across restarts and session-db round trips), else "".
     """
     uid = next((str(msg[key]) for key in _UID_KEYS if msg.get(key)), "")
     digest = hashlib.sha256(original.encode("utf-8", "surrogatepass")).hexdigest()
-    return hashlib.sha256(f"{uid}|{digest}".encode()).hexdigest()[:8]
+    return hashlib.sha256(f"{uid}|{digest}".encode()).hexdigest()[:REF_CHARS]
 
 
 def _lines(text: str) -> list[str]:

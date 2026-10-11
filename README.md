@@ -42,11 +42,11 @@ Properties:
 - **Error fingerprints are preserved** by the extract rung (checked plugin-side), by the brief (it keeps error
   exemplars), and, for rows cut down to a header, by the artifact trail below.
 - **Every rendered row names its original.** The first line of a rendered row is Hermes' own one-line summary
-  followed by `[tameru:<rung> kept K/N lines (KC of TC chars) ... ref=xxxxxxxx]`. Hermes' exit-code/error
+  followed by `[tameru:<rung> kept K/N lines (KC of TC chars) ... ref=xxxxxxxxxxxxxxxx]`. Hermes' exit-code/error
   envelope fields (`exit_code`, `error`, `total_lines`) are kept on a compact meta line, so Hermes' own regexes
   still match. Gaps inside extracts use Hermes' own elision marker.
 - **Recovery: `tameru_expand`.** The engine adds one tool, `tameru_expand(ref, start_line, end_line, grep,
-  max_chars)`, to the tool list (on by default; `expand_tool: false` removes it). Given the 8 hex characters
+  max_chars)`, to the tool list (on by default; `expand_tool: false` removes it). Given the 16 hex characters (8 on rows from before 1.4.1)
   after `ref=`, it returns the exact original lines (a range, or only lines matching a regex), as JSON, capped
   at `max_chars` (default 12,000; maximum 50,000) with a continuation hint. Originals come from a per-agent
   in-memory LRU store (`store_max_entries`, `store_max_chars`) and, when the Hermes session database is

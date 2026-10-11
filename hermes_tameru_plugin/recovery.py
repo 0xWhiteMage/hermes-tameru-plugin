@@ -1,7 +1,7 @@
 """Recovery of pruned tool output: the original store, the ``tameru_expand`` tool, the archive lookup.
 
-Every row Tameru renders names its original by ``ref=xxxxxxxx`` (``render.make_ref``). Two places
-can hand the original back:
+Every row Tameru renders names its original by ``ref=<16 hex>`` (``render.make_ref``; rows from
+before 1.4.1 carry its first 8 hex, which still resolve). Two places can hand the original back:
 
 * ``OriginalStore``: a per-agent, locked LRU of the originals this process pruned. Probable
   credentials are never kept (``contains_secret``).
@@ -51,7 +51,7 @@ EXPAND_SCHEMA: dict[str, Any] = {
     "description": (
         "Recover the exact original text of a tool output that was pruned to save context. "
         "A pruned tool result starts with a one-line summary ending in "
-        "[tameru:... ref=xxxxxxxx]; pass those 8 hex characters as ref. Returns the original "
+        "[tameru:... ref=xxxxxxxxxxxxxxxx]; pass those hex characters (16, or 8 on older rows) as ref. Returns the original "
         "lines (1-based, inclusive start_line..end_line), or only the lines matching a "
         "case-insensitive regex given as grep (matched_lines lists their line numbers). Output is "
         "capped at max_chars; when truncated is true, continue from the line after returned_lines. "
@@ -62,7 +62,7 @@ EXPAND_SCHEMA: dict[str, Any] = {
         "properties": {
             "ref": {
                 "type": "string",
-                "description": "The 8 hex characters after ref= in the pruned result's header.",
+                "description": "The hex characters after ref= in the pruned result's header (16, or 8 on older rows).",
             },
             "start_line": {
                 "type": "integer",
@@ -91,7 +91,7 @@ EXPAND_SCHEMA: dict[str, Any] = {
     },
 }
 
-_REF_RE = re.compile(r"[0-9a-f]{8}")
+_REF_RE = re.compile(r"[0-9a-f]{16}|[0-9a-f]{8}")
 _NESTED_QUANTIFIER_RE = re.compile(r"[)][*+]|[)][{]\d*,?\d*[}]")   # fallback when ``re``'s parser is unreachable
 _TERMINATOR_RE = re.compile(r"(\r\n|\r|\n)")   # the same line breaks ``render`` counts lines by
 _MISS_HINT = "session_search(query=..., role_filter='tool', session_id='{session_id}')"
@@ -256,10 +256,11 @@ class OriginalStore:
     def entry(self, ref: str) -> StoredOriginal | None:
         """The entry for ``ref`` (now the most recently used), else None."""
         with self._lock:
-            found = self._entries.get(ref)
-            if found is not None:
-                self._entries.move_to_end(ref)
-            return found
+            key = _resolve_ref(self._entries, ref)
+            if key is None:
+                return None
+            self._entries.move_to_end(key)
+            return self._entries[key]
 
     def get(self, ref: str) -> str | None:
         """The original text for ``ref``, else None."""
@@ -273,7 +274,7 @@ class OriginalStore:
 
     def __contains__(self, ref: object) -> bool:
         with self._lock:
-            return ref in self._entries
+            return isinstance(ref, str) and _resolve_ref(self._entries, ref) is not None
 
     def __len__(self) -> int:
         with self._lock:
@@ -348,7 +349,7 @@ def _expand(
     raw_ref = args.get("ref")
     ref = raw_ref.strip().lower().removeprefix("ref=") if isinstance(raw_ref, str) else ""
     if not _REF_RE.fullmatch(ref):
-        return _error("ref must be the 8 hex characters after ref= in a [tameru:...] header")
+        return _error("ref must be the 16 (or, on older rows, 8) hex characters after ref= in a [tameru:...] header")
     try:
         first, last, limit = (_positive_int(args, key) for key in ("start_line", "end_line", "max_chars"))
     except ValueError as exc:
@@ -449,6 +450,19 @@ def _identity_views(row: dict) -> list[dict]:
     return [ids, *({key: value} for key, value in list(ids.items())[1:])]
 
 
+def _resolve_ref(keys: Any, ref: str) -> str | None:
+    """The key of ``keys`` that ``ref`` names: itself, else (a legacy 8-hex ref) the one 16-hex key it prefixes.
+
+    Two 16-hex keys sharing those 8 chars make an old ref ambiguous: no key, rather than a wrong original.
+    """
+    if ref in keys:
+        return ref
+    if len(ref) != 8:
+        return None
+    hits = [key for key in keys if len(key) == 16 and key.startswith(ref)]
+    return hits[0] if len(hits) == 1 else None
+
+
 def _ref_index(
     rows: list[tuple[dict, str]], make_ref: Callable[[dict, str], str], *, fallback: bool,
 ) -> dict[str, str]:
@@ -487,10 +501,14 @@ def session_lookup_factory(
                     if isinstance(row, dict) and row.get("role") == "tool"
                     and isinstance(row.get("content"), str) and not is_tameru_rendered(row["content"])
                 ]
-            found = next((index[ref] for index in indexes if ref in index), None)
+            def find(index: dict[str, str]) -> str | None:
+                key = _resolve_ref(index, ref)
+                return None if key is None else index[key]
+
+            found = next((hit for hit in map(find, indexes) if hit is not None), None)
             while found is None and len(indexes) < 2:
                 indexes.append(_ref_index(rows, make_ref, fallback=bool(indexes)))
-                found = indexes[-1].get(ref)
+                found = find(indexes[-1])
             return found
         except Exception:
             return None

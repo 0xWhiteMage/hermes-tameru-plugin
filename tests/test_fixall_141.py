@@ -128,3 +128,55 @@ def test_r1_quoting_the_tags_is_not_a_spill(text):
     from hermes_tameru_plugin.hermes_compat import is_persisted_block
 
     assert not is_persisted_block(text)
+
+
+# ---- R7: 64-bit refs, 32-bit refs of older rows still work ----------------------------------------------------------
+def test_r7_new_refs_are_64_bit_and_old_ones_are_their_prefix():
+    import hashlib
+
+    from hermes_tameru_plugin.render import make_ref
+
+    ref = make_ref({"tool_call_id": "call_1"}, "original")
+    inner = hashlib.sha256(b"original").hexdigest()
+    assert ref == hashlib.sha256(f"call_1|{inner}".encode()).hexdigest()[:16]
+
+
+def test_r7_a_legacy_header_still_parses_and_classifies():
+    from hermes_tameru_plugin.render import classify_render, parse_header
+
+    for ref in ("0123abcd", "0123abcd4567ef89"):
+        row = f"[terminal] ran `ls` -> exit 0, 3 lines output [tameru:header kept 0/3 lines (0 of 30 chars) ref={ref}]"
+        assert classify_render(row) == "v1"
+        assert parse_header(row)["ref"] == ref
+
+
+def test_r7_expand_accepts_both_widths():
+    store = OriginalStore(16, 1_000_000)
+    assert store.put("0123abcd4567ef89", "alpha\nbeta\n" * 20)    # a new row
+    assert store.put("fedcba98", "gamma\n" * 30)                 # a row stored under a legacy ref
+    for ref in ("0123abcd4567ef89", "0123abcd", "fedcba98"):
+        out = json.loads(expand(store, {"ref": ref, "start_line": 1, "end_line": 1}))
+        assert "error" not in out, (ref, out)
+    assert "error" in json.loads(expand(store, {"ref": "0123abcd4567"}))   # neither width
+
+
+def test_r7_an_ambiguous_legacy_ref_is_a_miss_not_a_wrong_original():
+    store = OriginalStore(16, 1_000_000)
+    store.put("0123abcd00000000", "one\n" * 30)
+    store.put("0123abcd11111111", "two\n" * 30)
+    assert store.get("0123abcd") is None and store.get("0123abcd11111111").startswith("two")
+
+
+def test_r7_session_lookup_finds_a_legacy_ref():
+    from hermes_tameru_plugin.recovery import session_lookup_factory
+    from hermes_tameru_plugin.render import make_ref
+
+    row = {"role": "tool", "tool_call_id": "call_9", "content": "archived output\n" * 40}
+
+    class Db:
+        def get_messages(self, session_id, include_compacted=False):
+            return [row]
+
+    lookup = session_lookup_factory(Db(), "s1", make_ref)
+    full = make_ref(row, row["content"])
+    assert lookup(full) == row["content"] and lookup(full[:8]) == row["content"]

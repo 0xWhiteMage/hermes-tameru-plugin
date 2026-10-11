@@ -54,7 +54,7 @@ def test_grammar_is_frozen():
     assert TAMERU_TAG == " [tameru:"
     assert RUNGS == ("fold", "extract", "brief", "header", "superseded")
     assert HEADER_RE.pattern == (
-        r"^\[[^\n]*? \[tameru:(fold|extract|brief|header|superseded) [^\n]*? ref=([0-9a-f]{8})\]"
+        r"^\[[^\n]*? \[tameru:(fold|extract|brief|header|superseded) [^\n]*? ref=([0-9a-f]{16}|[0-9a-f]{8})\]"
     )
 
 
@@ -282,14 +282,14 @@ def test_non_strings_are_never_rendered(content):
 # ---- refs --------------------------------------------------------------------------------------
 def expected_ref(uid: str, original: str) -> str:
     inner = hashlib.sha256(original.encode()).hexdigest()
-    return hashlib.sha256(f"{uid}|{inner}".encode()).hexdigest()[:8]
+    return hashlib.sha256(f"{uid}|{inner}".encode()).hexdigest()[:16]
 
 
 def test_ref_formula_is_pinned():
     msg = {"_tool_call_uid": "uid-1", "message_uid": "m" * 32, "tool_call_id": "call_1"}
     ref = make_ref(msg, "original text")
     assert ref == expected_ref("uid-1", "original text")
-    assert len(ref) == 8 and ref == ref.lower() and int(ref, 16) >= 0
+    assert len(ref) == 16 and ref == ref.lower() and int(ref, 16) >= 0
 
 
 def test_ref_is_stable():
@@ -323,7 +323,7 @@ def test_ref_ignores_everything_but_the_ids():
 
 
 def test_ref_survives_odd_text():
-    assert len(make_ref({"tool_call_id": 123}, "lone surrogate \ud800 and 日本語")) == 8
+    assert len(make_ref({"tool_call_id": 123}, "lone surrogate \ud800 and 日本語")) == 16
 
 
 # ---- omitted categories ------------------------------------------------------------------------
