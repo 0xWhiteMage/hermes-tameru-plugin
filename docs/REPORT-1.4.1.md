@@ -271,7 +271,17 @@ re-recorded for each intended change (`tameru_1_4*.json`; `stock.json` untouched
 
 ### Fuzzing (final code, random seeds)
 
-FUZZ_PLACEHOLDER
+Code at `725fc9c` / engine `91f00e0`, `tests/test_fuzz_redteam.py` with `FUZZ_RANDOM=1`:
+
+| property | runs | failures |
+|---|---|---|
+| engine entry points | 3,000 stub + 3,000 real Hermes | 0 |
+| ladder, one demotion | 3,000 stub + 3,000 real Hermes | 0 |
+| whole prune pass (pairing, no swallowed error, byte stability) | 3,000 stub + 1,000 real Hermes | 0 |
+| `tameru_expand` grep vs Python `re` (random repeat/alternation patterns) | 3,000 | 0 |
+
+16,000 property examples plus 3,000 grep patterns; no crash, non-determinism or invariant violation
+(`fuzz/stub.txt`, `fuzz/real.txt`, `fuzz/real_prune.txt`, `fuzz/grep_differential.txt`).
 
 ### Not fixed
 
