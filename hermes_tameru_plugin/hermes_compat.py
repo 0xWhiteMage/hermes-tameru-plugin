@@ -36,7 +36,14 @@ MESSAGE_UID_KEY = "message_uid"
 # ``agent.tool_dispatch_helpers._maybe_wrap_untrusted``: what Hermes puts in front of a high-risk tool's result
 # (``web_extract``, ``web_search``, ``browser_*``, ``mcp_*``) AFTER the spill, so a spilled result of such a tool
 # starts with this header and its one-line notice, then a blank line, then the ``<persisted-output>`` block.
-_UNTRUSTED_WRAP_HEAD_RE = re.compile(r'<untrusted_tool_result source="[^"\n]*">\n(?:[^\n]+\n){0,3}\n')
+# Fix-all R1: tolerant of small format changes: any attributes in any order (or none), tag case, CRLF, trailing
+# blanks, a notice of 0-4 lines, extra blank lines, and a re-wrapped (nested) header. The notice must still end
+# in a blank line, so a page that merely quotes the tag a few lines down is not taken for a spill.
+_UNTRUSTED_WRAP_HEAD_RE = re.compile(
+    r"<untrusted_tool_result\b[^>\n]*>[ \t]*\r?\n(?:[^\n]*\S[^\n]*\n){0,4}?(?:[ \t]*\r?\n)+[ \t]*",
+    re.IGNORECASE,
+)
+_UNTRUSTED_WRAP_MAX_DEPTH = 3
 
 
 def is_persisted_block(content: Any) -> bool:
@@ -48,8 +55,10 @@ def is_persisted_block(content: Any) -> bool:
     if not isinstance(content, str):
         return False
     head = content.lstrip()
-    wrapped = _UNTRUSTED_WRAP_HEAD_RE.match(head)
-    if wrapped:
+    for _ in range(_UNTRUSTED_WRAP_MAX_DEPTH):
+        wrapped = _UNTRUSTED_WRAP_HEAD_RE.match(head)
+        if not wrapped:
+            break
         head = head[wrapped.end():]
     return head.startswith(PERSISTED_OUTPUT_TAG)
 
