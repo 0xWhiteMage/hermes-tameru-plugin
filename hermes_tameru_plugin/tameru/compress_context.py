@@ -106,6 +106,20 @@ _SECRETS_RE = re.compile(
     r"(?![^\s\"']*[(\[{<$])(?!(?:[A-Za-z_]\w*\.)+[A-Za-z_]\w*(?![^\s,;)\]}]))"
     r"(?![a-z_](?=[a-z0-9_]*_)[a-z0-9_]*(?![^\s,;)\]}]))"
     r"[^\s\"']{16,})"
+    # 1.4.1 fix-all: the code exclusions above also let through unquoted
+    # snake_case passphrases and dotted passwords. A whole-line ``.env`` /
+    # shell assignment (``DB_PASSWORD=correct_horse_battery_staple``, no
+    # spaces around ``=``) or a YAML ``key: value`` line still names one: the
+    # value runs to the end of the line and does not end in ``,`` ``;`` ``)``
+    # (a keyword argument on its own line). YAML keeps the attribute-chain
+    # exclusion (``api_key: pydantic.types.SecretStr`` is an annotation).
+    r"|(?im:^[ \t]*(?:export[ \t]+)?(?:[A-Za-z0-9_]+_)?"
+    r"(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)"
+    r"=(?![^\s\"']*[(\[{<$])[^\s\"']{15,}[^\s\"',;)][ \t]*$)"
+    r"|(?im:^[ \t]*(?:[A-Za-z0-9_]+_)?"
+    r"(?:password|passwd|secret|api[_-]?key|access[_-]?token|auth[_-]?token)"
+    r":[ \t]+(?![^\s\"']*[(\[{<$])(?!(?:[A-Za-z_]\w*\.)+[A-Za-z_]\w*[ \t]*$)"
+    r"[^\s\"']{15,}[^\s\"',;)][ \t]*$)"
 )
 
 # Recursion guard markers: output Tameru itself produced.
@@ -3989,7 +4003,9 @@ def brief_context(
     emitted, plus one probe with ``(total_chars, total_chars)`` that sizes the
     widest marker for the budget. A line is never cut, except one that is
     itself as long as the budget: it is truncated, with a marker. ``text`` is
-    returned unchanged when it already fits.
+    returned unchanged when it already fits. A ``gap_marker`` wrapped in
+    :class:`InliningGapMarker` keeps a dropped span verbatim instead when its
+    marker would not be shorter than the span (1.4.1).
     """
     text = text if isinstance(text, str) else str(text or "")
     budget = max(1, int(budget_chars))
@@ -4172,26 +4188,33 @@ def brief_context(
         if all_errors:
             break
 
+    # 1.4.1 (fix-all): an InliningGapMarker gets the dropped lines verbatim
+    # when its marker would not be shorter than them, as in compress_context.
+    inline_short = _inlines_short(gap_marker)
+
+    def gap_parts(lo: int, hi: int) -> list[str]:
+        if not has_content(lo, hi):
+            return []
+        span_chars = _span_chars(lines, lo, hi)
+        made = mark(span_chars)
+        if not made:
+            return []
+        if inline_short and len(made) >= span_chars:
+            return lines[lo:hi]
+        return [made]
+
     parts: list[str] = []
     prev = -1
     for i in chosen:
         lo = prev + 1
         if prev < 0 and i > 0:
-            span = (0, i)
+            parts.extend(gap_parts(0, i))
         elif prev >= 0 and i > prev + 1:
-            span = (lo, i)
-        else:
-            span = None
-        if span is not None and has_content(*span):
-            made = mark(_span_chars(lines, *span))
-            if made:
-                parts.append(made)
+            parts.extend(gap_parts(lo, i))
         parts.append(eff(i))
         prev = i
-    if chosen and prev < n - 1 and has_content(prev + 1, n):
-        made = mark(_span_chars(lines, prev + 1, n))
-        if made:
-            parts.append(made)
+    if chosen and prev < n - 1:
+        parts.extend(gap_parts(prev + 1, n))
     out = "\n".join(parts)
     if not out:
         # Not even one line (with its marker) fits a budget this small: the

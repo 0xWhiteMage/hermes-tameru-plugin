@@ -10,4 +10,4 @@ imports that do not resolve inside a nested package.
 from .compress_context import compress_context  # noqa: F401
 
 # Upstream commit this directory was synced from (scripts/sync_to_harness.py).
-VENDORED_FROM = "a1e8a7f0e966996f5964ce99714d472b1b28259e"  # local engine branch locally/redteam-engine (v1.4.0 + 1.4.1 candidate + red-team fix), not upstream yet
+VENDORED_FROM = "91f00e00e2307c5c96b2f3e129b04e0ac786d1d3"  # local engine branch locally/redteam-engine (v1.4.0 + 1.4.1 candidate + red-team and fix-all fixes), not upstream yet

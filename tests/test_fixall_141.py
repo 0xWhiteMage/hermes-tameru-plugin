@@ -83,3 +83,16 @@ def test_r5_brief_estimate_is_deterministic_and_bounded():
     assert a == engine._brief_estimate(plain)
     assert a >= engine._settings.brief_chars and b > a
     assert engine._brief_estimate("z" * 900) <= int((1 - engine._settings.min_savings) * 900)
+
+
+# ---- R3: env / YAML lines with identifier-like credentials are not kept --------------------------------------------
+def test_r3_env_file_passphrases_are_not_kept_for_expand():
+    """Red-team R3: the code exclusions let ``DB_PASSWORD=correct_horse_battery_staple`` (an unquoted snake_case
+    passphrase) through, so the recovery store kept a ``cat .env`` original holding it. Engine 91f00e0 flags
+    whole-line env / YAML assignments again; code that reads a password is still kept."""
+    store = OriginalStore(16, 1_000_000)
+    filler = "\n".join(f"LOG_LEVEL_{i}=info" for i in range(20))
+    assert not store.put("0123abcd", filler + "\nDB_PASSWORD=correct_horse_battery_staple\n")
+    assert not store.put("0123abce", "db:\n  host: db\n  secret: correct_horse_battery_staple\n")
+    assert not store.put("0123abcf", filler + "\nAUTH_TOKEN=team.alpha.deploy.token.x\n")
+    assert store.put("0123abd0", "def f(args):\n    run(\n        user_password=args.user_password,\n    )\n" + filler)
