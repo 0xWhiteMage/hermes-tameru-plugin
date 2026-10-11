@@ -98,10 +98,30 @@ def test_inline_short_gaps_in_extract() -> None:
     row = out[idx]["content"]
     assert changed
     assert classify_render(row) == "v1"
-    rung = parse_header(row)["rung"]
-    assert rung in {"extract", "brief"}
-    if rung == "extract":
-        assert "retry 1/3" in row
+    assert parse_header(row)["rung"] == "extract"
+    assert "ERROR payment gateway timeout order=991\nretry 1/3\n" in row
+
+
+def test_inline_short_gaps_in_brief(monkeypatch) -> None:
+    """Fix-all R8: the brief rung inlines a dropped line shorter than Hermes's marker too (the old test only
+    asserted it when the row happened to land on the extract rung)."""
+    from hermes_tameru_plugin import engine as engine_module
+
+    lines = [
+        f"2026-10-11 12:00:{i:02d} INFO worker-{i % 10} processed batch {i:03d} in 12ms " + "x" * 40
+        for i in range(1, 81)
+    ]
+    lines[39] = "ERROR payment gateway timeout order=991"
+    lines[40] = "retry 1/3"
+    lines[41] = "FATAL db pool exhausted after 30s"
+    chat = Chat("why did the payment gateway time out?")
+    idx = chat.tool("terminal", {}, hp.terminal_result("\n".join(lines)))
+    msgs = chat.finish()
+    monkeypatch.setattr(engine_module.TameruContextEngine, "_extract_row", lambda *a, **k: None)
+    changed, out = demote(make_engine(), msgs, idx)
+    row = out[idx]["content"]
+    assert changed and parse_header(row)["rung"] == "brief"
+    assert "ERROR payment gateway timeout order=991\nretry 1/3\nFATAL db pool exhausted after 30s" in row
 
 
 def test_compare_bootstrap_isolates_hermes_home(tmp_path, monkeypatch) -> None:

@@ -287,7 +287,11 @@ def test_the_query_leaves_out_the_bare_tool_name(monkeypatch, tool, args):
         engine_module.TameruContextEngine, "_extract_row",
         lambda self, line, pl, ref, query, *a: seen.append(list(query)) or real(self, line, pl, ref, query, *a),
     )
-    engine, msgs, idx = _one(TASK_NAMING_THE_TEST, tool, args, pytest_failure_with_passes())
+    # The output names the tool too, so ``usable_query`` (which drops parts absent from the text) keeps the
+    # tool-name part and only the plugin's filter can take it out (fix-all R8: without this line the
+    # ``read_file`` case passed even with the filter removed).
+    output = pytest_failure_with_passes() + f"\nconftest.py:12: fixture uses {tool}() to load the orders\n"
+    engine, msgs, idx = _one(TASK_NAMING_THE_TEST, tool, args, output)
     demote(engine, msgs, idx)
     assert seen and all(tool not in q for q in seen)
     assert any(any(str(v) in part for part in q) for q in seen for v in args.values())

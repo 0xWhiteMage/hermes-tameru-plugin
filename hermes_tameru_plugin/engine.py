@@ -71,6 +71,7 @@ from .render import (
 )
 from .supersede import SupersessionIndex, build_index, superseded_by
 from .tameru.compress_context import (
+    InliningGapMarker,
     ENGINE_VERSION,
     brief_context,
     compress_context,
@@ -78,6 +79,9 @@ from .tameru.compress_context import (
     extract_evidence_lines,
 )
 from .telemetry import Telemetry
+
+# A dropped span shorter than Hermes's elision marker is kept verbatim (extract and brief alike).
+_INLINING_ELISION = InliningGapMarker(elision_marker)
 
 try:
     from agent.context_compressor import ContextCompressor as _Base
@@ -511,13 +515,10 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         # extract or brief may not take the room the rows still to come in this pass need for their briefs.
         free = scope.room - self._reserved_after(scope, result, idx, call_id_to_tool, min_prune_chars)
         own_limit = min(limit, free)
-        # A brief squeezed below half its start size keeps little more than its header: a header row (ref kept)
-        # leaves that room to the newer rows instead.
-        brief_limit = own_limit if own_limit >= settings.brief_chars // 2 else 0
         hint = content_hint(tool, args, pl.inner)
         for rung, build in (
             ("extract", lambda: self._extract_row(line, pl, ref, query, hint, own_limit)),
-            ("brief", lambda: self._brief_row(line, pl, ref, query, brief_limit) if brief_limit > 0 else None),
+            ("brief", lambda: self._brief_row(line, pl, ref, query, own_limit) if own_limit > 0 else None),
         ):
             rendered = build()   # lazily: the brief is only computed when the extract was refused
             if rendered is not None:
@@ -697,7 +698,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                     break
                 try:
                     body = brief_context(
-                        pl.inner, budget_chars=budget, query=" ".join(query), gap_marker=elision_marker,
+                        pl.inner, budget_chars=budget, query=" ".join(query), gap_marker=_INLINING_ELISION,
                     )
                 except Exception:
                     return best
