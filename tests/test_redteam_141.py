@@ -84,3 +84,24 @@ def test_a_compress_focus_equal_to_the_tool_name_stays_in_the_query(monkeypatch)
     seen.clear()
     demote(make_engine(), msgs, idx)   # without the focus the bare name is still left out
     assert seen and "terminal" not in seen[-1]
+
+
+def test_source_code_that_reads_a_password_is_still_recoverable() -> None:
+    """Red-team finding (engine 173a948 secrets screen): ``password = get_password_from_vault()`` made
+    ``contains_secret`` true, so the recovery store refused the whole ``read_file`` original and ``tameru_expand``
+    could only miss. Engine a1e8a7f (locally/redteam-engine) no longer treats code expressions as secrets."""
+    import json
+
+    from hermes_tameru_plugin.recovery import OriginalStore, expand
+
+    source = "\n".join(
+        ["import vault", "", "def connect():", "    password = get_password_from_vault()",
+         "    api_key = settings.service_api_key", "    return Client(api_key=fallback_api_key, password=password)"]
+        + [f"# filler line {i}" for i in range(40)]
+    )
+    store = OriginalStore(16, 1_000_000)
+    assert store.put("0123abcd", source)
+    out = json.loads(expand(store, {"ref": "0123abcd", "grep": "password"}))
+    assert out["matched_lines"] == [4, 6]
+    # A real credential is still refused.
+    assert not store.put("0123abce", source + "\nDB_PASSWORD=Xk9-2mQ_vL8+pR4/zT6=\n")
