@@ -5,6 +5,7 @@ import os
 import sys
 from pathlib import Path
 
+import pytest
 from engine_support import Chat, demote, make_engine
 from fixtures import hermes_payloads as hp
 
@@ -127,3 +128,23 @@ def test_compare_bootstrap_isolates_hermes_home(tmp_path, monkeypatch) -> None:
     monkeypatch.setenv("TAMERU_EVAL_KEEP_HERMES_HOME", "1")
     module._bootstrap()
     assert os.environ["HERMES_HOME"] == str(tmp_path / "user_home")
+
+
+@pytest.mark.real_hermes
+def test_hermes_spill_with_an_appended_subdirectory_hint_keeps_its_path() -> None:
+    """Real ``tools.tool_result_storage._build_persisted_message``, then what ``agent.tool_executor`` appends
+    after it (``"\\n\\n[Subdirectory context discovered: ...]"``): the block no longer ends with the closing tag,
+    so the spill test is "starts with the tag", and the row still becomes a header naming the spill path."""
+    from tools.tool_result_storage import _build_persisted_message
+
+    spill = _build_persisted_message("p" * 1500, True, 90_000, "/tmp/spill.txt")
+    spill += "\n\n[Subdirectory context discovered: src/AGENTS.md]\n" + "Use ruff; keep functions short.\n" * 40
+    assert is_persisted_block(spill)
+    chat = Chat("q")
+    idx = chat.tool("terminal", {"command": "make"}, spill)
+    engine = make_engine()
+    _, out = demote(engine, chat.finish(), idx)
+    row = out[idx]["content"]
+    assert classify_render(row) == "v1" and parse_header(row)["rung"] == "header"
+    assert "spilled to /tmp/spill.txt" in row and "\n" not in row
+    assert engine._store.get(parse_header(row)["ref"]) == spill
