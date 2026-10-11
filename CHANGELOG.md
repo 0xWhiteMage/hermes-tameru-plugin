@@ -7,13 +7,29 @@ All notable changes to this project are documented here. The format follows
 
 Fixes from the first live Hermes sessions and for the two answers 1.4.0 still lost. Numbers are in
 [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md). The vendored engine is the local 1.4.1 candidate (`e099d10`, not upstream
-yet; patches in [docs/upstream-patches/](docs/upstream-patches/README.md)).
+yet; patches in [docs/upstream-patches/](docs/upstream-patches/README.md)). After the red-team round the vendored engine
+is `a1e8a7f` (`e099d10` plus one secrets-screen fix).
+
+### Red-team round (branch `locally/redteam-1.4.1`, see [REPORT-1.4.1.md §7](docs/REPORT-1.4.1.md))
+- **A spilled web/browser/MCP result was no longer recognised as a spill** (regression in this candidate). Hermes wraps
+  `web_extract`, `web_search`, `browser_*` and `mcp_*` results in `<untrusted_tool_result>` after the spill, so the
+  "starts with the tag" test missed them: they took the brief rung (~1k of the external preview) instead of the 1.4.0
+  `spilled to <path>` header. `is_persisted_block` now looks past that wrapper header.
+- **`/compress terminal` lost its focus on `terminal` rows** (regression in this candidate): the query de-duplicates the
+  focus and the call name into one part, and the bare-tool-name filter dropped it. A part equal to the focus stays.
+- **The recovery store refused ordinary source files** (regression from engine `173a948`): the new unquoted
+  `KEY=value` secrets pattern matched code such as `password = get_password_from_vault()` (141 of 2,372 non-test
+  Hermes `.py` files, 9 before), and the store never keeps an original with a secret, so `tameru_expand` could not serve
+  them from the store. Engine `a1e8a7f` excludes code expressions (15 of 2,372 files, all literal fixture keys).
+- Added `tests/test_fuzz_redteam.py` (hypothesis; skipped without it) and `tests/test_redteam_141.py`.
+- Still open, not changed: polynomial-time `grep` regexes in `tameru_expand` (`.*.*x` on a long line), briefs are not
+  covered by the pass-2 reservation, very small briefs (~250-330 chars) at the end of a tight budget. See the report.
 
 ### Fixed
 - **A result that quoted `<persisted-output>` was taken for a Hermes spill.** A live 29.5K `git log` that mentioned
-  the tag was reduced to the spill one-liner. A result is a spill only when it starts with the tag
-  (`hermes_compat.is_persisted_block`); Hermes may append subdirectory hints after the closing tag, so "ends with"
-  would be wrong.
+  the tag was reduced to the spill one-liner. A result is a spill only when it starts with the tag, or with Hermes'
+  untrusted-data wrapper header followed by the tag (`hermes_compat.is_persisted_block`; the wrapper case was added in
+  the red-team round). Hermes may append subdirectory hints after the closing tag, so "ends with" would be wrong.
 - **Both answers 1.4.0 lost are kept** (per-result QA set, `tests/eval/per_result.py`: 12/14 answers in 1.4.0,
   14/14 now, 22/22 error templates both):
   - a pytest failure with a long captured log now takes the extract (the engine collapses the captured section);

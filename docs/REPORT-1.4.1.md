@@ -2,14 +2,14 @@
 
 Status: local branch `locally/finish-1.4` on top of 1.4.0 (`0a7e568`), not released, not pushed. Vendored engine:
 the local 1.4.1 candidate `e099d10` (branch `locally/1.4.0-patches` of `tameru-compaction-system`; patches `0004` and
-`0005` in [upstream-patches/](upstream-patches/README.md)). Every number below was measured on 2026-10-12 with
+`0005` in [upstream-patches/](upstream-patches/README.md)); after the red-team round (§7) `a1e8a7f` (patch `0006`). Every number below was measured on 2026-10-12 with
 Hermes `1298c8e` unless it says otherwise. Savings are in characters.
 
 ## 1. What was open after 1.4.0 and where it stands
 
 | Item (source) | State |
 |---|---|
-| A live 29.5K `git log` that quoted `<persisted-output>` was read as a Hermes spill (first live sessions) | Fixed: a spill must start with the tag. Tested against Hermes' own `_build_persisted_message`, with a subdirectory hint appended after the closing tag. |
+| A live 29.5K `git log` that quoted `<persisted-output>` was read as a Hermes spill (first live sessions) | Fixed: a spill must start with the tag (or, since the red-team round, with Hermes' untrusted-data wrapper header and then the tag). Tested against Hermes' own `_build_persisted_message`, with a subdirectory hint appended after the closing tag, and with `make_tool_result_message` for wrapped tools. |
 | Two answers lost per result: saturated `rg -n` hit, pytest assertion inside a long captured log (REPORT-1.4.0 §8) | Fixed (engine `e099d10`); 14/14 answers |
 | Replay regression from the first 1.4.1 cut (`tameru_1_4` gold 13/17 to 10/17) | Fixed: pass-2 reservation; 13/17 |
 | `compare.py` wrote into the developer's `HERMES_HOME` | Fixed: always a throwaway home unless `TAMERU_EVAL_KEEP_HERMES_HOME=1` or `TAMERU_EVAL_HERMES_HOME=<dir>` |
@@ -77,7 +77,8 @@ Decomposition (engine alone, one input changed at a time):
   Hermes and other tools recognize an elision.
 - **The bare tool name in the query** (`terminal`) took git_log from 93.9% to 81.0%. It is now dropped.
 - **travis_yaml's other query part** is the test harness' neighbouring call (`echo filler 0`), which matches the
-  file's `echo` lines: 42.2% with that part alone. This comes from the fixture, not from what a real session asks.
+  file's `echo` lines: engine alone with the question plus that part saves 42.2% (corrected in the red-team round: an
+  earlier wording said "that part alone", which measures 58.6%). This comes from the fixture, not from what a real session asks.
 - **Row headers** (Hermes' one-line summary plus the tameru tag) cost roughly 150-250 chars per row; in the live run a brief kept 972 of its 1,189 chars as content.
 
 Byte stability: rendering is still a pure function of the row and the pass, and the replay reports 0 rows
@@ -144,10 +145,71 @@ What this shows, and what it does not:
   five-row case.
 - **The query change** affects every extract (the tool name is no longer a query part). The corpus, the replay and
   the QA set show no loss. A tool whose name is also the subject of the question (for example a result about
-  `terminal` settings) now relies on the user's words for that term.
+  `terminal` settings) now relies on the user's words for that term. A `/compress <topic>` focus equal to the tool name
+  is kept (red-team fix, §7).
 - **The vendored engine is not upstream.** `VENDORED_FROM` names a local commit (`e099d10`).
 - **Evidence:** the per-result set and corpus are synthetic. The replay uses a fake summarizer, and the live session
   is a single run per arm on an older Hermes build.
+
+## 7. Red-team round (branch `locally/redteam-1.4.1`, engine `locally/redteam-engine`)
+
+An adversarial review of everything since 1.4.0, done on the dev box only (no live model, no Benjamin, no NAS). Every
+number here was measured on 2026-10-12 against Hermes `1298c8e`. Artifacts: `/workspace/tameru-out/redteam/`.
+
+### Findings
+
+| # | Severity | Area | Finding | Status |
+|---|---|---|---|---|
+| R1 | Medium | spill detection (`3453d3a`) | Hermes wraps `web_extract`/`web_search`/`browser_*`/`mcp_*` results in `<untrusted_tool_result>` *after* the spill. "Starts with the tag" missed those spills: the brief rung (1,012-1,053 chars, mostly external preview) instead of the 1.4.0 `spilled to <path>` header, and no spill note in the lean tail. | Fixed `30ac14d` |
+| R2 | Low | query (`c4e46f1`) | `/compress terminal` on `terminal` rows: focus and call name collapse into one query part, and the filter dropped it. | Fixed `5f728cf` |
+| R3 | Medium | engine secrets screen (`173a948`) | Unquoted `KEY=value` pattern matched code (`password = get_password_from_vault()`, `api_key = agent._x`). `contains_secret` was true for 141/2,372 non-test Hermes `.py` files (9 at `a541e92`), and the recovery store refuses any original with a secret, so `tameru_expand` could not serve those files from the store. | Fixed engine `a1e8a7f`, vendored `5b8855d`: 15/2,372 (all literal fixture keys); linear on 200K-char inputs |
+| R4 | Medium (pre-existing since 1.4.0) | `tameru_expand` grep | `_backtracking_risk` catches nested repeats only. Polynomial patterns pass: `.*.*x` on a 1,200-char line took 1.4 s, `.*.*.*x` on a 3,000-char line ran >275 s (killed). `.*x` is quadratic on very long (minified) lines. `re` cannot be interrupted. | Open: needs a design decision (a subprocess/thread with a timeout, the `regex` module's timeout, or a line-length cap) |
+| R5 | Low (design) | pass-2 reservation | Only the extract is limited. A brief still uses the full room, and real briefs (1.8-2.7k) are larger than the 1,200 reserved, so the newest rows of a tight pass can still fall to headers or to a sliver brief (244-327 chars). Probe: 6 orders × 4 budgets, 13/24 change with the reservation, all toward more body-carrying rows; none lose one. | Open, documented (`reservation_probe.txt`) |
+| R6 | Info | spill detection | A tool output (or wrapped web page) that itself *starts* with `<persisted-output>` and a `Full output saved to:` line is taken as a spill and cut to a header naming that path. 1.4.0 accepted any result containing the tag, so this is narrower than before. | Not a bug |
+| R7 | Info | refs | `ref` is 32 bits; a session-archive lookup over 20K rows has a ~5e-6 chance per lookup of answering with a different row. | Not a bug, noted |
+| R8 | Low | tests | `test_the_query_leaves_out_the_bare_tool_name[read_file]` passes with the filter reverted (only `[terminal]` guards it). `test_inline_short_gaps_in_extract` asserts only when the rung is `extract` (it does fail when inlining is removed). The yaml and setuptools tests are skipped in both box venvs (they pass, 278/278, in a venv with those packages). | Open, noted |
+| R9 | Info | engine perf | Linear in every adversarial case timed (`perf_engine.txt`): saturated rg up to 3.0 MB 1.1 s, captured-log pytest 2.5 MB 0.8 s, nested rules 4.6 MB 22.5 s (4× input, 4× time), 4 MB single line 1.1 s (fail-open). | OK |
+
+### Mutation check of the 1.4.1 fixes (revert the fix, run the tests)
+
+Every fix is caught: spill "contains" (2 tests fail), no reservation (1), tool name kept (1), no `inline_short_gaps` (1),
+compare.py home (1); engine: saturated grep (4), captured-log collapse (2), CLI flags (3), renderer inlining (4),
+`_with_gaps` inlining (2), agent-format inlining (2), AIza pattern (1), cross-file marker (1). The red-team tests fail on
+`e2716a8` (6 in the stub, 7 on real Hermes) and on `e099d10` (engine secrets test).
+
+### Fuzzing (`tests/test_fuzz_redteam.py`, hypothesis 6.169, random seeds)
+
+| property | runs | failures |
+|---|---|---|
+| engine entry points (determinism, extract never longer than its input) | 3,000 real Hermes + 3,000 stub | 0 |
+| ladder, one demotion (no swallowed error, determinism, row never longer, extract keeps every error fingerprint, pairing, byte-stable second demotion) | 3,000 real Hermes + 3,000 stub | 0 |
+| whole prune pass (pairing, no swallowed error, rendered rows unchanged by a second prune) | 1,500 real Hermes | 0 |
+
+The real-Hermes single-row runs exercised the code before the R1-R3 fixes; the stub runs and the prune run, the code after.
+No crash, non-determinism or invariant violation was found.
+
+### Suites (before: `e2716a8`; after: red-team head)
+
+| suite | before | after |
+|---|---|---|
+| plugin, stub | 1085 passed, 269 skipped | 1094 passed, 270 skipped |
+| plugin, real Hermes | 1349 passed, 5 skipped | 1359 passed, 5 skipped |
+| engine pytest | `e099d10`: 1159 passed, 3 skipped | `a1e8a7f`: 1162 passed, 3 skipped |
+| `run_battery.py` | 15/15 | 15/15, savings identical |
+| `threshold_sweep.py` | 77.3 / 68.4 / 61.2 / 41.5 / 24.9% | same |
+| `compare.py` | 13/17 at 1,019,153; product 12/17 at 990,003 | identical |
+| `per_result.py` | 14/14 answers, 22/22 templates, corpus 67.5% vs 81.0% | identical |
+
+The added tests account for the difference: `test_redteam_141.py` (6 stub + 1 real-only) and 3 fuzz properties.
+
+### Docs check
+
+Every number in §2-§4 was re-measured or matched to a saved artifact: the 1.4.0 and pre-query-change per-result
+tables (re-run at `0a7e568` and `1a47165`), the decomposition in §3 (travis 40.9/47.9, jp_musubi 28.6/31.5, git_log
+89.4, ar_needle 72.9, git_log with `terminal` 81.0), the replay and WIP numbers, the suite counts and the live session
+(23 API calls, 559,425 vs 473,058 prompt tokens, briefs 2,211→1,189 and 11,734→1,208). One wording was wrong (§3
+travis "that part alone", corrected). Not re-checked on the box: the `b78931e` suite count (1319/30) and the
+"12/12 correct" judgement, which was made by reading the answers.
 
 ## Reproduce
 
