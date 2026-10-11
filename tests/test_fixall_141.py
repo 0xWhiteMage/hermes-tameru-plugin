@@ -47,9 +47,11 @@ def test_the_engine_passes_its_grep_settings_to_expand():
 
     from hermes_tameru_plugin.config import TameruSettings
 
-    engine = make_engine(TameruSettings(expand_grep_timeout=0.5, expand_grep_line_chars=10))
+    engine = make_engine(TameruSettings(expand_grep_timeout=0.5))
     engine._store.put(REF, "a" * 3000 + "\n" + "b" * 30)
     out = json.loads(engine.handle_tool_call("tameru_expand", {"ref": REF, "grep": ".*.*.*x"}))
     assert "after 0.5 s" in out["error"]
+    engine = make_engine(TameruSettings(expand_grep_line_chars=10))
+    engine._store.put(REF, "a" * 3000 + "\n" + "b" * 30)
     out = json.loads(engine.handle_tool_call("tameru_expand", {"ref": REF, "grep": "b"}))
     assert out["matched_lines"] == [2] and out["lines_capped"] == 2
