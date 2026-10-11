@@ -7,8 +7,10 @@ line. Not collected by pytest.
 """
 from __future__ import annotations
 
+import atexit
 import json
 import os
+import shutil
 import sys
 import tempfile
 from pathlib import Path
@@ -21,7 +23,13 @@ def _bootstrap() -> None:
     root = os.environ.get("HERMES_REPO_ROOT", "").strip()
     if not root:
         sys.exit("set HERMES_REPO_ROOT to a Hermes Agent checkout")
-    os.environ.setdefault("HERMES_HOME", tempfile.mkdtemp(prefix="tameru-eval-home-"))
+    chosen = os.environ.get("TAMERU_EVAL_HERMES_HOME", "").strip()
+    if chosen:
+        os.environ["HERMES_HOME"] = chosen
+    else:
+        home = tempfile.mkdtemp(prefix="tameru-eval-home-")
+        os.environ["HERMES_HOME"] = home
+        atexit.register(shutil.rmtree, home, ignore_errors=True)
     for p in (str(ROOT), str(HERE), str(Path(root).expanduser().resolve())):
         if p not in sys.path:
             sys.path.insert(0, p)

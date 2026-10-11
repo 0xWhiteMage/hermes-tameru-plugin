@@ -57,13 +57,14 @@ def test_brief_rung_when_the_extract_is_not_acceptable():
     assert error_fingerprints(parse_payload(msgs[idx]["content"]).inner).keys() <= error_fingerprints(row).keys()
 
 
-def test_a_failure_block_the_extract_cannot_shrink_falls_to_the_brief():
-    """Engine 1.4.0 keeps a failure block whole (captured log included): a lone ~7k failure saves ~4%,
-    under ``min_savings``, so the extract is refused and the structural brief takes the row."""
+def test_a_failure_block_with_a_long_captured_log_now_takes_the_extract():
+    """Engine 1.4.0 kept a failure block whole (captured log included): a lone ~7k failure saved ~4%, under
+    ``min_savings``, so the brief took the row. The 1.4.1 engine collapses a long captured section (first and
+    last lines, error and WARNING+ lines), so the query-aware extract keeps the failure itself."""
     engine, msgs, idx = _one(TASK_NAMING_THE_TEST, "terminal", {"command": "pytest -q"}, pytest_failure())
     changed, out = demote(engine, msgs, idx)
     row = out[idx]["content"]
-    assert changed and _rung(row) == "brief"
+    assert changed and _rung(row) == "extract"
     assert len(row) < 0.3 * len(msgs[idx]["content"])
     assert "test_reserve_stock_rollback" in row and "AssertionError" in row
 

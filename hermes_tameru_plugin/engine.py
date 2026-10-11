@@ -39,12 +39,12 @@ from typing import Any, NamedTuple
 from .config import TameruSettings, compression_kwargs, load_settings, read_hermes_config
 from .hermes_compat import (
     LEAN_STUB_RE,
-    PERSISTED_OUTPUT_TAG,
     SKILL_PRUNED_MARKER_PREFIX,
     SeamReport,
     compression_threshold,
     drop_stale_api_content,
     elision_marker,
+    is_persisted_block,
     marker_artifact_re,
     probe_seams,
     refused_summary,
@@ -190,7 +190,7 @@ def _json_args(raw: Any) -> dict:
 
 def _spill_note(content: str) -> str:
     """``spilled to <path>`` for a Hermes ``<persisted-output>`` block: the pointer is all that is worth keeping."""
-    found = _SPILL_PATH_RE.search(content) if PERSISTED_OUTPUT_TAG in content else None
+    found = _SPILL_PATH_RE.search(content) if is_persisted_block(content) else None
     return f"spilled to {found.group(1).strip()}" if found else ""
 
 
@@ -457,7 +457,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         ):
             return self._keep_parent(result, idx, shadow[0], tool)
         spill = _spill_note(content)
-        if PERSISTED_OUTPUT_TAG in content and not spill:
+        if not spill and is_persisted_block(content):
             return self._keep_parent(result, idx, shadow[0], tool)
         if scope.budget < len(content):
             self._telemetry.count("budget_skip", tool=tool)
@@ -540,6 +540,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             res = compress_context(
                 inner, query, ccr=False, citations=False, content_hint=hint,
                 pin_patterns=list(settings.protect_patterns) or None, gap_marker=elision_marker,
+                inline_short_gaps=True,
                 recursion_markers=(TAMERU_TAG.strip(),), min_savings_ratio=settings.min_savings,
                 **fixed,
             )
@@ -761,7 +762,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         """True for rows whose Hermes stub must stay (exempt tools, refusals, spill previews)."""
         return (
             tool in self._exempt or refused_summary(tool, _json_args(raw_args), content) is not None
-            or PERSISTED_OUTPUT_TAG in content or SKILL_PRUNED_MARKER_PREFIX in content
+            or is_persisted_block(content) or SKILL_PRUNED_MARKER_PREFIX in content
             or classify_render(content) == "legacy"
         )
 

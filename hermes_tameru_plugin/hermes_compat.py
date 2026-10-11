@@ -32,6 +32,14 @@ PRUNED_PLACEHOLDER = "[Old tool output cleared to save context space]"
 TOOL_CALL_UID_KEY = "_tool_call_uid"
 MESSAGE_UID_KEY = "message_uid"
 
+
+def is_persisted_block(content: Any) -> bool:
+    """True for Hermes' ``<persisted-output>`` replacement of an oversized result (it starts with the tag).
+
+    A result that merely quotes the tag (a commit message, a doc, this plugin's own source) is not one.
+    """
+    return isinstance(content, str) and content.lstrip().startswith(PERSISTED_OUTPUT_TAG)
+
 # What ``_lean_recovery_stub`` renders: ``[<tool> output demoted at compaction — N chars preserved
 # in session history.[ Recover with session_search(query=..., session_id='<id>')]]``.
 LEAN_STUB_RE = re.compile(

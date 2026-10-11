@@ -43,8 +43,8 @@ from typing import TYPE_CHECKING, Any, NamedTuple
 from .hermes_compat import (
     DUPLICATE_PREFIX,
     LEAN_STUB_RE,
-    PERSISTED_OUTPUT_TAG,
     PRUNED_PLACEHOLDER,
+    is_persisted_block,
     refused_summary,
     tool_calls_by_id,
 )
@@ -150,7 +150,7 @@ def _envelope(content: str, store: OriginalStore | None) -> dict:
 
 def _inspect(tool: str, args: dict, content: str, store: OriginalStore | None) -> _Outcome:
     if (
-        content.startswith((PRUNED_PLACEHOLDER, DUPLICATE_PREFIX)) or PERSISTED_OUTPUT_TAG in content
+        content.startswith((PRUNED_PLACEHOLDER, DUPLICATE_PREFIX)) or is_persisted_block(content)
         or LEAN_STUB_RE.match(content)
     ):
         return _Outcome(unknown=True)
@@ -172,7 +172,7 @@ def _original_text(content: str, store: OriginalStore | None) -> str:
     "" for what holds no original any more (Hermes' stubs and placeholders).
     """
     if (
-        content.startswith((PRUNED_PLACEHOLDER, DUPLICATE_PREFIX)) or PERSISTED_OUTPUT_TAG in content
+        content.startswith((PRUNED_PLACEHOLDER, DUPLICATE_PREFIX)) or is_persisted_block(content)
         or LEAN_STUB_RE.match(content)
     ):
         return ""
