@@ -17,6 +17,11 @@ HERMES_REPO_ROOT=/path/to/hermes-agent /path/to/venv314/bin/python -m pytest -q 
 ruff check .
 ```
 
+`.[dev]` brings `pyyaml`, `setuptools` and `hypothesis`; without them the direct `config.yaml` read
+(`tests/test_config.py`), the offline packaging build (`tests/test_packaging.py`) and the fuzz harness
+(`tests/test_fuzz_redteam.py`) skip, so check the skip count. In the real-mode venv install them too
+(`venv314/bin/pip install pyyaml setuptools hypothesis`).
+
 Markers: `real_hermes` (skipped without `HERMES_REPO_ROOT`), `stub_only` (skipped on real Hermes), `perf` (CI runs
 `-m "not perf"`). `tests/test_seam_contract.py` checks the private Hermes names the plugin hooks; if it fails
 after a Hermes bump, a seam moved.
@@ -27,7 +32,7 @@ after a Hermes bump, a seam moved.
 git clone https://github.com/NousResearch/hermes-agent
 git -C hermes-agent checkout 1298c8e74baa73e1a2b90124228d017261ac6bc4   # HERMES_PINNED_SHA in ci.yml
 python3.14 -m venv venv314
-venv314/bin/pip install -e ./hermes-agent pytest
+venv314/bin/pip install -e ./hermes-agent pytest pyyaml setuptools hypothesis
 export HERMES_REPO_ROOT=$PWD/hermes-agent
 ```
 
