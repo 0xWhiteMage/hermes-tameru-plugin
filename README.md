@@ -146,6 +146,8 @@ plugins:
 | `exempt_tools` | `[]` | Extra tool names left to Hermes' own handling (added to the built-in exempt set). |
 | `protect_patterns` | `[]` | Regexes; lines matching them are pinned in extracts. |
 | `expand_tool` | `true` | Add `tameru_expand` to the tool list. |
+| `expand_grep_timeout` | `2.0` | Seconds a `tameru_expand` grep with a repeat or alternation may run. It runs in a child process (`sys.executable -I -S`) that is killed after this; the model gets an error asking for a simpler pattern. Plain patterns (no repeat, no alternation) run in-process. |
+| `expand_grep_line_chars` | `20000` | Characters of each line a `tameru_expand` grep searches; longer lines are searched in their head only (`lines_capped` in the reply). |
 | `store_max_entries` | `512` | Originals kept in memory for `tameru_expand` (LRU). |
 | `store_max_chars` | `32000000` | Total characters of originals kept in memory (LRU). |
 | `pass_char_budget` | `4000000` | Original characters the ladder may process in one pass; rows beyond it use Hermes' line. |
@@ -160,7 +162,8 @@ plugins:
 Environment variable names: `TAMERU_HERMES_ENABLED`, `TAMERU_HERMES_MIN_TOOL_CHARS`,
 `TAMERU_HERMES_MAX_EXTRACT_CHARS`, `TAMERU_HERMES_BRIEF_CHARS`, `TAMERU_HERMES_MAX_RISK`,
 `TAMERU_HERMES_MIN_SAVINGS`, `TAMERU_HERMES_EXEMPT_TOOLS`, `TAMERU_HERMES_PROTECT_PATTERNS`,
-`TAMERU_HERMES_EXPAND_TOOL`, `TAMERU_HERMES_STORE_MAX_ENTRIES`, `TAMERU_HERMES_STORE_MAX_CHARS`,
+`TAMERU_HERMES_EXPAND_TOOL`, `TAMERU_HERMES_EXPAND_GREP_TIMEOUT`, `TAMERU_HERMES_EXPAND_GREP_LINE_CHARS`,
+`TAMERU_HERMES_STORE_MAX_ENTRIES`, `TAMERU_HERMES_STORE_MAX_CHARS`,
 `TAMERU_HERMES_PASS_CHAR_BUDGET`, `TAMERU_HERMES_RETAINED_EXTRACT_BUDGET_CHARS`, `TAMERU_HERMES_PRUNE_TAIL`,
 `TAMERU_HERMES_SUPERSESSION`, `TAMERU_HERMES_LEDGER`, `TAMERU_HERMES_TELEMETRY_LOG`,
 `TAMERU_HERMES_DEFAULT_PROACTIVE_PRUNE_TOKENS`, `TAMERU_HERMES_DEFAULT_PROACTIVE_PRUNE_MIN_RESULT_CHARS`.

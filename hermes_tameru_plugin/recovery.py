@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import json
 import re
+import subprocess
+import sys
 import threading
 from collections import OrderedDict
 from collections.abc import Callable
@@ -31,6 +33,18 @@ DEFAULT_MAX_CHARS = 12_000
 MAX_MAX_CHARS = 50_000
 MAX_GREP_CHARS = 200
 MAX_SCAN_ROWS = 20_000    # newest session rows a lookup considers
+DEFAULT_GREP_TIMEOUT = 2.0        # seconds a grep that may backtrack can run (in a child process) before it is killed
+DEFAULT_GREP_LINE_CHARS = 20_000  # chars of each line a grep scans (defence in depth; the rest of the line is not searched)
+
+# The child that runs a grep which may backtrack: ``re`` cannot be interrupted in-process, a process can be killed.
+# Stdlib only, isolated (-I) and without site (-S), so it starts in tens of milliseconds and imports nothing of the
+# host. Input: JSON {"p": pattern, "t": [line, ...]} on stdin (ASCII: surrogates escaped); output: JSON hit indexes.
+_GREP_CHILD = (
+    "import json,re,sys\n"
+    "d=json.loads(sys.stdin.buffer.read().decode('ascii'))\n"
+    "p=re.compile(d['p'],re.IGNORECASE)\n"
+    "sys.stdout.write(json.dumps([i for i,t in enumerate(d['t']) if p.search(t)]))\n"
+)
 
 EXPAND_SCHEMA: dict[str, Any] = {
     "name": EXPAND_TOOL_NAME,
@@ -81,6 +95,60 @@ _REF_RE = re.compile(r"[0-9a-f]{8}")
 _NESTED_QUANTIFIER_RE = re.compile(r"[)][*+]|[)][{]\d*,?\d*[}]")   # fallback when ``re``'s parser is unreachable
 _TERMINATOR_RE = re.compile(r"(\r\n|\r|\n)")   # the same line breaks ``render`` counts lines by
 _MISS_HINT = "session_search(query=..., role_filter='tool', session_id='{session_id}')"
+
+
+def _linear_pattern(pattern: str) -> bool:
+    """True for a pattern with no repeat and no alternation (literals, classes, ``.``, anchors, groups of those):
+    it cannot backtrack beyond its own length, so it runs in-process. Anything else runs in the timed child."""
+    try:
+        from re import _constants as const
+        from re import _parser as parser
+
+        plain = {
+            getattr(const, name) for name in (
+                "LITERAL", "NOT_LITERAL", "ANY", "IN", "AT", "CATEGORY", "NEGATE", "RANGE", "CHARSET", "BIGCHARSET",
+            ) if hasattr(const, name)
+        }
+
+        def flat(sub: Any) -> bool:
+            for op, av in sub:
+                if op == const.SUBPATTERN:
+                    if not flat(av[3]):
+                        return False
+                elif op not in plain:
+                    return False
+            return True
+
+        return flat(parser.parse(pattern))
+    except Exception:
+        return False
+
+
+def _grep_hits(
+    pattern: re.Pattern[str], texts: list[str], timeout: float,
+) -> tuple[list[int] | None, str]:
+    """Indexes of ``texts`` that ``pattern`` matches: ``(hits, "")``, or ``(None, error)`` when the search ran past
+    ``timeout`` seconds (the child is killed) or the child could not run."""
+    if _linear_pattern(pattern.pattern):
+        return [i for i, text in enumerate(texts) if pattern.search(text)], ""
+    payload = json.dumps({"p": pattern.pattern, "t": texts}).encode("ascii")
+    try:
+        done = subprocess.run(
+            [sys.executable, "-I", "-S", "-c", _GREP_CHILD], input=payload, capture_output=True,
+            timeout=timeout, check=False, creationflags=getattr(subprocess, "CREATE_NO_WINDOW", 0),
+        )
+    except subprocess.TimeoutExpired:
+        return None, (
+            f"grep timed out after {timeout:g} s and was stopped: the pattern backtracks too much on this output; "
+            "simplify it (a literal word, or fewer .* / \\w* repeats)"
+        )
+    except (OSError, ValueError) as exc:
+        return None, f"grep could not run in a child process ({type(exc).__name__}); use a literal pattern"
+    try:
+        hits = json.loads(done.stdout.decode("ascii"))
+    except (ValueError, UnicodeDecodeError):
+        return None, "grep could not run in a child process (no result); use a literal pattern"
+    return [int(i) for i in hits], ""
 
 
 def _backtracking_risk(pattern: str) -> bool:
@@ -243,6 +311,8 @@ def expand(
     *,
     session_lookup: Callable[[str], str | None] | None = None,
     session_id: str = "",
+    grep_timeout: float = DEFAULT_GREP_TIMEOUT,
+    grep_line_chars: int = DEFAULT_GREP_LINE_CHARS,
 ) -> str:
     """The ``tameru_expand`` tool: exact original lines for ``args["ref"]``, as a JSON string.
 
@@ -253,16 +323,20 @@ def expand(
     longer than that is cut. The original comes from ``store``, else from ``session_lookup``
     (a hit is cached in the store). A miss or bad arguments yield ``{"error": ...}``; this never
     raises.
+
+    A ``grep`` with any repeat or alternation runs in a child process killed after ``grep_timeout`` seconds (an
+    error asks the model to simplify the pattern); each line is searched in its first ``grep_line_chars`` chars
+    (``lines_capped`` counts the lines that were longer).
     """
     try:
-        return _expand(store, args, session_lookup, session_id)
+        return _expand(store, args, session_lookup, session_id, grep_timeout, grep_line_chars)
     except Exception as exc:  # a tool call must always answer with JSON
         return _error(f"tameru_expand failed: {type(exc).__name__}: {exc}")
 
 
 def _expand(
     store: OriginalStore, args: Any, session_lookup: Callable[[str], str | None] | None,
-    session_id: str,
+    session_id: str, grep_timeout: float = DEFAULT_GREP_TIMEOUT, grep_line_chars: int = DEFAULT_GREP_LINE_CHARS,
 ) -> str:
     if isinstance(args, str):
         try:
@@ -320,7 +394,15 @@ def _expand(
     if last < first:
         return _error("end_line must not be before start_line", total_lines=total)
 
-    chosen = [n for n in range(first, last + 1) if pattern is None or pattern.search(texts[n - 1])]
+    chosen = list(range(first, last + 1))
+    capped = 0
+    if pattern is not None:
+        cap = max(1, grep_line_chars)
+        capped = sum(1 for n in chosen if len(texts[n - 1]) > cap)
+        hits, failure = _grep_hits(pattern, [texts[n - 1][:cap] for n in chosen], grep_timeout)
+        if hits is None:
+            return _error(failure)
+        chosen = [chosen[i] for i in hits]
     content: list[str] = []
     returned: list[int] = []
     used = 0
@@ -345,6 +427,8 @@ def _expand(
     }
     if pattern is not None:
         result["matched_lines"] = returned
+        if capped:
+            result["lines_capped"] = capped
     return json.dumps(result, ensure_ascii=False)
 
 

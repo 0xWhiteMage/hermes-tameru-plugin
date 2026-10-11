@@ -57,7 +57,7 @@ def test_defaults_match_the_contract():
     assert dataclasses.asdict(TameruSettings()) == {
         "enabled": True, "min_tool_chars": 800, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
         "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (),
-        "expand_tool": True, "store_max_entries": 512, "store_max_chars": 32_000_000,
+        "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000,
         "default_proactive_prune_min_result_chars": 2000,
@@ -83,6 +83,8 @@ ENV_SAMPLES = {
     "exempt_tools": ("a, b", ("a", "b")),
     "protect_patterns": (r"\bID-\d+\b", (r"\bID-\d+\b",)),
     "expand_tool": ("no", False),
+    "expand_grep_timeout": ("0.5", 0.5),
+    "expand_grep_line_chars": ("4000", 4000),
     "store_max_entries": ("10", 10),
     "store_max_chars": ("1000", 1000),
     "pass_char_budget": ("0", 0),

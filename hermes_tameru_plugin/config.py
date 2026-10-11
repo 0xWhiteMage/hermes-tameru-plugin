@@ -45,6 +45,8 @@ class TameruSettings:
     exempt_tools: tuple[str, ...] = ()         # added to the built-in exempt set
     protect_patterns: tuple[str, ...] = ()     # regexes -> compress_context(pin_patterns=...)
     expand_tool: bool = True
+    expand_grep_timeout: float = 2.0             # seconds a backtracking-capable tameru_expand grep may run (killed after)
+    expand_grep_line_chars: int = 20_000         # chars of each line a tameru_expand grep scans
     store_max_entries: int = 512
     store_max_chars: int = 32_000_000
     pass_char_budget: int = 4_000_000          # inner chars Tameru may process per pass; beyond -> parent_line
@@ -117,6 +119,13 @@ def _parse_savings(raw: Any) -> float:
     return value
 
 
+def _parse_timeout(raw: Any) -> float:
+    value = _parse_float(raw)
+    if not 0.05 <= value <= 600:
+        raise ValueError("expected seconds in [0.05, 600]")
+    return value
+
+
 def _parse_risk(raw: Any) -> str:
     if isinstance(raw, str) and raw.strip().lower() in RISK_LEVELS:
         return raw.strip().lower()
@@ -175,6 +184,8 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "exempt_tools": _parse_str_tuple,
     "protect_patterns": _parse_patterns,
     "expand_tool": _parse_bool,
+    "expand_grep_timeout": _parse_timeout,
+    "expand_grep_line_chars": _min_int(1),
     "store_max_entries": _min_int(0),
     "store_max_chars": _min_int(0),
     "pass_char_budget": _min_int(0),

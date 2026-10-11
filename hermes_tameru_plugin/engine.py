@@ -867,7 +867,10 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 raw = archived(ref)
                 return None if raw is None else parse_payload(raw).inner
 
-        return expand(self._store, args, session_lookup=lookup, session_id=session_id)
+        return expand(
+            self._store, args, session_lookup=lookup, session_id=session_id,
+            grep_timeout=self._settings.expand_grep_timeout, grep_line_chars=self._settings.expand_grep_line_chars,
+        )
 
     # ---- status -------------------------------------------------------------------------------
     def get_status(self) -> dict[str, Any]:
