@@ -4,7 +4,7 @@ from __future__ import annotations
 import random
 
 import pytest
-from engine_support import Chat, make_engine, prune_pass
+from engine_support import Chat, make_engine, prune_pass, pytest_failure_with_passes
 from fixtures import hermes_payloads as hp
 
 from hermes_tameru_plugin.config import TameruSettings
@@ -112,3 +112,30 @@ def test_only_a_committing_pass_changes_rows():
     )
     res = engine.prune_tool_results_only(committed, 500_000)
     assert res[0] is committed and committed == before
+
+
+def _old_failure_then_logs() -> tuple[list[dict], int, list[int]]:
+    """An old pytest failure whose extract is large (~3.3k), then four logs that each need a ~1.2-1.8k brief."""
+    chat = Chat("tests/test_orders.py::test_reserve_stock_rollback failed")
+    old = chat.tool("terminal", {"command": "pytest -v"}, pytest_failure_with_passes())
+    idxs = [chat.tool("terminal", {"command": f"tail -n {400 + i} app.log"}, server_log(i)) for i in range(4)]
+    return chat.finish(), old, idxs
+
+
+def test_an_old_extract_leaves_room_for_the_briefs_still_to_come():
+    """Hermes visits pass 2 oldest first. 1.4.1: an old row's extract may only use the room left after a
+    ``brief_chars`` reservation for each later row of the pass, so one big early extract no longer starves the
+    newer rows down to headers (the tameru_1_4 replay regression)."""
+    messages, old, idxs = _old_failure_then_logs()
+    budget = 6000
+    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
+    rungs = _rungs(out, [old, *idxs])
+    assert rungs[0] == "brief", rungs                      # the extract (~3.3k) would not leave room
+    assert sum(r != "header" for r in rungs[1:]) >= 3, rungs
+    assert _bodies(out, [old, *idxs]) <= budget
+
+
+def test_the_reservation_does_not_bite_when_the_budget_fits():
+    messages, old, idxs = _old_failure_then_logs()
+    out, _ = prune_pass(make_engine(_all_bodies()), messages)
+    assert _rungs(out, [old, *idxs]) == ["extract"] + ["brief"] * len(idxs)

@@ -23,6 +23,7 @@ module still imports and the class raises ``ImportError`` when instantiated.
 """
 from __future__ import annotations
 
+import bisect
 import copy
 import hashlib
 import inspect
@@ -164,6 +165,8 @@ class _Pass:
     supersede: SupersessionIndex | None = None
     age_demote: set[int] | None = None            # rendered rows beyond the retained budget
     room: int = 0                                 # retained-extract chars left for new rows
+    boundary: int | None = None                   # Hermes' prune boundary of this pass (pass 2 runs below it)
+    pending: list[int] | None = None              # pass-2 rows the ladder may still render, oldest first
     gone: list[str] = field(default_factory=list)  # refs of rows this pass cut down to a body-less header
 
 
@@ -387,6 +390,9 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         boundary = super()._prune_boundary(result, protect_tail_count, protect_tail_tokens)
         if protect_tail_tokens and self._token_tail_scope() is not None:
             boundary = max(boundary, len(result) - protect_tail_count)
+        scope = _SCOPE.get()
+        if scope is not None and isinstance(boundary, int):
+            scope.boundary, scope.pending = boundary, None
         return boundary
 
     # ---- seam A: the ladder -------------------------------------------------------------------
@@ -493,9 +499,12 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         )
         capped = min(settings.max_extract_chars, int((1 - settings.min_savings) * len(content)))
         limit = min(capped, scope.room)
+        # Hermes walks pass 2 oldest first, while the retained budget favours the newest rows: an old
+        # row's extract may not take the room the rows still to come in this pass need for a brief.
+        extract_limit = min(limit, scope.room - self._reserved_after(scope, result, idx, call_id_to_tool, min_prune_chars))
         hint = content_hint(tool, args, pl.inner)
         for rung, build in (
-            ("extract", lambda: self._extract_row(line, pl, ref, query, hint, limit)),
+            ("extract", lambda: self._extract_row(line, pl, ref, query, hint, extract_limit)),
             ("brief", lambda: self._brief_row(line, pl, ref, query, limit)),
         ):
             rendered = build()   # lazily: the brief is only computed when the extract was refused
@@ -508,6 +517,33 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 self._header_row(line, pl, ref, "header"),
             )
         return self._keep_parent(result, idx, shadow[0], tool)
+
+    def _reserved_after(
+        self, scope: _Pass, result: list[dict], idx: int, call_id_to_tool: dict, min_prune_chars: int,
+    ) -> int:
+        """Retained-budget chars to leave for the rows pass 2 has still to visit after ``idx``.
+
+        ``brief_chars`` per row that the ladder could render (unrendered tool rows over both size floors,
+        not exempt) between ``idx`` and the prune boundary; 0 outside pass 2.
+        """
+        boundary = scope.boundary
+        if boundary is None or idx >= boundary or scope.pressure:
+            return 0
+        if scope.pending is None:
+            floor = max(self._settings.min_tool_chars, min_prune_chars + 1)
+            pending = []
+            for j in range(min(boundary, len(result))):
+                msg = result[j]
+                content = msg.get("content")
+                if (
+                    msg.get("role") == "tool" and isinstance(content, str) and len(content) >= floor
+                    and not classify_render(content) and not is_persisted_block(content)
+                    and call_id_to_tool.get(msg.get("tool_call_id") or "", ("unknown", ""))[0] not in self._exempt
+                ):
+                    pending.append(j)
+            scope.pending = pending
+        later = len(scope.pending) - bisect.bisect_right(scope.pending, idx)
+        return later * self._settings.brief_chars
 
     # ---- ladder rungs -------------------------------------------------------------------------
     @staticmethod
