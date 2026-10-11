@@ -33,12 +33,25 @@ TOOL_CALL_UID_KEY = "_tool_call_uid"
 MESSAGE_UID_KEY = "message_uid"
 
 
+# ``agent.tool_dispatch_helpers._maybe_wrap_untrusted``: what Hermes puts in front of a high-risk tool's result
+# (``web_extract``, ``web_search``, ``browser_*``, ``mcp_*``) AFTER the spill, so a spilled result of such a tool
+# starts with this header and its one-line notice, then a blank line, then the ``<persisted-output>`` block.
+_UNTRUSTED_WRAP_HEAD_RE = re.compile(r'<untrusted_tool_result source="[^"\n]*">\n(?:[^\n]+\n){0,3}\n')
+
+
 def is_persisted_block(content: Any) -> bool:
-    """True for Hermes' ``<persisted-output>`` replacement of an oversized result (it starts with the tag).
+    """True for Hermes' ``<persisted-output>`` replacement of an oversized result (it starts with the tag,
+    possibly inside Hermes' untrusted-data wrapper).
 
     A result that merely quotes the tag (a commit message, a doc, this plugin's own source) is not one.
     """
-    return isinstance(content, str) and content.lstrip().startswith(PERSISTED_OUTPUT_TAG)
+    if not isinstance(content, str):
+        return False
+    head = content.lstrip()
+    wrapped = _UNTRUSTED_WRAP_HEAD_RE.match(head)
+    if wrapped:
+        head = head[wrapped.end():]
+    return head.startswith(PERSISTED_OUTPUT_TAG)
 
 # What ``_lean_recovery_stub`` renders: ``[<tool> output demoted at compaction — N chars preserved
 # in session history.[ Recover with session_search(query=..., session_id='<id>')]]``.
