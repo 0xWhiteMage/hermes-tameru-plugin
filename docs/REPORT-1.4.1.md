@@ -163,11 +163,11 @@ number here was measured on 2026-10-12 against Hermes `1298c8e`. Artifacts: `/wo
 | R1 | Medium | spill detection (`3453d3a`) | Hermes wraps `web_extract`/`web_search`/`browser_*`/`mcp_*` results in `<untrusted_tool_result>` *after* the spill. "Starts with the tag" missed those spills: the brief rung (1,012-1,053 chars, mostly external preview) instead of the 1.4.0 `spilled to <path>` header, and no spill note in the lean tail. | Fixed `30ac14d` |
 | R2 | Low | query (`c4e46f1`) | `/compress terminal` on `terminal` rows: focus and call name collapse into one query part, and the filter dropped it. | Fixed `5f728cf` |
 | R3 | Medium | engine secrets screen (`173a948`) | Unquoted `KEY=value` pattern matched code (`password = get_password_from_vault()`, `api_key = agent._x`). `contains_secret` was true for 141/2,372 non-test Hermes `.py` files (9 at `a541e92`), and the recovery store refuses any original with a secret, so `tameru_expand` could not serve those files from the store. | Fixed engine `a1e8a7f`, vendored `5b8855d`: 15/2,372 (all literal fixture keys); linear on 200K-char inputs |
-| R4 | Medium (pre-existing since 1.4.0) | `tameru_expand` grep | `_backtracking_risk` catches nested repeats only. Polynomial patterns pass: `.*.*x` on a 1,200-char line took 1.4 s, `.*.*.*x` on a 3,000-char line ran >275 s (killed). `.*x` is quadratic on very long (minified) lines. `re` cannot be interrupted. | Open: needs a design decision (a subprocess/thread with a timeout, the `regex` module's timeout, or a line-length cap) |
-| R5 | Low (design) | pass-2 reservation | Only the extract is limited. A brief still uses the full room, and real briefs (1.8-2.7k) are larger than the 1,200 reserved, so the newest rows of a tight pass can still fall to headers or to a sliver brief (244-327 chars). Probe: 6 orders × 4 budgets, 13/24 change with the reservation, all toward more body-carrying rows; none lose one. | Open, documented (`reservation_probe.txt`) |
+| R4 | Medium (pre-existing since 1.4.0) | `tameru_expand` grep | `_backtracking_risk` catches nested repeats only. Polynomial patterns pass: `.*.*x` on a 1,200-char line took 1.4 s, `.*.*.*x` on a 3,000-char line ran >275 s (killed). `.*x` is quadratic on very long (minified) lines. `re` cannot be interrupted. | Fixed in §8 (`7634d3a`) |
+| R5 | Low (design) | pass-2 reservation | Only the extract is limited. A brief still uses the full room, and real briefs (1.8-2.7k) are larger than the 1,200 reserved, so the newest rows of a tight pass can still fall to headers or to a sliver brief (244-327 chars). Probe: 6 orders × 4 budgets, 13/24 change with the reservation, all toward more body-carrying rows; none lose one. | Fixed in §8 (`27b66d7`, `83df6b1`) |
 | R6 | Info | spill detection | A tool output (or wrapped web page) that itself *starts* with `<persisted-output>` and a `Full output saved to:` line is taken as a spill and cut to a header naming that path. 1.4.0 accepted any result containing the tag, so this is narrower than before. | Not a bug |
-| R7 | Info | refs | `ref` is 32 bits; a session-archive lookup over 20K rows has a ~5e-6 chance per lookup of answering with a different row. | Not a bug, noted |
-| R8 | Low | tests | `test_the_query_leaves_out_the_bare_tool_name[read_file]` passes with the filter reverted (only `[terminal]` guards it). `test_inline_short_gaps_in_extract` asserts only when the rung is `extract` (it does fail when inlining is removed). The yaml and setuptools tests are skipped in both box venvs (they pass, 278/278, in a venv with those packages). | Open, noted |
+| R7 | Info | refs | `ref` is 32 bits; a session-archive lookup over 20K rows has a ~5e-6 chance per lookup of answering with a different row. | Widened to 64 bits in §8 (`725fc9c`) |
+| R8 | Low | tests | `test_the_query_leaves_out_the_bare_tool_name[read_file]` passes with the filter reverted (only `[terminal]` guards it). `test_inline_short_gaps_in_extract` asserts only when the rung is `extract` (it does fail when inlining is removed). The yaml and setuptools tests are skipped in both box venvs (they pass, 278/278, in a venv with those packages). | Fixed in §8 (`83df6b1`, `53c23ea`) |
 | R9 | Info | engine perf | Linear in every adversarial case timed (`perf_engine.txt`): saturated rg up to 3.0 MB 1.1 s, captured-log pytest 2.5 MB 0.8 s, nested rules 4.6 MB 22.5 s (4× input, 4× time), 4 MB single line 1.1 s (fail-open). | OK |
 
 ### Mutation check of the 1.4.1 fixes (revert the fix, run the tests)
@@ -210,6 +210,74 @@ tables (re-run at `0a7e568` and `1a47165`), the decomposition in §3 (travis 40.
 (23 API calls, 559,425 vs 473,058 prompt tokens, briefs 2,211→1,189 and 11,734→1,208). One wording was wrong (§3
 travis "that part alone", corrected). Not re-checked on the box: the `b78931e` suite count (1319/30) and the
 "12/12 correct" judgement, which was made by reading the answers.
+
+## 8. Fix-all round (same branches; plugin `d8fd2d6..725fc9c`, engine `a1e8a7f..91f00e0`)
+
+Every open red-team item was fixed. Box only, measured on 2026-10-12 against Hermes `1298c8e`.
+Artifacts: `/workspace/tameru-out/fixall/`. For each fix, a test that fails when the fix is reverted ("mutation" below).
+
+| # | Change | Commits | Tests (mutation result) |
+|---|---|---|---|
+| R4 | `tameru_expand` grep: a pattern with a repeat or an alternation runs in a child `python -I -S` process (stdlib only, JSON over stdin), killed after `expand_grep_timeout` s (default 2, 0.05-600), error "grep timed out after N s and was stopped ... simplify it". Repeat-free patterns stay in-process. Lines capped at `expand_grep_line_chars` (20,000; `lines_capped` reported). Nested-repeat pre-check kept. | `7634d3a`, `22be182` | `test_fixall_141.py` R4 tests (6). Forcing the in-process path: the timeout test hangs (killed at 40 s). |
+| R5 | Pass-2 reservation limits the brief too, and each later row reserves an estimate of its own brief (`max(brief_chars, brief_share*size)`, x1.5 with an error fingerprint, capped at its extract cap) instead of a flat 1,200. A `brief_chars/2` floor tried in `27b66d7` was removed in `83df6b1` (below). | `27b66d7`, `83df6b1` | `test_r5_*` (2 fail without the fix); `test_retained_budget.py` updated to the intended newest-first order (2 tests pinned the old order). |
+| R3 | Engine: whole-line env/shell (`KEY=value`, no spaces) and YAML (`key: value`) credential assignments are secrets again, whatever the value looks like, unless an expression/placeholder, ending in `,` `;` `)`, or (YAML) an attribute chain. | engine `91f00e0`, vendored `b029396` | engine `test_secrets_screen_141.py` (+3; positives fail without the fix), plugin `test_r3_env_file_passphrases_are_not_kept_for_expand` (fails with the `a1e8a7f` vendor). Linear: 100K/200K/400K inputs 0.05/0.10/0.20 s. |
+| R8 | Brief rung inlines short gaps (engine `brief_context` honours `InliningGapMarker`); `[read_file]` case made to bite; inline-gap test asserts at the brief rung; `pyyaml`, `setuptools`, `hypothesis` in the `dev` extra (documented in `DEVELOPMENT.md`). | engine `b391ed9`, `83df6b1`, `53c23ea` | engine `test_brief_inline_gaps.py` (1 fails without); `test_inline_short_gaps_in_brief` (fails with the plain marker); `[read_file]` and `[terminal]` both fail with the filter removed; the yaml and build_py tests now pass instead of skipping. |
+| R1 | Untrusted-wrapper spill check: any attributes in any order, tag case, CRLF/trailing blanks, 0-4 notice lines, extra blank lines, up to 3 nested wraps; notice must end in a blank line. Still pinned by `test_real_hermes_wrapped_spill_is_a_spill`. | `aa51a4a` | `test_r1_*` (10; 5 of the 6 variants fail on the old regex, the exact Hermes format passes both). |
+| R7 | Refs are 16 hex (64 bits). An old 8-hex ref is the prefix of the new one: headers, `tameru_expand`, the store and the session-archive lookup accept both; an 8-hex ref prefixing two keys is a miss, not a wrong original. | `725fc9c` | `test_r7_*` (5; 3 fail without the change, the ambiguity and session-lookup tests are guards). `test_render.py` grammar/formula tests updated. |
+
+### What the brief-floor episode showed
+
+With brief inlining plus the `brief_chars/2` floor from `27b66d7`, the product replay lost gold fact R4: the T12
+`git diff` row became a header, where a 346-char brief had kept the `index 3f9a1c2..8be41d7` line. Without the floor
+both arms keep 13/17, so the floor (a speculative change) was dropped. Small briefs can still occur; none appeared in
+the reservation probe after the change.
+
+### Reservation probe (`reservation_probe_compare.txt`, 6 orders x 4 budgets)
+
+The newest row keeps a body in 24/24 cases (7/24 at `d8fd2d6`); briefs under 400 chars: 0 (6 before). Cost: the
+estimate over-reserves in some orders, so a tight budget is used less fully (LLLLF 3,000: 2,321 of 3,000 vs 2,936;
+LFLFLF 9,000: 8,036 vs 8,920). In the replay this nets out (below).
+
+### `tameru_expand` grep timing (5,000-line, 330 KB original, median of 20 calls, 3 runs)
+
+| pattern | `d8fd2d6` | fix-all head |
+|---|---|---|
+| repeat-free (`ERROR`, `error timeout`) | 3.0-3.8 ms | 3.4-3.7 ms (in-process; one cold run 6.4-6.8 ms) |
+| child path (`ERROR\|WARN`, `batch \d+ in 9\dms`, `err.*out`) | 3.2-11.4 ms | 21-26 ms |
+| `.*.*.*x`, `a*a*a*a*x`, `\w*\w*\w*!` on a 3,000-char line | `.*.*.*x` >275 s (killed) | error after 1.00 s (timeout 1) / 2.00 s (default 2) |
+
+The child costs about 18-20 ms per call (interpreter start). Differential check: 3,000 random repeat/alternation
+patterns, `matched_lines` equal to Python `re` line by line in all 3,000, no errors (`fuzz/grep_differential.txt`).
+Windows: `subprocess.run(timeout=...)` (TerminateProcess) with `CREATE_NO_WINDOW`; not run on Windows. A frozen
+interpreter (`sys.executable` not Python) makes such greps return an error rather than run.
+
+### Suites (before: red-team head `d8fd2d6`; after: `725fc9c`, engine `91f00e0`)
+
+| suite | before | after |
+|---|---|---|
+| plugin, stub | 1094 passed, 270 skipped | 1125 passed, 268 skipped |
+| plugin, real Hermes | 1359 passed, 5 skipped | 1390 passed, 3 skipped |
+| engine pytest | `a1e8a7f`: 1162 passed, 3 skipped | `91f00e0`: 1168 passed, 3 skipped |
+| `run_battery.py` | 15/15 | 15/15, savings identical |
+| `threshold_sweep.py` | 77.3 / 68.4 / 61.2 / 41.5 / 24.9% | identical |
+| `compare.py` `tameru_1_4` | 13/17, 5,481,666 chars, 1,019,153 cache-priced | 13/17, 5,484,812, 1,019,675 |
+| `compare.py` product | 12/17, 5,296,155, 990,003 | 13/17, 5,290,759, 989,114 |
+| `per_result.py` | 14/14 answers, 22/22 templates, 86.2%; corpus 67.5% vs 81.0% | 14/14, 22/22, 86.1%; corpus 67.2% vs 81.0% |
+| secrets probe (2,372 Hermes `.py`) | 15 | 15 |
+
+Replay steps: R5 alone took product to 13/17 and both arms' input down (5,471,639 / 5,287,152); the 16-hex refs add
+8 chars per header (+3,479 / +4,035 chars over the session; savings -0.1 to -0.7 points in the per-result tables). Baselines were
+re-recorded for each intended change (`tameru_1_4*.json`; `stock.json` untouched).
+
+### Fuzzing (final code, random seeds)
+
+FUZZ_PLACEHOLDER
+
+### Not fixed
+
+- Unquoted snake_case or dotted credentials inside code-shaped lines (`password = settings_default_password`, a
+  keyword argument) stay unflagged: lexically they are code. Only whole-line env/YAML assignments are caught.
+- The grep timeout is untested on Windows.
 
 ## Reproduce
 

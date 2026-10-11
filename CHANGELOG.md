@@ -10,6 +10,41 @@ Fixes from the first live Hermes sessions and for the two answers 1.4.0 still lo
 yet; patches in [docs/upstream-patches/](docs/upstream-patches/README.md)). After the red-team round the vendored engine
 is `a1e8a7f` (`e099d10` plus one secrets-screen fix).
 
+### Fix-all round (same branches, see [REPORT-1.4.1.md §8](docs/REPORT-1.4.1.md))
+- **`tameru_expand` grep can no longer hang the agent** (R4, open since 1.4.0). A pattern with a repeat or an
+  alternation now runs in a child Python process (`-I -S`, stdlib only) that is killed after
+  `expand_grep_timeout` seconds (default 2, `TAMERU_HERMES_EXPAND_GREP_TIMEOUT`, 0.05-600) with
+  "grep timed out ... simplify it". `.*.*.*x` on a 3,000-char line (>275 s before) now returns that error after
+  2.00 s (1.00 s at a 1 s timeout). Repeat-free patterns stay in-process. Lines are capped at `expand_grep_line_chars` (default
+  20,000) before matching (`lines_capped` in the result). The nested-repeat pre-check is unchanged. Cost on a
+  5,000-line original (median of 20): repeat-free 3.0-3.8 to 3.4-3.7 ms, child path 3.2-11.4 to 21-26 ms per call. Uses `subprocess.run` with a
+  timeout (TerminateProcess on Windows); only tested on Linux.
+- **Briefs honour the pass-2 reservation** (R5). The room left for the newer rows of a pass is now taken from an
+  estimate of each row's own brief (`max(brief_chars, brief_share * size)`, one growth step for a row with an error
+  fingerprint, capped at its extract cap) instead of a flat `brief_chars`, and it limits the brief as well as the
+  extract. Reservation probe (6 orders x 4 budgets): the newest row keeps a body in 24/24 cases (7/24 before), no
+  brief under 400 chars (6 before); a tight budget is used less fully in some orders (e.g. 2,321 of 3,000).
+  Replay product arm: gold 12/17 to 13/17.
+- **Secrets screen** (R3, engine `91f00e0`): a whole-line env/shell (`DB_PASSWORD=correct_horse_battery_staple`) or
+  YAML (`secret: correct_horse_battery_staple`) assignment is a secret again, whatever the value looks like, unless it
+  is an expression or placeholder, ends in `,` `;` `)` (a keyword argument on its own line) or, in YAML, is an
+  attribute chain. Hermes probe: 15 of 2,372 non-test `.py` files before and after. Still not flagged: the same values
+  inside code (`password = settings_default_password`), which cannot be told apart from code.
+- **Brief rung inlines short gaps** (R8, engine `b391ed9`): `brief_context` honours `InliningGapMarker`, and the brief
+  rung uses it, so a dropped line shorter than Hermes' ~100-char marker stays verbatim, as in extracts.
+- **Spill check tolerates small format changes** (R1): the untrusted-wrapper header may carry any attributes in any
+  order, other case, CRLF or trailing blanks, a 0-4 line notice, extra blank lines, or be nested up to 3 deep. The
+  notice must still end in a blank line.
+- **Refs are 64 bits** (R7): `make_ref` returns 16 hex chars. A pre-change ref is the first 8 of them; headers,
+  `tameru_expand`, the store and the session-archive lookup accept both (an 8-hex ref that prefixes two keys is a
+  miss). Committed rows keep their bytes. Cost: 8 chars per rendered header.
+- Tests (R8): the `[read_file]` case of the bare-tool-name test now fails without the filter; the inline-gap test
+  asserts at the brief rung too; `pyyaml`, `setuptools` and `hypothesis` are in the `dev` extra, so the direct
+  `config.yaml` and offline packaging tests run.
+- Measured against the red-team head `d8fd2d6`: replay `tameru_1_4` 13/17 at 1,019,153 to 13/17 at 1,019,675
+  cache-priced; product 12/17 at 990,003 to 13/17 at 989,114; per-result 14/14 answers, 22/22 templates both; engine
+  corpus through the plugin 67.5% to 67.2% saved (the longer refs). Baselines re-recorded.
+
 ### Red-team round (branch `locally/redteam-1.4.1`, see [REPORT-1.4.1.md §7](docs/REPORT-1.4.1.md))
 - **A spilled web/browser/MCP result was no longer recognised as a spill** (regression in this candidate). Hermes wraps
   `web_extract`, `web_search`, `browser_*` and `mcp_*` results in `<untrusted_tool_result>` after the spill, so the
@@ -22,8 +57,9 @@ is `a1e8a7f` (`e099d10` plus one secrets-screen fix).
   Hermes `.py` files, 9 before), and the store never keeps an original with a secret, so `tameru_expand` could not serve
   them from the store. Engine `a1e8a7f` excludes code expressions (15 of 2,372 files, all literal fixture keys).
 - Added `tests/test_fuzz_redteam.py` (hypothesis; skipped without it) and `tests/test_redteam_141.py`.
-- Still open, not changed: polynomial-time `grep` regexes in `tameru_expand` (`.*.*x` on a long line), briefs are not
-  covered by the pass-2 reservation, very small briefs (~250-330 chars) at the end of a tight budget. See the report.
+- Left open in this round, fixed in the fix-all round above: polynomial-time `grep` regexes in `tameru_expand`
+  (`.*.*x` on a long line), briefs not covered by the pass-2 reservation, very small briefs (~250-330 chars) at the end
+  of a tight budget.
 
 ### Fixed
 - **A result that quoted `<persisted-output>` was taken for a Hermes spill.** A live 29.5K `git log` that mentioned
