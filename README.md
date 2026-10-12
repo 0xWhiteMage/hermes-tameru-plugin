@@ -2,9 +2,10 @@
 
 [Tameru](https://github.com/0xWhiteMage/tameru-compaction-system) deterministic, extractive context
 compaction for [Hermes Agent](https://github.com/NousResearch/hermes-agent), as a standalone plugin (no Hermes
-source changes). Version 1.4.1 candidate on `main` (not yet tagged; release metadata in `plugin.yaml` still
-says 1.4.0 until it is), verified against Hermes `1298c8e` (see [Compatibility](#compatibility)). What changed and
-what was measured: [CHANGELOG.md](CHANGELOG.md) and [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md).
+source changes). Source and package metadata identify **1.4.1**; a GitHub tag/Release is pending.
+The vendored engine is synchronised with the reviewed Tameru 1.4.1 source. Compatibility is verified
+against Hermes `a0a4992`, the current Hermes PR base (see [Compatibility](#compatibility)).
+Changes and historical measurements: [CHANGELOG.md](CHANGELOG.md) and [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md).
 
 ## What it does
 
@@ -249,7 +250,7 @@ the pass is retried once with header-only rungs, which reclaim more.
 
 ## Limitations
 
-- The plugin hooks private Hermes methods. It is tested against Hermes `1298c8e` (and nightly against `main`);
+- The plugin hooks private Hermes methods. It is tested against Hermes `a0a4992` (and nightly against `main`);
   a Hermes refactor can disable it (safely, as above) until the plugin is updated.
 - It is extractive: an extract or brief keeps lines, not meaning. Facts that were only in a cut region are gone
   from the context until the model calls `tameru_expand` (or re-runs the tool). In the replay the "recall" probe
@@ -274,11 +275,11 @@ the pass is retried once with header-only rungs, which reclaim more.
   Newer Hermes also logs `capability_check ... capability=tools.override decision=deny evidence=not granted` at
   every plugin load; that is Hermes probing its tool-override policy and is not an error.
 - Results under `min_tool_chars` (800) get Hermes' own one-line summary, as in stock Hermes.
-- Re-sync of the vendored engine invalidates the saved replay baselines on purpose; they must be re-recorded.
+- Re-syncing the engine can change replay outputs. Rerun baseline checks and re-record only intended differences. The 1.4.1 version sync retained the existing deterministic metrics.
 
 ## Compatibility
 
-- Hermes pinned in CI: `1298c8e74baa73e1a2b90124228d017261ac6bc4`; the full suite runs against it on Python 3.14
+- Hermes pinned in CI: `a0a49926f44c231f3456faffeaa4b1cc8ee4274c`; the full suite runs against it on Python 3.14
   and with a stub on Python 3.11 to 3.14. A nightly job runs it against Hermes `main` and may fail without
   blocking.
 - Upgrading from 1.3.0: see [CHANGELOG.md](CHANGELOG.md).
@@ -306,16 +307,16 @@ python scripts/sync_to_harness.py <this_repo>/hermes_tameru_plugin/tameru --mani
 python scripts/sync_to_harness.py <this_repo>/hermes_tameru_plugin/tameru --manifest ../plugin.yaml --check
 ```
 
-After a sync, update `VENDORED_FROM`, re-record the replay baselines and read the diff
-([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)). The vendored engine is `91f00e0`, on the `main`
-branch of [tameru-compaction-system](https://github.com/0xWhiteMage/tameru-compaction-system) (1.4.1 candidate, not
-yet tagged). The engine commits behind 1.4.0 and the 1.4.1 candidate are
-also exported in [docs/upstream-patches/](docs/upstream-patches/README.md).
+After a sync, update `VENDORED_FROM`, rerun both test modes and inspect replay baseline differences
+([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)). `VENDORED_FROM` records the authoritative full engine SHA;
+release-readiness does not imply that a GitHub tag exists. The historical engine patches are
+exported in [docs/upstream-patches/](docs/upstream-patches/README.md).
 
 ## More
 
 - [CHANGELOG.md](CHANGELOG.md)
-- [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md): the 1.4.1 candidate, a live Hermes session, the red-team and fix-all rounds.
+- [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md): historical candidate measurements, a live Hermes session, and the red-team/fix-all rounds.
+- [docs/AUDIT-1.4.1.md](docs/AUDIT-1.4.1.md): source/version consistency and verification against the current Hermes base.
 - [docs/REPORT-1.4.0.md](docs/REPORT-1.4.0.md): what changed from 1.3.0, measured against 1.3.0 and stock Hermes, QA findings.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, real-Hermes setup, replay harness, CI.
 - [docs/compaction-research.md](docs/compaction-research.md): survey, gap analysis (G1 to G16) and results.

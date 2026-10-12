@@ -30,7 +30,7 @@ after a Hermes bump, a seam moved.
 
 ```bash
 git clone https://github.com/NousResearch/hermes-agent
-git -C hermes-agent checkout 1298c8e74baa73e1a2b90124228d017261ac6bc4   # HERMES_PINNED_SHA in ci.yml
+git -C hermes-agent checkout a0a49926f44c231f3456faffeaa4b1cc8ee4274c   # HERMES_PINNED_SHA in ci.yml
 python3.14 -m venv venv314
 venv314/bin/pip install -e ./hermes-agent pytest pyyaml setuptools hypothesis
 export HERMES_REPO_ROOT=$PWD/hermes-agent

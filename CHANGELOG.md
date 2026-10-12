@@ -3,12 +3,23 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
-## [Unreleased] (1.4.1 candidate)
+## [Unreleased]
 
-Fixes from the first live Hermes sessions and for the two answers 1.4.0 still lost. Numbers are in
-[docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md). The vendored engine is the local 1.4.1 candidate (`e099d10`, not upstream
-yet; patches in [docs/upstream-patches/](docs/upstream-patches/README.md)). After the red-team round the vendored engine
-is `a1e8a7f` (`e099d10` plus one secrets-screen fix).
+## [1.4.1] - 2026-10-12
+
+Source/package update; GitHub tag and Release pending. This includes the live-session,
+red-team and fix-all changes measured in [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md).
+The engine is now synchronised with upstream 1.4.1; the full source commit is recorded in
+`hermes_tameru_plugin/tameru/__init__.py` as `VENDORED_FROM`.
+
+### Release consistency audit
+- Align package metadata, plugin manifest and vendored `ENGINE_VERSION` at 1.4.1.
+- Replace stale candidate/local-only provenance claims with the current upstream source identity.
+- Verified: 1,125 passed / 268 skipped in stub mode (Python 3.12), and 1,386 passed / 5 skipped against real Hermes `a0a4992` (Python 3.14). Replay/baseline acceptance checks passed without re-recording metrics.
+- Bump the CI Hermes pin to `a0a4992`; refresh verbatim stub helpers and the third-party attribution revision to match. Strict parity assertions remain enabled.
+- The import-safety test now measures module-import effects before constructing an engine; Hermes constructor home/config initialisation is not a plugin-import side effect.
+- Install the plugin dev extra in the existing real-Hermes CI jobs so YAML, packaging and fuzz coverage runs; pin checkout/setup-python actions to full SHAs.
+- Ruff, build and wheel-content/version checks passed. See [AUDIT-1.4.1.md](docs/AUDIT-1.4.1.md).
 
 ### Fix-all round (same branches, see [REPORT-1.4.1.md §8](docs/REPORT-1.4.1.md))
 - **`tameru_expand` grep can no longer hang the agent** (R4, open since 1.4.0). A pattern with a repeat or an

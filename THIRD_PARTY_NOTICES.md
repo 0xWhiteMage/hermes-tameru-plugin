@@ -8,7 +8,7 @@ not part of the wheel, and are used only when a real Hermes Agent checkout is no
 ## Hermes Agent — Nous Research
 
 - Project: <https://github.com/NousResearch/hermes-agent>
-- Revision copied from / mirrored: `1298c8e74baa73e1a2b90124228d017261ac6bc4`
+- Revision copied from / mirrored: `a0a49926f44c231f3456faffeaa4b1cc8ee4274c`
 - License: MIT, Copyright (c) 2025 Nous Research
 
 | File in this repository | Relationship to Hermes Agent |

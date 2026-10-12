@@ -42,6 +42,11 @@ _SCRIPT = textwrap.dedent(
         except BaseException as exc:
             errors[stem] = repr(exc)
     result = {"errors": errors}
+    # Measure module imports before construction: current Hermes constructors
+    # initialise their home/config, which is a host lifecycle action.
+    result["env_added"] = sorted(set(os.environ) - set(env_before))
+    result["threads_started"] = threading.active_count() - threads_before
+    result["home_files"] = sorted(set(os.listdir(hermes_home)) - home_before)
     if load_init == "1":
         try:
             import importlib.util
@@ -68,9 +73,6 @@ _SCRIPT = textwrap.dedent(
             result["instantiated"] = False
         except BaseException as exc:
             result["instantiate_error"] = repr(exc)
-    result["env_added"] = sorted(set(os.environ) - set(env_before))
-    result["threads_started"] = threading.active_count() - threads_before
-    result["home_files"] = sorted(set(os.listdir(hermes_home)) - home_before)
     print("RESULT " + json.dumps(result))
     """
 )

@@ -98,9 +98,9 @@ def _tc_get(obj: Any, key: str, default: Any = "") -> Any:
     return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
 
 
-def _tool_calls_by_id(messages: List[Dict[str, Any]]) -> Dict[str, tuple]:
+def _tool_calls_by_id(messages: list[dict[str, Any]]) -> dict[str, tuple]:
     """Map ``tool_call_id -> (tool_name, raw_arguments)`` over every assistant tool call."""
-    out: Dict[str, tuple] = {}
+    out: dict[str, tuple] = {}
     for msg in messages:
         if msg.get("role") != "assistant":
             continue
@@ -114,6 +114,8 @@ def _json_dict(text: Any) -> dict:
     """Parse ``text`` as a JSON object; ``{}`` for empty, invalid, or non-object input."""
     try:
         parsed = json.loads(text) if text else {}
+    # Just-loaded / actively-referenced skills survive verbatim (#32106). Pass-4 pressure demotion overrides
+    # this.
     except (json.JSONDecodeError, TypeError):
         return {}
     return parsed if isinstance(parsed, dict) else {}
@@ -133,14 +135,14 @@ def _is_image_part(part: Any) -> bool:
     return isinstance(part, dict) and part.get("type") in _IMAGE_PART_TYPES
 
 
-def _replace_image_parts(parts: Any, placeholder: str) -> Optional[List[Any]]:
+def _replace_image_parts(parts: Any, placeholder: str) -> Optional[list[Any]]:
     """New parts list with every image part replaced by a text placeholder; None if no images."""
     if not isinstance(parts, list) or not any(_is_image_part(p) for p in parts):
         return None
     return [{"type": "text", "text": placeholder} if _is_image_part(p) else p for p in parts]
 
 
-def _strip_images_from_tool_msg(msg: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+def _strip_images_from_tool_msg(msg: dict[str, Any]) -> Optional[dict[str, Any]]:
     """Copy of a tool message with image payloads replaced (stale ``api_content`` dropped); ``None`` if nothing to strip."""
     content = msg.get("content")
     if isinstance(content, dict) and content.get("_multimodal"):
@@ -166,9 +168,11 @@ def _estimate_msg_budget_tokens(msg: dict, charge_stale_thinking: bool = True) -
     return tokens
 
 
-def _pending_tool_round(messages: "List[Dict[str, Any]]") -> range:
-    """Indices of the tool results the transcript ends with — a round the model has not answered yet.
-    Trailing /steer rows do not answer it, so they are skipped."""
+def _pending_tool_round(messages: list[dict[str, Any]]) -> range:
+    """Indices of the tool results the transcript ends with — a round the model has not answered yet; empty when
+    the transcript ends in any other row. /steer rows after the round do not answer it: a steer is delivered
+    after the newest tool result before the next API call, and two can land in one iteration (one when the tool
+    batch ends, one before the request), so every contiguous trailing steer row is skipped."""
     end = len(messages)
     while end and messages[end - 1].get("display_kind") == STEER_DISPLAY_KIND:
         end -= 1
@@ -178,8 +182,8 @@ def _pending_tool_round(messages: "List[Dict[str, Any]]") -> range:
     return range(start, end)
 
 
-def _skill_view_call_sites(messages: List[Dict[str, Any]]) -> list[tuple[int, str]]:
-    """``(message_index, skill_name)`` for every skill_view tool call."""
+def _skill_view_call_sites(messages: list[dict[str, Any]]) -> list[tuple[int, str]]:
+    """Yield ``(message_index, skill_name)`` for every skill_view tool call."""
     sites: list[tuple[int, str]] = []
     for i, msg in enumerate(messages):
         if msg.get("role") != "assistant":
@@ -195,8 +199,10 @@ def _skill_view_call_sites(messages: List[Dict[str, Any]]) -> list[tuple[int, st
     return sites
 
 
-def _collect_protected_skill_names(messages: List[Dict[str, Any]], prune_boundary: int) -> set[str]:
-    """Skill names (lower-cased) whose skill_view bodies must survive pass-2 demotion."""
+def _collect_protected_skill_names(messages: list[dict[str, Any]], prune_boundary: int) -> set[str]:
+    """Skill names (lower-cased) whose skill_view bodies must survive Phase-1 demotion.
+    Recently loaded, loaded inside the protected tail, or named by a tail user message. Applies to
+    Phase-1/2 only; the Pass-4 pressure demotion ignores it."""
     total = len(messages)
     if not total:
         return set()
@@ -336,24 +342,27 @@ class ContextCompressor(ContextEngine):
         return cut, accumulated
 
     def _prune_boundary(
-        self, result: List[Dict[str, Any]], protect_tail_count: int, protect_tail_tokens: int | None,
+        self, result: list[dict[str, Any]], protect_tail_count: int, protect_tail_tokens: int | None,
     ) -> int:
         """First index of the protected tail; token budget (when given) beats the count floor."""
         if protect_tail_tokens is None or protect_tail_tokens <= 0:
             return len(result) - protect_tail_count
+        # Token-budget walk; cap the message-count floor like tail-cut so a bulky recent run stays prunable.
         min_protect = min(protect_tail_count, len(result), _MAX_TAIL_MESSAGE_FLOOR)
         boundary, _ = self._walk_tail_budget(result, 0, protect_tail_tokens, min_protect, cut_at_break=True)
+        # Apply the floor in count-space: `max` in index-space would invert (smaller index = MORE protected).
         return min(boundary, len(result) - min_protect)
 
     # ---- the pruning seam -----------------------------------------------------------------
     @staticmethod
-    def _dedupe_tool_results(result: List[Dict[str, Any]]) -> int:
+    def _dedupe_tool_results(result: list[dict[str, Any]]) -> int:
         """Pass 1: keep the newest copy of identical tool results, back-reference older ones."""
         pruned = 0
         content_hashes: set = set()
         for i in range(len(result) - 1, -1, -1):
             msg = result[i]
             content = msg.get("content") or ""
+            # Non-string/multimodal-envelope shapes can't be hashed by text.
             if msg.get("role") != "tool" or not isinstance(content, str) or len(content) < _PRUNE_MIN_CHARS:
                 continue
             h = hashlib.md5(content.encode("utf-8", errors="replace")).hexdigest()[:12]
@@ -365,18 +374,17 @@ class ContextCompressor(ContextEngine):
 
     @staticmethod
     def _demote_tool_result_at(
-        result: List[Dict[str, Any]], idx: int, call_id_to_tool: Dict[str, tuple[str, str]],
+        result: list[dict[str, Any]], idx: int, call_id_to_tool: dict[str, tuple[str, str]],
         min_prune_chars: int, protected_skills: Optional[set[str]] = None,
     ) -> bool:
         """Replace the tool result at ``idx`` with a 1-line summary; True if modified.
-        ``protected_skills`` (lower-cased) spares matching skill_view bodies; None (pressure pass)
-        overrides the guard. Image-bearing (list / ``_multimodal``) content is stripped as in Hermes;
-        text-only parts are left alone."""
+        ``protected_skills`` (lower-cased) spares matching skill_view bodies; None (pressure pass) overrides the guard."""
         msg = result[idx]
         if msg.get("role") != "tool":
             return False
         content = msg.get("content", "")
         if isinstance(content, list) or (isinstance(content, dict) and content.get("_multimodal")):
+            # Shared strip policy with pass 3.5 (also drops the stale api_content sidecar).
             new_msg = _strip_images_from_tool_msg(msg)
             if new_msg is not None:
                 result[idx] = new_msg
@@ -396,6 +404,9 @@ class ContextCompressor(ContextEngine):
         return True
 
     def _tail_soft_ceiling(self, token_budget: int) -> int:
+        """Optional tail rows may overrun the budget by 1.5x so whole rows are kept, but never past
+        ``TAIL_MAX_CONTEXT_FRACTION`` of the window — on a small window the overrun alone was a third
+        of the request. Required anchors and atomic tool groups may still exceed it."""
         ceiling = int(token_budget * 1.5)
         ctx = getattr(self, "context_length", 0) or 0
         if ctx > 0:
