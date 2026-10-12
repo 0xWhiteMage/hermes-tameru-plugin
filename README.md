@@ -2,8 +2,8 @@
 
 [Tameru](https://github.com/0xWhiteMage/tameru-compaction-system) deterministic, extractive context
 compaction for [Hermes Agent](https://github.com/NousResearch/hermes-agent), as a standalone plugin (no Hermes
-source changes). Version 1.4.1 candidate (branch `tameru-1.4.1`; release metadata in `plugin.yaml` still says
-1.4.0 until it is tagged), verified against Hermes `1298c8e` (see [Compatibility](#compatibility)). What changed and
+source changes). Version 1.4.1 candidate on `main` (not yet tagged; release metadata in `plugin.yaml` still
+says 1.4.0 until it is), verified against Hermes `1298c8e` (see [Compatibility](#compatibility)). What changed and
 what was measured: [CHANGELOG.md](CHANGELOG.md) and [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md).
 
 ## What it does
@@ -307,9 +307,9 @@ python scripts/sync_to_harness.py <this_repo>/hermes_tameru_plugin/tameru --mani
 ```
 
 After a sync, update `VENDORED_FROM`, re-record the replay baselines and read the diff
-([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)). The vendored engine is `91f00e0`, on the
-[`tameru-1.4.1` branch](https://github.com/0xWhiteMage/tameru-compaction-system/tree/tameru-1.4.1) of
-tameru-compaction-system (not yet merged to its `main`). The engine commits behind 1.4.0 and the 1.4.1 candidate are
+([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)). The vendored engine is `91f00e0`, on the `main`
+branch of [tameru-compaction-system](https://github.com/0xWhiteMage/tameru-compaction-system) (1.4.1 candidate, not
+yet tagged). The engine commits behind 1.4.0 and the 1.4.1 candidate are
 also exported in [docs/upstream-patches/](docs/upstream-patches/README.md).
 
 ## More

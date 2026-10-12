@@ -1,7 +1,7 @@
 # Tameru 1.4.1 candidate: what changed and what was measured
 
-Status: branch `tameru-1.4.1` on top of 1.4.0 (`0a7e568`), not released. Vendored engine:
-the 1.4.1 candidate `e099d10` (branch `tameru-1.4.1` of `tameru-compaction-system`; patches `0004` and
+Status: on `main` (developed on branch `tameru-1.4.1`) on top of 1.4.0 (`0a7e568`), not released. Vendored engine:
+the 1.4.1 candidate `e099d10` (now on `main` of `tameru-compaction-system`; patches `0004` and
 `0005` in [upstream-patches/](upstream-patches/README.md)); after the red-team round (§7) `a1e8a7f` (patch `0006`). Every number below was measured on 2026-10-12 with
 Hermes `1298c8e` unless it says otherwise. Savings are in characters.
 
@@ -147,7 +147,7 @@ What this shows, and what it does not:
   the QA set show no loss. A tool whose name is also the subject of the question (for example a result about
   `terminal` settings) now relies on the user's words for that term. A `/compress <topic>` focus equal to the tool name
   is kept (red-team fix, §7).
-- **The vendored engine is not on the engine's `main`.** `VENDORED_FROM` names a commit on its `tameru-1.4.1` branch (now `91f00e0`).
+- **The vendored engine is not a tagged release.** `VENDORED_FROM` names an untagged commit on the engine's `main` (now `91f00e0`).
 - **Evidence:** the per-result set and corpus are synthetic. The replay uses a fake summarizer, and the live session
   is a single run per arm on an older Hermes build.
 

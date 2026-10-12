@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
-## [Unreleased] (1.4.1 candidate, branch `tameru-1.4.1`)
+## [Unreleased] (1.4.1 candidate)
 
 Fixes from the first live Hermes sessions and for the two answers 1.4.0 still lost. Numbers are in
 [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md). The vendored engine is the local 1.4.1 candidate (`e099d10`, not upstream
