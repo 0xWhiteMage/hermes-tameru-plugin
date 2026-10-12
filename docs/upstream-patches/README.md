@@ -17,9 +17,11 @@ applied upstream: the vendored copy in `hermes_tameru_plugin/tameru/` already co
 | `0007-fix-brief-brief_context-inlines-dropped-spans-shorte.patch` | 1.4.1 fix-all round: `brief_context` honours `InliningGapMarker` (a dropped span shorter than the marker stays verbatim) |
 | `0008-fix-secrets-flag-whole-line-env-YAML-credential-assi.patch` | 1.4.1 fix-all round: whole-line env / YAML credential assignments with snake_case or dotted values are secrets again |
 
-`0004` and `0005` come from the local engine branch `locally/1.4.0-patches` (`a541e92..e099d10`; `a541e92` is the
-local 1.4.0 commit, upstream `v1.4.0` is `11b9e5e`). `0006`-`0008` come from `locally/redteam-engine` (`e099d10..91f00e0`).
-The vendored copy is `91f00e0` (`VENDORED_FROM`). They are not upstream yet. Generated with
+All eight are now also on the engine branch
+[`tameru-1.4.1`](https://github.com/0xWhiteMage/tameru-compaction-system/tree/tameru-1.4.1) (`b480ab3..91f00e0`; the
+1.4.0 commits there are `24a6bab`, `94960c0`, `a541e92`, re-applied from `0001`-`0003`, so their ids differ from the
+`11b9e5e` named below). `0004` and `0005` are `a541e92..e099d10`; `0006`-`0008` are `e099d10..91f00e0`. The vendored
+copy is `91f00e0` (`VENDORED_FROM`). The branch is not merged into the engine's `main` yet. Generated with
 `git format-patch a541e92..e099d10 --start-number 4`, `git format-patch e099d10..a1e8a7f --start-number 6` and
 `git format-patch a1e8a7f..91f00e0 --start-number 7`; apply them in order after `0001`-`0003`.
 

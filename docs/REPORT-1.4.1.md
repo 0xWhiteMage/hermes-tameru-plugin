@@ -1,7 +1,7 @@
 # Tameru 1.4.1 candidate: what changed and what was measured
 
-Status: local branch `locally/finish-1.4` on top of 1.4.0 (`0a7e568`), not released, not pushed. Vendored engine:
-the local 1.4.1 candidate `e099d10` (branch `locally/1.4.0-patches` of `tameru-compaction-system`; patches `0004` and
+Status: branch `tameru-1.4.1` on top of 1.4.0 (`0a7e568`), not released. Vendored engine:
+the 1.4.1 candidate `e099d10` (branch `tameru-1.4.1` of `tameru-compaction-system`; patches `0004` and
 `0005` in [upstream-patches/](upstream-patches/README.md)); after the red-team round (§7) `a1e8a7f` (patch `0006`). Every number below was measured on 2026-10-12 with
 Hermes `1298c8e` unless it says otherwise. Savings are in characters.
 
@@ -147,14 +147,14 @@ What this shows, and what it does not:
   the QA set show no loss. A tool whose name is also the subject of the question (for example a result about
   `terminal` settings) now relies on the user's words for that term. A `/compress <topic>` focus equal to the tool name
   is kept (red-team fix, §7).
-- **The vendored engine is not upstream.** `VENDORED_FROM` names a local commit (`e099d10`).
+- **The vendored engine is not on the engine's `main`.** `VENDORED_FROM` names a commit on its `tameru-1.4.1` branch (now `91f00e0`).
 - **Evidence:** the per-result set and corpus are synthetic. The replay uses a fake summarizer, and the live session
   is a single run per arm on an older Hermes build.
 
-## 7. Red-team round (branch `locally/redteam-1.4.1`, engine `locally/redteam-engine`)
+## 7. Red-team round
 
-An adversarial review of everything since 1.4.0, done on the dev box only (no live model, no Benjamin, no NAS). Every
-number here was measured on 2026-10-12 against Hermes `1298c8e`. Artifacts: `/workspace/tameru-out/redteam/`.
+An adversarial review of everything since 1.4.0, done on a Linux dev machine only (no live model). Every
+number here was measured on 2026-10-12 against Hermes `1298c8e`.
 
 ### Findings
 
@@ -167,7 +167,7 @@ number here was measured on 2026-10-12 against Hermes `1298c8e`. Artifacts: `/wo
 | R5 | Low (design) | pass-2 reservation | Only the extract is limited. A brief still uses the full room, and real briefs (1.8-2.7k) are larger than the 1,200 reserved, so the newest rows of a tight pass can still fall to headers or to a sliver brief (244-327 chars). Probe: 6 orders × 4 budgets, 13/24 change with the reservation, all toward more body-carrying rows; none lose one. | Fixed in §8 (`27b66d7`, `83df6b1`) |
 | R6 | Info | spill detection | A tool output (or wrapped web page) that itself *starts* with `<persisted-output>` and a `Full output saved to:` line is taken as a spill and cut to a header naming that path. 1.4.0 accepted any result containing the tag, so this is narrower than before. | Not a bug |
 | R7 | Info | refs | `ref` is 32 bits; a session-archive lookup over 20K rows has a ~5e-6 chance per lookup of answering with a different row. | Widened to 64 bits in §8 (`725fc9c`) |
-| R8 | Low | tests | `test_the_query_leaves_out_the_bare_tool_name[read_file]` passes with the filter reverted (only `[terminal]` guards it). `test_inline_short_gaps_in_extract` asserts only when the rung is `extract` (it does fail when inlining is removed). The yaml and setuptools tests are skipped in both box venvs (they pass, 278/278, in a venv with those packages). | Fixed in §8 (`83df6b1`, `53c23ea`) |
+| R8 | Low | tests | `test_the_query_leaves_out_the_bare_tool_name[read_file]` passes with the filter reverted (only `[terminal]` guards it). `test_inline_short_gaps_in_extract` asserts only when the rung is `extract` (it does fail when inlining is removed). The yaml and setuptools tests are skipped in both dev venvs (they pass, 278/278, in a venv with those packages). | Fixed in §8 (`83df6b1`, `53c23ea`) |
 | R9 | Info | engine perf | Linear in every adversarial case timed (`perf_engine.txt`): saturated rg up to 3.0 MB 1.1 s, captured-log pytest 2.5 MB 0.8 s, nested rules 4.6 MB 22.5 s (4× input, 4× time), 4 MB single line 1.1 s (fail-open). | OK |
 
 ### Mutation check of the 1.4.1 fixes (revert the fix, run the tests)
@@ -208,13 +208,13 @@ Every number in §2-§4 was re-measured or matched to a saved artifact: the 1.4.
 tables (re-run at `0a7e568` and `1a47165`), the decomposition in §3 (travis 40.9/47.9, jp_musubi 28.6/31.5, git_log
 89.4, ar_needle 72.9, git_log with `terminal` 81.0), the replay and WIP numbers, the suite counts and the live session
 (23 API calls, 559,425 vs 473,058 prompt tokens, briefs 2,211→1,189 and 11,734→1,208). One wording was wrong (§3
-travis "that part alone", corrected). Not re-checked on the box: the `b78931e` suite count (1319/30) and the
+travis "that part alone", corrected). Not re-checked on the dev machine: the `b78931e` suite count (1319/30) and the
 "12/12 correct" judgement, which was made by reading the answers.
 
 ## 8. Fix-all round (same branches; plugin `d8fd2d6..725fc9c`, engine `a1e8a7f..91f00e0`)
 
-Every open red-team item was fixed. Box only, measured on 2026-10-12 against Hermes `1298c8e`.
-Artifacts: `/workspace/tameru-out/fixall/`. For each fix, a test that fails when the fix is reverted ("mutation" below).
+Every open red-team item was fixed. Linux dev machine only, measured on 2026-10-12 against Hermes `1298c8e`.
+For each fix, a test that fails when the fix is reverted ("mutation" below).
 
 | # | Change | Commits | Tests (mutation result) |
 |---|---|---|---|

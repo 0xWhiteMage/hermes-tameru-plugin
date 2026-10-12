@@ -1,4 +1,4 @@
-"""Regression tests for the 1.4.1 red-team round (each fails on locally/finish-1.4 before its fix)."""
+"""Regression tests for the 1.4.1 red-team round (each fails on the pre-red-team 1.4.1 candidate, e2716a8, before its fix)."""
 from __future__ import annotations
 
 import pytest
@@ -89,7 +89,7 @@ def test_a_compress_focus_equal_to_the_tool_name_stays_in_the_query(monkeypatch)
 def test_source_code_that_reads_a_password_is_still_recoverable() -> None:
     """Red-team finding (engine 173a948 secrets screen): ``password = get_password_from_vault()`` made
     ``contains_secret`` true, so the recovery store refused the whole ``read_file`` original and ``tameru_expand``
-    could only miss. Engine a1e8a7f (locally/redteam-engine) no longer treats code expressions as secrets."""
+    could only miss. Engine a1e8a7f no longer treats code expressions as secrets."""
     import json
 
     from hermes_tameru_plugin.recovery import OriginalStore, expand

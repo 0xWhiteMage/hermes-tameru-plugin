@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
-## [Unreleased] (1.4.1 candidate, local branch `locally/finish-1.4`)
+## [Unreleased] (1.4.1 candidate, branch `tameru-1.4.1`)
 
 Fixes from the first live Hermes sessions and for the two answers 1.4.0 still lost. Numbers are in
 [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md). The vendored engine is the local 1.4.1 candidate (`e099d10`, not upstream
@@ -45,7 +45,7 @@ is `a1e8a7f` (`e099d10` plus one secrets-screen fix).
   cache-priced; product 12/17 at 990,003 to 13/17 at 989,114; per-result 14/14 answers, 22/22 templates both; engine
   corpus through the plugin 67.5% to 67.2% saved (the longer refs). Baselines re-recorded.
 
-### Red-team round (branch `locally/redteam-1.4.1`, see [REPORT-1.4.1.md §7](docs/REPORT-1.4.1.md))
+### Red-team round (see [REPORT-1.4.1.md §7](docs/REPORT-1.4.1.md))
 - **A spilled web/browser/MCP result was no longer recognised as a spill** (regression in this candidate). Hermes wraps
   `web_extract`, `web_search`, `browser_*` and `mcp_*` results in `<untrusted_tool_result>` after the spill, so the
   "starts with the tag" test missed them: they took the brief rung (~1k of the external preview) instead of the 1.4.0

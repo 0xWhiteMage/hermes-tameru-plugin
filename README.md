@@ -2,7 +2,9 @@
 
 [Tameru](https://github.com/0xWhiteMage/tameru-compaction-system) deterministic, extractive context
 compaction for [Hermes Agent](https://github.com/NousResearch/hermes-agent), as a standalone plugin (no Hermes
-source changes). Version 1.4.0, verified against Hermes `1298c8e` (see [Compatibility](#compatibility)).
+source changes). Version 1.4.1 candidate (branch `tameru-1.4.1`; release metadata in `plugin.yaml` still says
+1.4.0 until it is tagged), verified against Hermes `1298c8e` (see [Compatibility](#compatibility)). What changed and
+what was measured: [CHANGELOG.md](CHANGELOG.md) and [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md).
 
 ## What it does
 
@@ -263,9 +265,9 @@ the pass is retried once with header-only rungs, which reclaim more.
 - Output whose extract cannot shrink under `max_extract_chars` (big logs, very large `grep` output) ends as a
   brief. The brief keeps every error template, but a specific matching line can be cut. In the QA set of agent
   outputs (`tests/eval/per_result.py`) 14 of 14 answer strings are kept (1.4.0: 12 of 14).
-- Savings are lower than the engine alone on the same text: 67.5% against 81.0% mean on the engine's corpus.
+- Savings are lower than the engine alone on the same text: 67.2% against 81.0% mean on the engine's corpus.
   Hermes' elision marker is about 100 characters per gap (the engine's own is `[…]`) and each row carries a
-  header. Worst: `travis_yaml` 23.4% against 64.1%, `jp_musubi` 29.4% against 46.1%
+  header. Worst: `travis_yaml` 23.2% against 64.1%, `jp_musubi` 29.3% against 46.1%
   ([report](docs/REPORT-1.4.1.md)).
 - `tameru_expand` is only offered when Hermes injects context-engine tools: with no toolset restriction, or one
   that includes `context_engine` (`hermes chat -t terminal,file,context_engine`). `-t terminal,file` hides it.
@@ -305,12 +307,15 @@ python scripts/sync_to_harness.py <this_repo>/hermes_tameru_plugin/tameru --mani
 ```
 
 After a sync, update `VENDORED_FROM`, re-record the replay baselines and read the diff
-([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)). The upstream commits behind 1.4.0 are exported in
-[docs/upstream-patches/](docs/upstream-patches/README.md).
+([docs/DEVELOPMENT.md](docs/DEVELOPMENT.md)). The vendored engine is `91f00e0`, on the
+[`tameru-1.4.1` branch](https://github.com/0xWhiteMage/tameru-compaction-system/tree/tameru-1.4.1) of
+tameru-compaction-system (not yet merged to its `main`). The engine commits behind 1.4.0 and the 1.4.1 candidate are
+also exported in [docs/upstream-patches/](docs/upstream-patches/README.md).
 
 ## More
 
 - [CHANGELOG.md](CHANGELOG.md)
+- [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md): the 1.4.1 candidate, a live Hermes session, the red-team and fix-all rounds.
 - [docs/REPORT-1.4.0.md](docs/REPORT-1.4.0.md): what changed from 1.3.0, measured against 1.3.0 and stock Hermes, QA findings.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, real-Hermes setup, replay harness, CI.
 - [docs/compaction-research.md](docs/compaction-research.md): survey, gap analysis (G1 to G16) and results.
