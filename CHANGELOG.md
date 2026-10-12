@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Contribution audit
+- Resynchronise the vendored engine with the BOM-tolerant CLI/cache/recovery reads; upstream now passes 1,172 tests with 3 skipped.
+
+- Catalogue-admission validation passes all 14 checks, including safe security scan, capability matching and no runtime core override.
+- Revise Hermes PR #94102 towards a catalogue entry pinned to the verified standalone plugin. The in-tree vendored engine exceeded Hermes code-health limits; the plugin source stays in its own repository.
+
 ## [1.4.1] - 2026-10-12
 
 Source/package update; GitHub tag and Release pending. This includes the live-session,
