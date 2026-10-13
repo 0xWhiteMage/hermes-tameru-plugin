@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Fixed
+- **The proactive prune ran on no window under ~64K.** The plugin's trigger is `max(48,000, 0.75 x threshold)`, and a
+  32K window's compaction threshold is 27,200 tokens: the trigger was above the window, so the prune never fired
+  (`prune_commits` 0 in every 32K replay cell). Where the result is not below the threshold the trigger is now
+  `small_window_prune_ratio` (0.60) x threshold (16,320 at 32K); a 64K window and up are unchanged. The regrowth rule
+  applies there too, and the re-prune target gate (`reprune_target_ratio`) does not: the fixed part of a 32K prompt is
+  ~0.3 of the threshold, so the gate blocked every re-prune. Replay on a realistic harness (simulated clock, context
+  overflow path) against Hermes as shipped, 32K, seeds 0 and 1: turns that fail with a context overflow
+  default/oncall/refactor/i18n 6/6/4-5/17 -> 0 (Hermes as shipped: the same counts), compactions 3/6/4/2 -> 1/2/1/2, gold
+  facts 6/12/7-10/12 -> 11/14/14/14, cost per answered turn -5..-6%/-37%/-13..-17%/-19% against Hermes. The 48K cells
+  gain gold (default 6 -> 12, oncall 12 -> 17-18, against Hermes' 5 and 6-10) at -9..-10% cost on default, -38% on oncall,
+  +3..+4% on refactor and -4% on i18n.
+  Smallrows (nothing prunable) is unchanged: +8.9% at 32K.
+
 ### Changed
 - **A prune is followed by the next prune after a regrowth of `prune_regrowth_ratio` (0.20) of the threshold, not Hermes' full
   trigger-sized runway (0.7), and only if it leaves the prompt at or below `reprune_target_ratio` (0.30) of the threshold.**

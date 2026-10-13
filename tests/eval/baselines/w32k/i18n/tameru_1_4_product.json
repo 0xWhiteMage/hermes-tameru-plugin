@@ -12,56 +12,39 @@
  },
  "metrics": {
   "turns": 32,
-  "requests": 31,
+  "requests": 59,
   "context_length": 32000,
   "threshold_tokens": 27200,
-  "input_chars_total": 1356750,
-  "input_chars_max": 85646,
-  "input_chars_final": 37718,
-  "cost_cache_priced": 394232.95,
-  "cost_uncached": 1356750.0,
-  "cost_ratio_vs_uncached": 0.290572,
-  "cached_chars_total": 1131917,
-  "compress_calls": 5,
-  "compactions": 3,
-  "compactions_shrinking": 3,
-  "summary_llm_calls": 3,
+  "input_chars_total": 2581888,
+  "input_chars_max": 73505,
+  "input_chars_final": 39586,
+  "cost_cache_priced": 661937.7,
+  "cost_uncached": 2581888.0,
+  "cost_ratio_vs_uncached": 0.256377,
+  "cached_chars_total": 2230802,
+  "compress_calls": 2,
+  "compactions": 2,
+  "compactions_shrinking": 2,
+  "summary_llm_calls": 2,
   "summary_unparsed_prompts": 0,
-  "summary_prompt_chars": 36761,
-  "prune_calls": 12,
-  "prune_commits": 0,
-  "prune_rows_demoted": 0,
-  "prefix_invalidated_chars": 187115,
-  "prefix_break_events": 3,
-  "messages_final": 70,
-  "overflow_errors": 16,
+  "summary_prompt_chars": 19827,
+  "prune_calls": 25,
+  "prune_commits": 7,
+  "prune_rows_demoted": 12,
+  "prefix_invalidated_chars": 311500,
+  "prefix_break_events": 9,
+  "messages_final": 106,
+  "overflow_errors": 0,
   "overflow_compactions": 0,
-  "failed_turns": 16,
-  "failed_turn_reasons": [
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff",
-   "deferred:structural_backoff"
-  ],
+  "failed_turns": 0,
+  "failed_turn_reasons": [],
   "requests_over_window": 0,
-  "max_request_window_ratio": 0.9863,
-  "max_attempted_window_ratio": 2.0455,
+  "max_request_window_ratio": 0.8071,
+  "max_attempted_window_ratio": 0.8071,
   "gold": {
    "total": 15,
-   "retained": 12,
-   "retention": 0.8,
+   "retained": 14,
+   "retention": 0.9333,
    "by_category": {
     "recall": {
      "total": 7,
@@ -73,12 +56,9 @@
     },
     "artifact": {
      "total": 3,
-     "retained": 1,
-     "retention": 0.3333,
-     "missing": [
-      "A2",
-      "A3"
-     ]
+     "retained": 3,
+     "retention": 1.0,
+     "missing": []
     },
     "continuation": {
      "total": 2,
@@ -101,21 +81,20 @@
   },
   "refetch": {
    "needed_facts": 12,
-   "missing_needed_facts": 2,
-   "refetch_rate": 0.1667,
+   "missing_needed_facts": 1,
+   "refetch_rate": 0.0833,
    "missing_ids": [
-    "A2",
     "R4"
    ],
    "refetch_opportunities": 1
   },
   "pairing": {
-   "requests_checked": 31,
+   "requests_checked": 59,
    "violations": 0,
    "details": []
   },
   "byte_stability": {
-   "requests_checked": 31,
+   "requests_checked": 59,
    "rewrites_outside_commits": 0,
    "details": []
   }
@@ -134,25 +113,53 @@
    47222,
    47387,
    47601,
-   66921,
-   67092,
-   68298,
-   68452,
-   21807,
-   21997,
-   22889,
-   31732,
-   31913,
-   41709,
-   41836,
-   56418,
-   56575,
-   71048,
-   71205,
-   85489,
-   85646,
-   37130,
-   37718
+   32208,
+   32379,
+   33585,
+   33739,
+   42583,
+   42773,
+   43665,
+   33762,
+   33943,
+   43739,
+   43866,
+   58448,
+   58605,
+   49688,
+   49845,
+   64129,
+   64286,
+   52868,
+   53065,
+   72414,
+   72549,
+   73121,
+   73399,
+   73505,
+   30038,
+   30165,
+   41405,
+   41554,
+   36494,
+   36621,
+   36832,
+   38038,
+   38141,
+   51894,
+   52019,
+   36517,
+   36649,
+   45496,
+   45617,
+   55679,
+   55812,
+   56740,
+   56878,
+   38785,
+   38891,
+   38998,
+   39586
   ],
   "cached_chars": [
    0,
@@ -167,25 +174,53 @@
    32983,
    47222,
    47387,
-   47601,
-   66921,
-   67092,
-   68298,
+   10914,
+   32208,
+   32379,
+   33585,
+   33739,
+   42583,
+   42773,
+   13167,
+   33762,
+   33943,
+   43739,
+   43866,
+   58448,
+   34161,
+   49688,
+   49845,
+   64129,
+   35471,
+   52868,
+   53065,
+   72414,
+   72549,
+   73121,
+   73399,
    3240,
-   21807,
-   21997,
-   22889,
-   31732,
-   31913,
-   41709,
-   41836,
-   56418,
-   56575,
-   71048,
-   71205,
-   85489,
-   5276,
-   37130
+   30038,
+   30165,
+   41405,
+   20455,
+   36494,
+   36621,
+   36832,
+   38038,
+   38141,
+   51894,
+   23807,
+   36517,
+   36649,
+   45496,
+   45617,
+   55679,
+   55812,
+   56740,
+   26931,
+   38785,
+   38891,
+   38998
   ],
   "invalidated_chars": [
    0,
@@ -200,24 +235,52 @@
    0,
    0,
    0,
-   0,
-   0,
-   0,
-   0,
-   65212,
-   0,
+   36687,
    0,
    0,
    0,
    0,
    0,
    0,
+   30498,
    0,
    0,
    0,
    0,
    0,
-   80370,
+   24444,
+   0,
+   0,
+   0,
+   28815,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   70265,
+   0,
+   0,
+   0,
+   21099,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   28212,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   0,
+   29947,
+   0,
+   0,
    0
   ],
   "events": [
@@ -230,197 +293,70 @@
     "chars_after": 10531
    },
    {
-    "request": 16,
+    "request": 12,
+    "kind": "prune",
+    "rows": 2,
+    "chars_before": 66897,
+    "chars_after": 32184
+   },
+   {
+    "request": 19,
+    "kind": "prune",
+    "rows": 1,
+    "chars_before": 52470,
+    "chars_after": 33724
+   },
+   {
+    "request": 25,
+    "kind": "prune",
+    "rows": 2,
+    "chars_before": 73028,
+    "chars_after": 49638
+   },
+   {
+    "request": 29,
+    "kind": "prune",
+    "rows": 1,
+    "chars_before": 66735,
+    "chars_after": 52810
+   },
+   {
+    "request": 36,
     "kind": "compress",
-    "messages_before": 32,
-    "messages_after": 12,
-    "chars_before": 77264,
-    "chars_after": 21795
+    "messages_before": 72,
+    "messages_after": 62,
+    "chars_before": 83273,
+    "chars_after": 29976
    },
    {
-    "request": 27,
-    "kind": "compress_noop"
+    "request": 40,
+    "kind": "prune",
+    "rows": 2,
+    "chars_before": 54438,
+    "chars_after": 36424
    },
    {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:260"
+    "request": 47,
+    "kind": "prune",
+    "rows": 2,
+    "chars_before": 61776,
+    "chars_after": 36433
    },
    {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:240"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:200"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:160"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:140"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:100"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:60"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:20"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "compress_noop"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:300"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:260"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:220"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:180"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:140"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:100"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:60"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "overflow_blocked",
-    "reason": "structural_backoff:20"
-   },
-   {
-    "request": 29,
-    "kind": "turn_failed",
-    "reason": "deferred:structural_backoff"
-   },
-   {
-    "request": 29,
-    "kind": "compress",
-    "messages_before": 94,
-    "messages_after": 68,
-    "chars_before": 189570,
-    "chars_after": 37062
+    "request": 55,
+    "kind": "prune",
+    "rows": 2,
+    "chars_before": 57402,
+    "chars_after": 38685
    }
   ]
  },
  "timing": {
-  "engine_seconds": 0.883,
+  "engine_seconds": 0.81,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 0.882,
-   "prune": 0.0
+   "compress": 0.27,
+   "prune": 0.54
   }
  }
 }

@@ -61,6 +61,7 @@ class TameruSettings:
     telemetry_log: str = ""                    # JSONL path; "" = off
     default_proactive_prune_tokens: int = 48_000          # only if compression.proactive_prune_tokens is not set
     default_proactive_prune_ratio: float = 0.75           # ...then at least this share of Hermes' compaction threshold
+    small_window_prune_ratio: float = 0.60                # ...but where that fixed trigger is not below the threshold (a window under ~57K) this share of it; 0 = the fixed trigger
     default_proactive_prune_min_result_chars: int = 8000  # Hermes' own default; only if compression.proactive_prune_min_result_chars is not set
     reprune_target_ratio: float = 0.30         # ...and commits only if it leaves the prompt at or below this share of the threshold (a compaction leaves ~0.2); 0 = no such gate
     prune_regrowth_ratio: float = 0.20         # after a prune commit, the next may fire once the prompt regrew by this share of Hermes' compaction threshold (plugin-supplied trigger only); 0 = Hermes' full trigger-sized runway
@@ -207,6 +208,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "telemetry_log": _parse_str,
     "default_proactive_prune_tokens": _min_int(0),
     "default_proactive_prune_ratio": _parse_savings,
+    "small_window_prune_ratio": _parse_savings,
     "default_proactive_prune_min_result_chars": _min_int(0),
     "prune_regrowth_ratio": _parse_savings,
     "reprune_target_ratio": _parse_savings,
@@ -444,7 +446,12 @@ def scaled_prune_tokens(settings: TameruSettings, threshold_tokens: Any) -> int:
 
     ``max(default_proactive_prune_tokens, default_proactive_prune_ratio * threshold)``: a fixed trigger
     pruned a large window long before it filled (a 200K window lost facts stock Hermes keeps), so on big
-    windows the prune starts near the compaction threshold instead; small windows keep the fixed value.
+    windows the prune starts near the compaction threshold instead; a window of 64K keeps the fixed value.
+
+    A fixed value at or above the compaction threshold (a window under ~57K: 48,000 against 27,200 at 32K) is a
+    prune that can never run: the prompt reaches the threshold, and the window, first. There the trigger is
+    ``small_window_prune_ratio * threshold`` instead, so the prune can reclaim the old tool results while the
+    prompt still fits (at 32K it took the turns that failed with a context overflow from 3-17 per session to 0).
     """
     floor = settings.default_proactive_prune_tokens
     try:
@@ -453,15 +460,35 @@ def scaled_prune_tokens(settings: TameruSettings, threshold_tokens: Any) -> int:
         threshold = 0
     if floor <= 0 or threshold <= 0 or settings.default_proactive_prune_ratio <= 0:
         return floor
-    return max(floor, round(settings.default_proactive_prune_ratio * threshold))
+    trigger = max(floor, round(settings.default_proactive_prune_ratio * threshold))
+    if trigger >= threshold and settings.small_window_prune_ratio > 0:
+        trigger = round(settings.small_window_prune_ratio * threshold)
+    return trigger
 
 
 def prune_trigger_follows_window(settings: TameruSettings, threshold_tokens: Any) -> bool:
-    """True when ``default_proactive_prune_ratio * threshold`` (not the fixed floor) sets the plugin's trigger.
+    """True when the window, not the fixed 48,000, sets the plugin's trigger (``scaled_prune_tokens`` differs from it).
 
-    That is a window big enough for a prune to leave room to regrow before the compaction (above ~85K tokens with
-    Hermes' default threshold). On a smaller one the trigger sits at the threshold and a compaction follows
-    within a request or two, so the regrowth rules below do not apply.
+    That is a window above ~85K tokens (``default_proactive_prune_ratio * threshold`` is the trigger) or one under
+    ~57K (``small_window_prune_ratio * threshold``): in both a prune leaves room to regrow before the compaction
+    it is meant to replace, so the regrowth rules below apply. On a 64K window the fixed trigger sits at 0.88 of the
+    threshold and a compaction follows within a request or two, so they do not.
+    """
+    try:
+        threshold = int(threshold_tokens or 0)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    floor, ratio = settings.default_proactive_prune_tokens, settings.default_proactive_prune_ratio
+    return floor > 0 and ratio > 0 and threshold > 0 and scaled_prune_tokens(settings, threshold) != floor
+
+
+def reprune_gate_applies(settings: TameruSettings, threshold_tokens: Any) -> bool:
+    """True when ``reprune_target_ratio`` gates a re-prune: a window where ``default_proactive_prune_ratio`` sets the trigger.
+
+    The gate asks a re-prune to leave the prompt near what a compaction would (~0.2 of the threshold), or wait for
+    the compaction. On a small window a prune is what keeps the prompt under the window (the compaction can be a
+    structural no-op while the pruned copy would fit), and the fixed part of the prompt (system prompt, the first
+    user message) alone is ~0.3 of a 32K threshold, so the target is unreachable and the gate would only block it.
     """
     try:
         threshold = int(threshold_tokens or 0)
