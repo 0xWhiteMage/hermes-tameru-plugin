@@ -51,11 +51,14 @@ class TameruSettings:
     store_max_chars: int = 32_000_000
     pass_char_budget: int = 4_000_000          # inner chars Tameru may process per pass; beyond -> parent_line
     retained_extract_budget_chars: int = 6000  # bodies (extract/brief) the newest rendered rows may keep in all
+    retained_error_budget_chars: int = 8000    # "errors" rows (header + one line per error template) kept in all
+    errors_row_chars: int = 1600               # cap on one errors row's exemplar lines; 0 = rows fall to a bare header
     prune_tail: str = "tokens"                 # proactive-prune tail: "tokens" (Hermes' tail_token_budget) | "count" (protect_last_n)
     supersession: bool = True
     ledger: bool = True
     telemetry_log: str = ""                    # JSONL path; "" = off
     default_proactive_prune_tokens: int = 48_000          # only if compression.proactive_prune_tokens is not set
+    default_proactive_prune_ratio: float = 0.70           # ...then at least this share of Hermes' compaction threshold
     default_proactive_prune_min_result_chars: int = 2000  # only if compression.proactive_prune_min_result_chars is not set
 
 
@@ -190,11 +193,14 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "store_max_chars": _min_int(0),
     "pass_char_budget": _min_int(0),
     "retained_extract_budget_chars": _min_int(0),
+    "retained_error_budget_chars": _min_int(0),
+    "errors_row_chars": _min_int(0),
     "prune_tail": _parse_prune_tail,
     "supersession": _parse_bool,
     "ledger": _parse_bool,
     "telemetry_log": _parse_str,
     "default_proactive_prune_tokens": _min_int(0),
+    "default_proactive_prune_ratio": _parse_savings,
     "default_proactive_prune_min_result_chars": _min_int(0),
 }
 
@@ -397,6 +403,28 @@ _PRUNE_DEFAULTS = {
 def _compression_section(config: Any) -> Mapping[str, Any]:
     section = config.get("compression") if isinstance(config, Mapping) else None
     return section if isinstance(section, Mapping) else {}
+
+
+def prune_default_applies(raw: Mapping[str, Any] | None, settings: TameruSettings) -> bool:
+    """True when the plugin, not the user's ``compression.proactive_prune_tokens``, sets the prune trigger."""
+    return bool(settings.enabled) and "proactive_prune_tokens" not in _compression_section(raw)
+
+
+def scaled_prune_tokens(settings: TameruSettings, threshold_tokens: Any) -> int:
+    """The plugin's proactive-prune trigger for a compaction threshold of ``threshold_tokens``.
+
+    ``max(default_proactive_prune_tokens, default_proactive_prune_ratio * threshold)``: a fixed trigger
+    pruned a large window long before it filled (a 200K window lost facts stock Hermes keeps), so on big
+    windows the prune starts near the compaction threshold instead; small windows keep the fixed value.
+    """
+    floor = settings.default_proactive_prune_tokens
+    try:
+        threshold = int(threshold_tokens or 0)
+    except (TypeError, ValueError, OverflowError):
+        threshold = 0
+    if floor <= 0 or threshold <= 0 or settings.default_proactive_prune_ratio <= 0:
+        return floor
+    return max(floor, round(settings.default_proactive_prune_ratio * threshold))
 
 
 def compression_kwargs(

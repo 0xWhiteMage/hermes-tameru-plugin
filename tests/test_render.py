@@ -52,9 +52,10 @@ def assert_stub(header: str) -> None:
 # ---- the grammar -------------------------------------------------------------------------------
 def test_grammar_is_frozen():
     assert TAMERU_TAG == " [tameru:"
-    assert RUNGS == ("fold", "extract", "brief", "header", "superseded")
+    # Rungs are only ever added (``errors`` in 1.4.1); every row an earlier version wrote still parses.
+    assert RUNGS == ("fold", "extract", "brief", "errors", "header", "superseded")
     assert HEADER_RE.pattern == (
-        r"^\[[^\n]*? \[tameru:(fold|extract|brief|header|superseded) [^\n]*? ref=([0-9a-f]{16}|[0-9a-f]{8})\]"
+        r"^\[[^\n]*? \[tameru:(fold|extract|brief|errors|header|superseded) [^\n]*? ref=([0-9a-f]{16}|[0-9a-f]{8})\]"
     )
 
 

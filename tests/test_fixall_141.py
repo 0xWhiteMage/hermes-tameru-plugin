@@ -70,7 +70,8 @@ def test_r5_an_old_brief_does_not_starve_the_newest_rows():
     budget = 3000
     out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
     rungs = _rungs(out, idxs)
-    assert rungs[-1] != "header" and rungs[0] == "header", rungs
+    # Rows past the budget keep no body; a log's error lines survive on the ``errors`` rung (its own budget).
+    assert rungs[-1] in ("extract", "brief") and rungs[0] in ("header", "errors"), rungs
     assert _bodies(out, idxs) <= budget
     assert len(rungs) == ROWS
 

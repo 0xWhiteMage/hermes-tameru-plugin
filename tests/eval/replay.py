@@ -289,9 +289,9 @@ def patched_summary_llm(summarizer: FakeSummarizer):
 # =================================================================================================
 # The session loop
 # =================================================================================================
-def prepare_engine(engine: Any) -> None:
+def prepare_engine(engine: Any, context_length: int = CONTEXT_LENGTH) -> None:
     """Configure the engine the way Hermes' ``agent_init`` does: tiny window, then session start."""
-    engine.update_model(model=MODEL, context_length=CONTEXT_LENGTH)
+    engine.update_model(model=MODEL, context_length=context_length)
     engine.on_session_start("replay-session")
 
 
@@ -474,7 +474,8 @@ def _tool_row(cid: str, step) -> dict:
 
 
 def run_session(
-    engine_factory: Callable[[], Any], *, turns: int = N_TURNS, seed: int = 0, keep_final_request: bool = False
+    engine_factory: Callable[[], Any], *, turns: int = N_TURNS, seed: int = 0, keep_final_request: bool = False,
+    context_length: int = CONTEXT_LENGTH,
 ) -> dict:
     """Replay the scripted session against ``engine_factory()`` and return the metrics.
 
@@ -483,7 +484,7 @@ def run_session(
     """
     scenario = build_scenario(seed, turns)
     engine = engine_factory()
-    prepare_engine(engine)
+    prepare_engine(engine, context_length)
     sess = _Session(engine, scenario)
     summarizer = FakeSummarizer()
     call_counter = 0
@@ -535,7 +536,7 @@ def run_session(
     metrics = {
         "turns": turns,
         "requests": len(sess.request_chars),
-        "context_length": CONTEXT_LENGTH,
+        "context_length": context_length,
         "threshold_tokens": int(getattr(engine, "threshold_tokens", 0) or 0),
         "input_chars_total": sum(sess.request_chars),
         "input_chars_max": max(sess.request_chars),

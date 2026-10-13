@@ -70,11 +70,29 @@ def test_a_failure_block_with_a_long_captured_log_now_takes_the_extract():
 
 
 def test_header_rung_in_the_pressure_pass_and_when_degraded():
-    engine, msgs, idx = _one(TASK_NAMING_THE_TEST, "terminal", {"command": "pytest -q"}, pytest_failure())
+    engine, msgs, idx = _one(TASK_NAMING_THE_TEST, "terminal", {"command": "pytest -q"}, pytest_failure(),
+                             settings=TameruSettings(errors_row_chars=0))
     for scope in ({"pressure": True}, {"degrade": True}):
         changed, out = demote(engine, msgs, idx, scope=scope)
         row = out[idx]["content"]
         assert changed and _rung(row) == "header" and "\n" not in row and len(row) <= 380
+
+
+def test_errors_rung_keeps_one_line_per_error_template_when_no_body_fits():
+    """Pressure, a degraded pass or a spent retained budget used to leave a bare header, taking the
+    result's error lines with it; now each error template keeps one exemplar line under the header."""
+    engine, msgs, idx = _one("why are payments failing?", "terminal", {"command": "tail -n 450 app.log"},
+                             server_log())
+    original = parse_payload(msgs[idx]["content"]).inner
+    for scope in ({"pressure": True}, {"degrade": True}):
+        changed, out = demote(engine, msgs, idx, scope=scope)
+        row = out[idx]["content"]
+        assert changed and _rung(row) == "errors"
+        assert error_fingerprints(original).keys() <= error_fingerprints(row).keys()
+        assert len(row.split("\n", 1)[1]) <= engine._settings.errors_row_chars + 60   # meta line + exemplars
+    plain = _one("q", "terminal", {"command": "seq 5000"}, hp.terminal_result("\n".join(map(str, range(5000)))))
+    changed, out = demote(plain[0], plain[1], plain[2], scope={"pressure": True})
+    assert changed and _rung(out[plain[2]]["content"]) == "header"   # no error templates: a bare header
 
 
 def test_superseded_rung_names_the_later_call():

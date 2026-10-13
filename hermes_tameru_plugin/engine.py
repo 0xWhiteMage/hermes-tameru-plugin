@@ -37,7 +37,10 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any, NamedTuple
 
-from .config import TameruSettings, compression_kwargs, load_settings, read_hermes_config
+from .config import (
+    TameruSettings, compression_kwargs, load_settings, prune_default_applies, read_hermes_config,
+    scaled_prune_tokens,
+)
 from .hermes_compat import (
     LEAN_STUB_RE,
     SKILL_PRUNED_MARKER_PREFIX,
@@ -63,6 +66,7 @@ from .render import (
     build_header,
     classify_render,
     header_only,
+    header_parent,
     make_ref,
     omitted_categories,
     parse_header,
@@ -97,6 +101,7 @@ _EXEMPT_TOOLS = frozenset({
 })
 _RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
 _BODYLESS = frozenset({"header", "superseded"})   # rungs that keep no text of the original
+_ERROR_LINE_CHARS = 300                            # an errors row keeps at most this much of one exemplar line
 _FIXED_RETRIES = 2                                 # fixed-budget extract attempts after an oversized one
 _MEMO_ENTRIES = 2048
 _MEMO_MAX_TEXT = 50_000       # a bigger extract is recomputed rather than held
@@ -169,6 +174,7 @@ class _Pass:
     supersede: SupersessionIndex | None = None
     age_demote: set[int] | None = None            # rendered rows beyond the retained budget
     room: int = 0                                 # retained-extract chars left for new rows
+    err_room: int = 0                             # retained "errors"-row chars left for new rows
     boundary: int | None = None                   # Hermes' prune boundary of this pass (pass 2 runs below it)
     pending: list[int] | None = None              # pass-2 rows the ladder may still render, oldest first
     reserve_tail: list[int] | None = None         # reserve_tail[k]: estimated brief chars of pending[k:]
@@ -236,16 +242,24 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         warnings: list[str] = []
         if settings is None:
             settings, warnings = load_settings()
+        scaled = False
         try:
             merged, raw = read_hermes_config()
             params = set(inspect.signature(_Base.__init__).parameters) - {"self"}
             configured, more = compression_kwargs(merged, raw, settings, params)
             warnings += more
+            # The plugin's own prune trigger (not the user's, not an explicit argument) follows the window.
+            scaled = (
+                "proactive_prune_tokens" not in kwargs and "proactive_prune_tokens" in configured
+                and prune_default_applies(raw, settings)
+            )
         except Exception as exc:
             configured = {}
             warnings.append(f"compression.* could not be read ({exc!r})")
         super().__init__(model=model, **{**configured, **kwargs})
         self._settings = settings
+        self._scaled_prune = scaled
+        self._scale_prune_trigger()
         self._warnings = warnings
         self._store = OriginalStore(settings.store_max_entries, settings.store_max_chars)
         self._telemetry = Telemetry(settings.telemetry_log)
@@ -293,6 +307,17 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             except Exception:
                 pass
         super().update_model(model, context_length, *args, **kwargs)
+        self._scale_prune_trigger()
+
+    def _scale_prune_trigger(self) -> None:
+        """Re-derive the plugin-supplied proactive-prune trigger from Hermes' current compaction threshold."""
+        if getattr(self, "_scaled_prune", False):
+            try:
+                self.proactive_prune_tokens = scaled_prune_tokens(
+                    self._settings, getattr(self, "threshold_tokens", 0),
+                )
+            except Exception:
+                pass
 
     def clone_for_agent(self) -> TameruContextEngine:
         """A per-agent copy; the store, memo and telemetry copy as fresh empty objects."""
@@ -422,16 +447,23 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         decides whether that pass commits.
         """
         room = self._settings.retained_extract_budget_chars
+        err_room = self._settings.retained_error_budget_chars
         demote: set[int] = set()
         for i in range(len(result) - 1, -1, -1):
             msg = result[i]
             content = msg.get("content") if msg.get("role") == "tool" else None
             if isinstance(content, str) and "\n" in content and classify_render(content):
-                if len(content) <= room:
+                header = parse_header(content)
+                if header is not None and header["rung"] == "errors":   # their own, separate budget
+                    if len(content) <= err_room:
+                        err_room -= len(content)
+                    else:
+                        demote.add(i)
+                elif len(content) <= room:
                     room -= len(content)
                 else:
                     demote.add(i)
-        scope.age_demote, scope.room = demote, room
+        scope.age_demote, scope.room, scope.err_room = demote, room, err_room
 
     def _ladder(self, parent, result, idx, call_id_to_tool, min_prune_chars, rest, kw) -> bool:
         settings = self._settings
@@ -494,10 +526,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                     self._header_row(line, pl, ref, "superseded", note),
                 )
         if scope.degrade or scope.pressure:
-            return self._commit(
-                result, idx, content, tool, ref, pl, scope, "header",
-                self._header_row(line, pl, ref, "header"),
-            )
+            return self._commit_header_or_errors(result, idx, content, tool, ref, pl, scope, line)
 
         # The engine's task query names the tool itself ("terminal", "read_file"): in an agent transcript every
         # row shares that word and it selects incidental lines, so the plugin leaves it out, unless the user's
@@ -525,10 +554,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 scope.room -= len(rendered)
                 return self._commit(result, idx, content, tool, ref, pl, scope, rung, rendered)
         if free < capped:   # the retained budget (and its reservation), not the savings rule, ruled the body out
-            return self._commit(
-                result, idx, content, tool, ref, pl, scope, "header",
-                self._header_row(line, pl, ref, "header"),
-            )
+            return self._commit_header_or_errors(result, idx, content, tool, ref, pl, scope, line)
         return self._keep_parent(result, idx, shadow[0], tool)
 
     def _reserved_after(
@@ -572,6 +598,50 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         return min(size, settings.max_extract_chars, int((1 - settings.min_savings) * len(content)))
 
     # ---- ladder rungs -------------------------------------------------------------------------
+    def _errors_body(self, inner: str) -> str:
+        """One exemplar line per error template of ``inner``, in order, within ``errors_row_chars``."""
+        cap = self._settings.errors_row_chars
+        if cap <= 0:
+            return ""
+        lines: list[str] = []
+        used = 0
+        for line in error_fingerprints(inner).values():
+            line = line if len(line) <= _ERROR_LINE_CHARS else line[: _ERROR_LINE_CHARS - 1] + "…"
+            if used + len(line) + (1 if lines else 0) > cap:
+                if not lines:
+                    lines.append(line[: max(1, cap - 1)] + "…")
+                break
+            lines.append(line)
+            used += len(line) + (1 if len(lines) > 1 else 0)
+        return "\n".join(lines)
+
+    def _errors_row(self, parent_line: str, pl: HermesPayload, ref: str, room: int) -> str | None:
+        """The ``errors`` row for ``pl`` (header, meta line, one line per error template) if it fits ``room``."""
+        body = self._errors_body(pl.inner)
+        if not body:
+            return None
+        rendered = self._body_row(" ".join(parent_line.splitlines()), pl, ref, "errors", body)
+        return rendered if len(rendered) <= room else None
+
+    def _commit_header_or_errors(
+        self, result: list[dict], idx: int, content: str, tool: str, ref: str, pl: HermesPayload,
+        scope: _Pass, line: str,
+    ) -> bool:
+        """A body-less row, except that a result with error templates keeps one exemplar line of each.
+
+        Rows past the retained-extract budget (or in the pressure pass) used to drop to a bare header and
+        took their error lines with them; on a large window, where no compaction summary carries them
+        either, a session then kept almost none of its errors. The exemplar lines have their own budget
+        (``retained_error_budget_chars``); past it, a bare header as before.
+        """
+        rendered = self._errors_row(line, pl, ref, scope.err_room)
+        if rendered is not None:
+            scope.err_room -= len(rendered)
+            return self._commit(result, idx, content, tool, ref, pl, scope, "errors", rendered)
+        return self._commit(
+            result, idx, content, tool, ref, pl, scope, "header", self._header_row(line, pl, ref, "header"),
+        )
+
     @staticmethod
     def _header_row(
         parent_line: str, pl: HermesPayload, ref: str, rung: str, note: str = "",
@@ -758,11 +828,15 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             new = self._header_row(line, pl, ref, "header")
             self._store.put(ref, pl.inner, tool=tool, meta=pl.meta)
         elif "\n" in content:
-            new = retarget_rung(content, "header")
             header = parse_header(content)
             scope = _SCOPE.get()
-            if scope is not None and header is not None:
-                scope.gone.append(header["ref"])
+            if header is not None and header["rung"] == "errors" and not (scope and idx in scope.age_demote):
+                return False   # already the smallest row that keeps the errors; only its own budget retires it
+            new = self._demoted_errors_row(content, header, scope) if header and header["rung"] != "errors" else None
+            if new is None:
+                new = retarget_rung(content, "header")
+                if scope is not None and header is not None:
+                    scope.gone.append(header["ref"])
         else:
             return False   # already header-only
         if new is None or new == content:
@@ -770,9 +844,24 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         row = {**msg, "content": new}
         drop_stale_api_content(row)
         result[idx] = row
-        self._telemetry.count("render", rung="header", tool=tool, demoted="1")
+        landed = parse_header(new)
+        self._telemetry.count("render", rung=landed["rung"] if landed else "header", tool=tool, demoted="1")
         self._telemetry.add_chars(len(content), len(new))
         return True
+
+    def _demoted_errors_row(self, content: str, header: dict, scope: _Pass | None) -> str | None:
+        """The ``errors`` row an extract or brief steps down to, when its original has error templates."""
+        if scope is None:
+            return None
+        found = self._store.entry(header["ref"])
+        parent = header_parent(content)
+        if found is None or parent is None:
+            return None
+        pl = HermesPayload(inner=found.text, field=None, meta=dict(found.meta or {}), wrapped=False)
+        rendered = self._errors_row(parent, pl, header["ref"], scope.err_room)
+        if rendered is not None:
+            scope.err_room -= len(rendered)
+        return rendered
 
     # ---- seam B: the lean tail ----------------------------------------------------------------
     def _demote_stale_tail_tools(self, messages, tail_start):

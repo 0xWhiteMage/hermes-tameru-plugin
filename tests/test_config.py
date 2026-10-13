@@ -58,8 +58,8 @@ def test_defaults_match_the_contract():
         "enabled": True, "min_tool_chars": 800, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
         "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (),
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
-        "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "prune_tail": "tokens",
-        "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000,
+        "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_error_budget_chars": 8000, "errors_row_chars": 1600, "prune_tail": "tokens",
+        "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.70,
         "default_proactive_prune_min_result_chars": 2000,
     }
 
@@ -89,11 +89,14 @@ ENV_SAMPLES = {
     "store_max_chars": ("1000", 1000),
     "pass_char_budget": ("0", 0),
     "retained_extract_budget_chars": ("2000", 2000),
+    "retained_error_budget_chars": ("100", 100),
+    "errors_row_chars": ("0", 0),
     "prune_tail": (" COUNT ", "count"),
     "supersession": ("0", False),
     "ledger": ("YES", True),
     "telemetry_log": ("/tmp/t.jsonl", "/tmp/t.jsonl"),
     "default_proactive_prune_tokens": ("0", 0),
+    "default_proactive_prune_ratio": ("0.5", 0.5),
     "default_proactive_prune_min_result_chars": ("500", 500),
 }
 
@@ -254,7 +257,7 @@ BAD_ENV = [
     ("min_tool_chars", "1.5"), ("max_extract_chars", "0"), ("brief_chars", "x"), ("min_savings", "1.0"),
     ("min_savings", "-0.1"), ("brief_share", "1.5"), ("min_savings", "nan"), ("min_savings", "inf"), ("min_savings", "high"),
     ("max_risk", "extreme"), ("prune_tail", "weeks"), ("protect_patterns", "ok,(unclosed"), ("store_max_entries", "-5"),
-    ("default_proactive_prune_tokens", "-1"),
+    ("default_proactive_prune_tokens", "-1"), ("default_proactive_prune_ratio", "1.5"),
 ]
 
 

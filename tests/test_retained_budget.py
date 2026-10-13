@@ -29,7 +29,11 @@ def _rungs(messages: list[dict], idxs: list[int]) -> list[str]:
 
 
 def _bodies(messages: list[dict], idxs: list[int]) -> int:
-    return sum(len(messages[i]["content"]) for i in idxs if "\n" in messages[i]["content"])
+    """Chars of the extract/brief bodies (``errors`` rows have a budget of their own)."""
+    return sum(
+        len(messages[i]["content"]) for i in idxs
+        if "\n" in messages[i]["content"] and parse_header(messages[i]["content"])["rung"] != "errors"
+    )
 
 
 def _all_bodies() -> TameruSettings:
@@ -61,7 +65,7 @@ def test_one_pass_keeps_its_bodies_within_the_budget():
     messages, idxs = _session()
     budget = 4000
     out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
-    bodied = [_rungs(out, idxs)[k] != "header" for k in range(ROWS)]
+    bodied = [_rungs(out, idxs)[k] in ("extract", "brief") for k in range(ROWS)]
     assert any(bodied) and not all(bodied)
     assert bodied == sorted(bodied), bodied
     assert _bodies(out, idxs) <= budget
@@ -83,7 +87,7 @@ def test_new_rows_stop_taking_bodies_when_the_budget_is_spent():
     engine = make_engine(TameruSettings(retained_extract_budget_chars=budget))
     out, _ = prune_pass(engine, messages)
     rungs = _rungs(out, idxs)
-    assert "header" in rungs and rungs.count("brief") + rungs.count("extract") >= 1
+    assert ("header" in rungs or "errors" in rungs) and rungs.count("brief") + rungs.count("extract") >= 1
     assert _bodies(out, idxs) <= budget
     assert all(len(out[i]["content"]) <= 380 for i in idxs if "\n" not in out[i]["content"])
 
@@ -132,7 +136,7 @@ def test_an_old_extract_leaves_room_for_the_briefs_still_to_come():
     budget = 6000
     out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
     rungs = _rungs(out, [old, *idxs])
-    assert rungs[0] == "header", rungs          # neither its extract (~3.3k) nor its brief leaves the room
+    assert rungs[0] in ("header", "errors"), rungs   # neither its extract (~3.3k) nor its brief fits the room
     assert rungs[1:] == ["brief"] * len(idxs), rungs
     assert _bodies(out, [old, *idxs]) <= budget
 

@@ -5,6 +5,7 @@ from agent.context_compressor import _is_summary_stub
 from engine_support import Chat, make_engine, prune_pass, pytest_failure, server_log, source_file
 from fixtures import hermes_payloads as hp
 
+from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.render import classify_render, is_tameru_rendered, parse_header
 
 
@@ -60,11 +61,21 @@ def test_header_only_rows_are_summary_stubs_even_with_worst_case_paths():
 
 def test_header_only_rows_survive_the_pressure_pass_unchanged():
     chat, rows = _session()
-    engine = make_engine()
+    engine = make_engine(TameruSettings(errors_row_chars=0))
     headers, _ = prune_pass(engine, chat.finish(), degrade=True)
     assert all(parse_header(headers[i]["content"])["rung"] == "header" for i in rows)
     again, n = prune_pass(engine, headers, pressure=True)
     assert again == headers and n == 0
+
+
+def test_errors_rows_survive_the_pressure_pass_unchanged():
+    """A degraded pass keeps one line per error template; the pressure pass leaves those rows alone."""
+    chat, rows = _session()
+    engine = make_engine()
+    degraded, _ = prune_pass(engine, chat.finish(), degrade=True)
+    assert {parse_header(degraded[i]["content"])["rung"] for i in rows} <= {"header", "errors"}
+    again, n = prune_pass(engine, degraded, pressure=True)
+    assert again == degraded and n == 0
 
 
 def _legacy_row() -> str:

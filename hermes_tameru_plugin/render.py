@@ -34,17 +34,17 @@ from typing import Literal
 from .tameru.compress_context import classify_line
 
 TAMERU_TAG = " [tameru:"
-RUNGS = ("fold", "extract", "brief", "header", "superseded")
+RUNGS = ("fold", "extract", "brief", "errors", "header", "superseded")
 
 # Anchored at the start of the content, first line only: a row that merely quotes a header on a later
 # line (or source code that contains this pattern) is not a rendered row.
 HEADER_RE = re.compile(
-    r"^\[[^\n]*? \[tameru:(fold|extract|brief|header|superseded) [^\n]*? ref=([0-9a-f]{16}|[0-9a-f]{8})\]"
+    r"^\[[^\n]*? \[tameru:(fold|extract|brief|errors|header|superseded) [^\n]*? ref=([0-9a-f]{16}|[0-9a-f]{8})\]"
 )
 # The whole grammar of one header line, for parsing and rewriting. The parent line is greedy: the real
 # tag is the last one on the line, so a parent line that quotes a header cannot hijack the parse.
 _ROW_RE = re.compile(
-    r"(?P<parent>\[[^\n]*) \[tameru:(?P<rung>fold|extract|brief|header|superseded) "
+    r"(?P<parent>\[[^\n]*) \[tameru:(?P<rung>fold|extract|brief|errors|header|superseded) "
     r"(?P<counts>kept (?P<kept>\d+)/(?P<total>\d+) lines \([\d,]+ of [\d,]+ chars\))"
     r"(?P<extra>[^\n]*?) ref=(?P<ref>[0-9a-f]{16}|[0-9a-f]{8})\](?=\n|\Z)"
 )
@@ -106,6 +106,12 @@ def parse_header(content: str) -> dict | None:
     return {
         "rung": m["rung"], "ref": m["ref"], "kept": int(m["kept"]), "total": int(m["total"]),
     }
+
+
+def header_parent(content: str) -> str | None:
+    """Hermes' own one-line summary that opens a current row's header, else None."""
+    m = _ROW_RE.match(content) if isinstance(content, str) else None
+    return None if m is None else m["parent"]
 
 
 # ---- refs and statistics ---------------------------------------------------------------------

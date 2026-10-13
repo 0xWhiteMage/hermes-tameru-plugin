@@ -16,7 +16,7 @@ from typing import Any
 ENGINES: dict[str, Callable[[], Any]] = {}
 
 #: Engines the replay test runs and compares exactly against ``baselines/<name>.json``.
-BASELINE_ENGINES = ("stock", "tameru_1_4", "tameru_1_4_product")
+BASELINE_ENGINES = ("stock_defaults", "stock", "tameru_1_4", "tameru_1_4_product")
 
 
 def register(name: str, factory: Callable[[], Any] | None = None):
@@ -44,9 +44,21 @@ def plugin_engine_version() -> str:
     return str(getattr(module, "ENGINE_VERSION", "1.3.0"))
 
 
+@register("stock_defaults")
+def stock_defaults() -> Any:
+    """Real Hermes ``ContextCompressor`` exactly as Hermes ships it: the proactive prune is opt-in (off)."""
+    from agent.context_compressor import ContextCompressor
+
+    return ContextCompressor(model="test-model", quiet_mode=True)
+
+
 @register("stock")
 def stock() -> Any:
-    """Real Hermes ``ContextCompressor`` with the proactive tool-result prune enabled at 48K tokens."""
+    """Real Hermes ``ContextCompressor`` with the proactive tool-result prune opted in at 48K tokens.
+
+    Not Hermes' shipped default (``proactive_prune_tokens: 0``, see ``stock_defaults``): this is the equal-gates
+    reference for ``tameru_1_4``, which runs the same prune gates.
+    """
     from agent.context_compressor import ContextCompressor
 
     return ContextCompressor(model="test-model", proactive_prune_tokens=48_000, quiet_mode=True)

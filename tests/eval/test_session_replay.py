@@ -112,6 +112,21 @@ def test_stock_matches_saved_baseline():
     )
 
 
+def test_stock_defaults_matches_saved_baseline():
+    """Hermes as shipped (proactive prune off): the reference a user switching to the plugin starts from."""
+    got = replay.deterministic_part(runs("stock_defaults")[0])
+    path = baseline_path("stock_defaults")
+    if WRITE:
+        write_baseline("stock_defaults", runs("stock_defaults")[0])
+    assert path.is_file(), f"{path} missing; run once with TAMERU_WRITE_BASELINES=1"
+    saved = json.loads(path.read_text(encoding="utf-8"))
+    assert got == {"metrics": saved["metrics"], "series": saved["series"]}
+
+
+def test_stock_defaults_is_hermes_as_shipped():
+    assert engines.make_engine("stock_defaults").proactive_prune_tokens == 0
+
+
 def test_tameru_1_4_runs_with_the_same_prune_gates_as_stock():
     """An equal-gates comparison: the plugin's own product defaults (2000-char min result) must not leak in."""
     stock, plugin = (engines.make_engine(n) for n in ("stock", "tameru_1_4"))
@@ -157,10 +172,10 @@ def test_tameru_1_4_product_matches_saved_baseline():
 
 def test_phase5_comparison_report(capsys, record_property):
     """Print the stock vs plugin table and the plugin's rung histogram (``pytest -s`` to see it)."""
-    names = ("stock", "tameru_1_4", "tameru_1_4_product")
+    names = ("stock_defaults", "stock", "tameru_1_4", "tameru_1_4_product")
     results = {name: runs(name)[0] for name in names}
     rungs = {}
-    for name in names[1:]:
+    for name in names[2:]:
         telemetry = _BUILT[name][0].get_status()["tameru"]["telemetry"]
         rungs[name] = telemetry["events"].get("render", {}).get("labels", {}).get("rung", {})
         assert "events" in telemetry
@@ -218,6 +233,45 @@ def test_acceptance_committed_rows_are_byte_stable_between_commits(name):
 @pytest.mark.parametrize("name", ACCEPTANCE_ENGINES)
 def test_acceptance_tool_call_pairs_stay_intact(name):
     assert _metrics(name)["pairing"]["violations"] == 0
+
+
+# ---- against Hermes as shipped (``stock_defaults``: no proactive prune) -----------------------------------
+def test_acceptance_the_shipped_plugin_beats_hermes_defaults():
+    """What a user sees when switching from out-of-the-box Hermes to the plugin as shipped."""
+    ours, theirs = _metrics("tameru_1_4_product"), _metrics("stock_defaults")
+    assert ours["cost_cache_priced"] <= theirs["cost_cache_priced"]
+    assert ours["compactions_shrinking"] <= theirs["compactions_shrinking"]
+    assert ours["error_fingerprints"]["retained"] >= theirs["error_fingerprints"]["retained"]
+    assert ours["refetch"]["refetch_rate"] <= theirs["refetch"]["refetch_rate"]
+    for category in CATEGORIES:
+        assert ours["gold"]["by_category"][category]["retained"] >= theirs["gold"]["by_category"][category]["retained"], category
+    assert ours["pairing"]["violations"] == 0 and ours["byte_stability"]["rewrites_outside_commits"] == 0
+
+
+def _large(name: str, window: int) -> dict:
+    return replay.run_session(lambda: engines.make_engine(name), context_length=window)["metrics"]
+
+
+def test_a_session_under_the_scaled_trigger_is_left_exactly_as_stock_leaves_it():
+    """256K window: the session never reaches the plugin's trigger (70% of Hermes' compaction threshold), so it is
+    replayed exactly as Hermes as shipped replays it: every fact kept, same cost. The fixed 48K trigger it
+    replaced pruned this session twice and kept 13 of 17 gold facts and 1 of 7 error templates."""
+    theirs, ours = _large("stock_defaults", 256_000), _large("tameru_1_4_product", 256_000)
+    assert ours["prune_commits"] == 0 and ours["compactions"] == 0
+    assert ours["gold"]["retained"] == theirs["gold"]["retained"] == theirs["gold"]["total"]
+    assert ours["cost_cache_priced"] == theirs["cost_cache_priced"]
+
+
+@pytest.mark.parametrize("window", (128_000, 200_000))
+def test_large_windows_keep_every_error_template(window):
+    """Once the session passes the trigger the prune does cut facts for cost (the trade-off of a proactive prune),
+    but no row may lose its error lines: rows past the retained budget keep one exemplar per error template (the
+    ``errors`` rung). Before it, these windows kept 0 or 1 of the 7 templates."""
+    theirs, ours = _large("stock_defaults", window), _large("tameru_1_4_product", window)
+    assert ours["error_fingerprints"]["retained"] == ours["error_fingerprints"]["total"]
+    assert ours["error_fingerprints"]["retained"] >= theirs["error_fingerprints"]["retained"]
+    assert ours["compactions"] <= theirs["compactions"]
+    assert ours["pairing"]["violations"] == 0 and ours["byte_stability"]["rewrites_outside_commits"] == 0
 
 
 @pytest.mark.parametrize("seed", (1, 2))
