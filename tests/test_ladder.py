@@ -169,7 +169,7 @@ def test_a_persisted_block_without_a_path_takes_hermes_line():
 
 
 def test_short_results_take_hermes_line():
-    body = "x" * 500
+    body = "x" * 300
     engine, msgs, idx = _one("q", "terminal", {"command": "echo"}, hp.terminal_result(body))
     _, out = demote(engine, msgs, idx)
     assert classify_render(out[idx]["content"]) is None and len(engine._store) == 0
@@ -202,13 +202,53 @@ def test_pass_budget_sends_the_rest_to_hermes_line():
     assert engine._telemetry.snapshot()["events"]["budget_skip"]["count"] == 1
 
 
+def _plain_log() -> str:
+    """A terminal result with no error line at all."""
+    return hp.terminal_result("\n".join(f"step {i:03d} processed batch {i * 7} without incident" for i in range(120)))
+
+
 def test_no_acceptable_rung_falls_back_to_hermes_line():
-    """Nothing small enough: Hermes' own line, and nothing stored."""
-    engine, msgs, idx = _one("q", "terminal", {"command": "ls"}, server_log(),
+    """Nothing small enough and no error template to keep: Hermes' own line, and nothing stored."""
+    engine, msgs, idx = _one("q", "terminal", {"command": "ls"}, _plain_log(),
                              settings=TameruSettings(brief_chars=10, max_risk="low", max_extract_chars=150))
     _, out = demote(engine, msgs, idx)
     assert classify_render(out[idx]["content"]) is None
     assert out[idx]["content"].startswith("[terminal]")
+    assert len(engine._store) == 0
+
+
+def test_no_acceptable_body_with_error_templates_uses_the_errors_rung_not_hermes_line():
+    """Hermes' one-liner drops every error line: a result that has some never falls back to it."""
+    original = server_log()
+    engine, msgs, idx = _one("q", "terminal", {"command": "ls"}, original,
+                             settings=TameruSettings(brief_chars=10, max_risk="low", max_extract_chars=150))
+    _, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    assert _rung(row) == "errors"
+    assert error_fingerprints(parse_payload(original).inner).keys() <= error_fingerprints(row).keys()
+
+
+def test_a_brief_that_misses_error_templates_is_refused_and_the_errors_rung_keeps_them():
+    """A tight allotment (here ``max_extract_chars``) squeezes the brief below what the original's error
+    templates need. It used to be accepted anyway, so the ``errors`` rung never ran and templates were lost."""
+    original = server_log()
+    want = error_fingerprints(parse_payload(original).inner)
+    assert len(want) >= 5
+    engine, msgs, idx = _one("why did the payment gateway time out?", "terminal",
+                             {"command": "tail -n 450 app.log"}, original,
+                             settings=TameruSettings(max_extract_chars=700))
+    _, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    assert _rung(row) == "errors"
+    assert want.keys() <= error_fingerprints(row).keys()
+
+
+def test_brief_row_returns_none_when_it_cannot_hold_every_template():
+    original = server_log()
+    pl = parse_payload(original)
+    engine = make_engine()
+    assert engine._brief_row("[terminal] ran `x` -> exit 0, 1 lines output", pl, "0" * 16, [], 600) is None
+    assert engine._brief_row("[terminal] ran `x` -> exit 0, 1 lines output", pl, "0" * 16, [], 6000) is not None
 
 
 def test_originals_are_kept_for_expand():
@@ -313,3 +353,96 @@ def test_the_query_leaves_out_the_bare_tool_name(monkeypatch, tool, args):
     demote(engine, msgs, idx)
     assert seen and all(tool not in q for q in seen)
     assert any(any(str(v) in part for part in q) for q in seen for v in args.values())
+
+
+# ---- Hermes' "N lines output" -------------------------------------------------------------------
+def _lines_of(original: str) -> int:
+    return len(parse_payload(original).inner.split("\n"))
+
+
+@pytest.mark.real_hermes   # the stub's summarizer has another shape; only Hermes' own `_sum_terminal` counts "1 lines output"
+@pytest.mark.parametrize("settings", [
+    TameruSettings(),                                                    # extract or brief
+    TameruSettings(max_extract_chars=700),                               # errors
+    TameruSettings(retained_extract_budget_chars=0, retained_extract_budget_ratio=0, errors_row_chars=0),   # header
+], ids=["body", "errors", "header"])
+def test_a_rendered_terminal_row_carries_the_real_line_count(settings):
+    original = server_log()
+    engine, msgs, idx = _one("why did the payment gateway time out?", "terminal",
+                             {"command": "tail -n 450 app.log"}, original, settings=settings)
+    _, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    first = row.split("\n")[0]
+    assert classify_render(row) == "v1"
+    assert f"-> exit 0, {_lines_of(original)} lines output [tameru:" in first
+    assert " 1 lines output" not in first
+    assert len(first) < 400 and first.startswith("[")
+
+
+@pytest.mark.real_hermes
+def test_a_superseded_terminal_row_carries_the_real_line_count():
+    chat = Chat("why did the payment gateway time out?")
+    first = chat.tool("terminal", {"command": "tail -n 450 app.log"}, server_log(1))
+    chat.tool("terminal", {"command": "tail -n 450 app.log"}, server_log(1))
+    msgs = chat.finish()
+    _, out = demote(make_engine(), msgs, first)
+    head = out[first]["content"].split("\n")[0]
+    assert _rung(head) == "superseded"
+    assert f"-> exit 0, {_lines_of(server_log(1))} lines output [tameru:superseded" in head
+
+
+def test_the_parent_line_is_left_alone_for_other_tools_and_shapes():
+    from hermes_tameru_plugin.render import true_line_count
+
+    other = "[read_file] read src/a.py from line 1 (9,000 chars)"
+    assert true_line_count(other, 42) == other
+    assert true_line_count("[terminal] ran `ls` -> exit 2, 1 lines output", 42) == "[terminal] ran `ls` -> exit 2, 42 lines output"
+    assert true_line_count("[terminal] ran `a -> exit 0, 5 lines output` -> exit ?, 1 lines output", 9).endswith("exit ?, 9 lines output")
+    odd = "[terminal] ran `ls` -> exit 0, 1 lines output and more"
+    assert true_line_count(odd, 42) == odd
+
+
+@pytest.mark.real_hermes
+def test_a_row_hermes_renders_keeps_its_own_line():
+    """The ``_keep_parent`` path is Hermes' row, byte for byte (its count is its own)."""
+    engine, msgs, idx = _one("q", "terminal", {"command": "ls"}, _plain_log(),
+                             settings=TameruSettings(brief_chars=10, max_risk="low", max_extract_chars=150))
+    _, out = demote(engine, msgs, idx)
+    assert out[idx]["content"].endswith("1 lines output")
+
+
+def test_the_line_count_is_only_replaced_for_an_unwrapped_payload():
+    engine = make_engine()
+    line = "[terminal] ran `cat x` -> exit 0, 1 lines output"
+    wrapped = parse_payload(hp.terminal_result("a\nb\nc\n" + "x" * 400))
+    plain = parse_payload("a\nb\nc\n" + "x" * 400)
+    assert wrapped.wrapped and not plain.wrapped
+    assert engine._terminal_line(line, wrapped) == "[terminal] ran `cat x` -> exit 0, 4 lines output"
+    assert engine._terminal_line(line, plain) == line
+
+
+def test_a_committed_row_is_not_rewritten():
+    original = server_log()
+    engine, msgs, idx = _one("why did the payment gateway time out?", "terminal",
+                             {"command": "tail -n 450 app.log"}, original)
+    _, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    again_changed, again = demote(engine, out, idx)
+    assert not again_changed and again[idx]["content"] == row
+
+
+# ---- min_tool_chars 400 ---------------------------------------------------------------------------
+def test_a_short_result_with_a_needle_keeps_its_answer():
+    """561 chars (the benchmark's ``zh_needle``) used to get Hermes' one-liner and lose the answer."""
+    import json as _json
+    from pathlib import Path
+
+    cases = _json.loads((Path(__file__).parent / "fixtures" / "engine_benchmark_cases.json").read_text("utf-8"))
+    case = next(c for c in cases if c["name"] == "zh_needle")
+    assert 400 <= len(case["ctx"]) < 800
+    engine, msgs, idx = _one(case["q"], "terminal", {"command": "cat report.txt"}, case["ctx"])
+    changed, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    assert changed and classify_render(row) == "v1" and _rung(row) in ("extract", "brief")
+    assert all(gold in row for gold in case["gold"])
+    assert len(row) < len(case["ctx"])

@@ -36,7 +36,7 @@ class TameruSettings:
     """Every plugin knob; the defaults are what runs when nothing is configured."""
 
     enabled: bool = True                       # kill switch -> pure stock ContextCompressor behaviour
-    min_tool_chars: int = 800                  # shorter results take the parent path
+    min_tool_chars: int = 400                  # shorter results take the parent path
     max_extract_chars: int = 6000              # incl. header/meta/marker bytes
     brief_chars: int = 1200                    # smallest brief row
     brief_share: float = 0.0                   # brief start size as a share of the result (0 = brief_chars)
@@ -50,7 +50,8 @@ class TameruSettings:
     store_max_entries: int = 512
     store_max_chars: int = 32_000_000
     pass_char_budget: int = 4_000_000          # inner chars Tameru may process per pass; beyond -> parent_line
-    retained_extract_budget_chars: int = 6000  # bodies (extract/brief) the newest rendered rows may keep in all
+    retained_extract_budget_chars: int = 6000  # bodies (extract/brief) the newest rendered rows may keep in all (the floor)
+    retained_extract_budget_ratio: float = 0.10  # ...at least this many chars per token of Hermes' compaction threshold; 0 = fixed
     retained_error_budget_chars: int = 8000    # "errors" rows (header + one line per error template) kept in all
     errors_row_chars: int = 1600               # cap on one errors row's exemplar lines; 0 = rows fall to a bare header
     prune_tail: str = "tokens"                 # proactive-prune tail: "tokens" (Hermes' tail_token_budget) | "count" (protect_last_n)
@@ -193,6 +194,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "store_max_chars": _min_int(0),
     "pass_char_budget": _min_int(0),
     "retained_extract_budget_chars": _min_int(0),
+    "retained_extract_budget_ratio": _parse_savings,
     "retained_error_budget_chars": _min_int(0),
     "errors_row_chars": _min_int(0),
     "prune_tail": _parse_prune_tail,
@@ -425,6 +427,24 @@ def scaled_prune_tokens(settings: TameruSettings, threshold_tokens: Any) -> int:
     if floor <= 0 or threshold <= 0 or settings.default_proactive_prune_ratio <= 0:
         return floor
     return max(floor, round(settings.default_proactive_prune_ratio * threshold))
+
+
+def scaled_retained_budget(settings: TameruSettings, threshold_tokens: Any) -> int:
+    """Chars of extract/brief bodies the retained rows may keep for a compaction threshold of ``threshold_tokens``.
+
+    ``max(retained_extract_budget_chars, round(retained_extract_budget_ratio * threshold))``: a fixed 6,000
+    chars is what a 64K window wants (a bigger budget lost facts there), but on 128K to 256K windows, where the
+    session reaches the prune trigger with room to spare, it threw away facts a larger budget keeps for
+    ~1-2% of the cost. Small windows keep the fixed value.
+    """
+    floor = settings.retained_extract_budget_chars
+    try:
+        threshold = int(threshold_tokens or 0)
+    except (TypeError, ValueError, OverflowError):
+        threshold = 0
+    if threshold <= 0 or settings.retained_extract_budget_ratio <= 0:
+        return floor
+    return max(floor, round(settings.retained_extract_budget_ratio * threshold))
 
 
 def compression_kwargs(

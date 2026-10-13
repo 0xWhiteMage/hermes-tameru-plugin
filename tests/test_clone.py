@@ -14,7 +14,7 @@ from hermes_tameru_plugin.render import parse_header
 
 
 def _loaded_engine():
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=12_345), threshold_percent=0.42)
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=12_345), threshold_percent=0.80)
     chat = Chat("tests/test_orders.py::test_reserve_stock_rollback failed")
     idx = chat.tool("terminal", {"command": "pytest -q"}, pytest_failure())
     _, out = demote(engine, chat.finish(), idx)
@@ -42,7 +42,7 @@ def test_a_copy_keeps_settings_caps_and_runtime_fields():
     assert (clone._store.max_entries, clone._store.max_chars) == (
         engine._store.max_entries, engine._store.max_chars,
     )
-    assert clone.threshold_percent == engine.threshold_percent == 0.42
+    assert clone.threshold_percent == engine.threshold_percent == 0.80
     assert clone.compression_count == 3 and clone._seams == engine._seams
     assert clone.proactive_prune_tokens == engine.proactive_prune_tokens
 

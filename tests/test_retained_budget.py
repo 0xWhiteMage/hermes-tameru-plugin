@@ -37,7 +37,7 @@ def _bodies(messages: list[dict], idxs: list[int]) -> int:
 
 
 def _all_bodies() -> TameruSettings:
-    return TameruSettings(retained_extract_budget_chars=10**6)
+    return TameruSettings(retained_extract_budget_chars=10**6, retained_extract_budget_ratio=0)
 
 
 def test_rows_beyond_the_budget_step_down_newest_first():
@@ -47,7 +47,7 @@ def test_rows_beyond_the_budget_step_down_newest_first():
     assert set(rungs) <= {"brief", "extract"}
     newest_two = sum(len(committed[i]["content"]) for i in idxs[-2:])
 
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=newest_two + 50))
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=newest_two + 50, retained_extract_budget_ratio=0))
     stepped, n = prune_pass(engine, committed)
     assert n == ROWS - 2
     assert _rungs(stepped, idxs) == ["header"] * (ROWS - 2) + rungs[-2:]
@@ -64,7 +64,7 @@ def test_one_pass_keeps_its_bodies_within_the_budget():
     reservation too), and the older rows fall back to headers."""
     messages, idxs = _session()
     budget = 4000
-    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
+    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget, retained_extract_budget_ratio=0)), messages)
     bodied = [_rungs(out, idxs)[k] in ("extract", "brief") for k in range(ROWS)]
     assert any(bodied) and not all(bodied)
     assert bodied == sorted(bodied), bodied
@@ -76,7 +76,7 @@ def test_one_pass_keeps_its_bodies_within_the_budget():
 def test_a_budget_that_fits_everything_changes_nothing():
     messages, idxs = _session()
     committed, _ = prune_pass(make_engine(_all_bodies()), messages)
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=10**6))
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=10**6, retained_extract_budget_ratio=0))
     again, n = prune_pass(engine, committed)
     assert n == 0 and again == committed
 
@@ -84,7 +84,7 @@ def test_a_budget_that_fits_everything_changes_nothing():
 def test_new_rows_stop_taking_bodies_when_the_budget_is_spent():
     messages, idxs = _session()
     budget = 3000
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=budget))
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=budget, retained_extract_budget_ratio=0))
     out, _ = prune_pass(engine, messages)
     rungs = _rungs(out, idxs)
     assert ("header" in rungs or "errors" in rungs) and rungs.count("brief") + rungs.count("extract") >= 1
@@ -101,7 +101,7 @@ def test_the_budget_counts_rows_outside_this_pass_too():
     tail = chat.messages[2:]
     session = [*committed, *tail]
     one = len(committed[idxs[0]]["content"])
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=one + 50))
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=one + 50, retained_extract_budget_ratio=0))
     out, _ = prune_pass(engine, session)
     assert tail_idx and _rungs(out, idxs).count("header") >= ROWS - 1
 
@@ -113,7 +113,7 @@ def test_only_a_committing_pass_changes_rows():
     committed, _ = prune_pass(make_engine(_all_bodies()), messages)
     before = [dict(m) for m in committed]
     engine = make_engine(
-        TameruSettings(retained_extract_budget_chars=100), proactive_prune_min_reclaim_tokens=10**7,
+        TameruSettings(retained_extract_budget_chars=100, retained_extract_budget_ratio=0), proactive_prune_min_reclaim_tokens=10**7,
     )
     res = engine.prune_tool_results_only(committed, 500_000)
     assert res[0] is committed and committed == before
@@ -131,13 +131,15 @@ def test_an_old_extract_leaves_room_for_the_briefs_still_to_come():
     """Hermes visits pass 2 oldest first. 1.4.1: an old row's extract may only use the room left after a
     ``brief_chars`` reservation for each later row of the pass, so one big early extract no longer starves the
     newer rows down to headers (the tameru_1_4 replay regression). Fix-all R5: the brief honours the
-    reservation too, so here the old row only keeps its header and every newer log keeps a brief."""
+    reservation too, so here the old row only keeps its header and the newer logs keep a brief. A log whose
+    allotment is too small for a brief with every error template falls to the ``errors`` rung (a brief that misses
+    a template is refused), so no log loses an error line."""
     messages, old, idxs = _old_failure_then_logs()
     budget = 6000
-    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
+    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget, retained_extract_budget_ratio=0)), messages)
     rungs = _rungs(out, [old, *idxs])
     assert rungs[0] in ("header", "errors"), rungs   # neither its extract (~3.3k) nor its brief fits the room
-    assert rungs[1:] == ["brief"] * len(idxs), rungs
+    assert set(rungs[1:]) <= {"brief", "errors"} and rungs[-3:] == ["brief"] * 3, rungs
     assert _bodies(out, [old, *idxs]) <= budget
 
 

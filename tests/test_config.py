@@ -55,10 +55,10 @@ def init_params(compressor_cls) -> set[str]:
 # ---- TameruSettings ------------------------------------------------------------------------------
 def test_defaults_match_the_contract():
     assert dataclasses.asdict(TameruSettings()) == {
-        "enabled": True, "min_tool_chars": 800, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
+        "enabled": True, "min_tool_chars": 400, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
         "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (),
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
-        "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_error_budget_chars": 8000, "errors_row_chars": 1600, "prune_tail": "tokens",
+        "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.70,
         "default_proactive_prune_min_result_chars": 2000,
     }
@@ -89,6 +89,7 @@ ENV_SAMPLES = {
     "store_max_chars": ("1000", 1000),
     "pass_char_budget": ("0", 0),
     "retained_extract_budget_chars": ("2000", 2000),
+    "retained_extract_budget_ratio": ("0.25", 0.25),
     "retained_error_budget_chars": ("100", 100),
     "errors_row_chars": ("0", 0),
     "prune_tail": (" COUNT ", "count"),
@@ -240,6 +241,13 @@ def test_min_savings_accepts_numbers_below_one(hermes_config, value, expected):
     assert (settings.min_savings, warnings) == (expected, [])
 
 
+@pytest.mark.parametrize("value, expected", [(0, 0.0), ("0.10", 0.10), (0.25, 0.25), (0.999, 0.999)])
+def test_retained_extract_budget_ratio_accepts_numbers_below_one(hermes_config, value, expected):
+    hermes_config(plugin_config(retained_extract_budget_ratio=value))
+    settings, warnings = load_settings(env={})
+    assert (settings.retained_extract_budget_ratio, warnings) == (expected, [])
+
+
 def test_tuples_from_env_split_on_commas_trim_and_deduplicate(hermes_config):
     settings, warnings = load_settings(env={ENV + "EXEMPT_TOOLS": " alpha, beta ,,gamma,alpha "})
     assert (settings.exempt_tools, warnings) == (("alpha", "beta", "gamma"), [])
@@ -258,6 +266,8 @@ BAD_ENV = [
     ("min_savings", "-0.1"), ("brief_share", "1.5"), ("min_savings", "nan"), ("min_savings", "inf"), ("min_savings", "high"),
     ("max_risk", "extreme"), ("prune_tail", "weeks"), ("protect_patterns", "ok,(unclosed"), ("store_max_entries", "-5"),
     ("default_proactive_prune_tokens", "-1"), ("default_proactive_prune_ratio", "1.5"),
+    ("retained_extract_budget_ratio", "1.0"), ("retained_extract_budget_ratio", "-0.1"),
+    ("retained_extract_budget_ratio", "nan"), ("retained_extract_budget_ratio", "wide"),
 ]
 
 
@@ -272,7 +282,8 @@ BAD_FILE = [
     ("enabled", 2), ("enabled", "perhaps"), ("min_tool_chars", True), ("min_tool_chars", 12.5),
     ("min_tool_chars", [1]), ("min_savings", True), ("min_savings", 1), ("max_risk", 3), ("prune_tail", True),
     ("exempt_tools", 5), ("exempt_tools", ["a", 2]), ("protect_patterns", ["["]), ("telemetry_log", 5),
-    ("telemetry_log", ["a"]),
+    ("telemetry_log", ["a"]), ("retained_extract_budget_ratio", True), ("retained_extract_budget_ratio", 1),
+    ("retained_extract_budget_ratio", [0.1]),
 ]
 
 

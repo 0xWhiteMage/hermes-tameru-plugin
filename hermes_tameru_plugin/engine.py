@@ -39,7 +39,7 @@ from typing import Any, NamedTuple
 
 from .config import (
     TameruSettings, compression_kwargs, load_settings, prune_default_applies, read_hermes_config,
-    scaled_prune_tokens,
+    scaled_prune_tokens, scaled_retained_budget,
 )
 from .hermes_compat import (
     LEAN_STUB_RE,
@@ -72,6 +72,7 @@ from .render import (
     parse_header,
     render,
     retarget_rung,
+    true_line_count,
 )
 from .supersede import SupersessionIndex, build_index, superseded_by
 from .tameru.compress_context import (
@@ -319,6 +320,16 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             except Exception:
                 pass
 
+    def _retained_budget(self) -> int:
+        """The retained-extract budget now: the configured floor, or the window-scaled value when larger.
+
+        Computed at use time because Hermes' compaction threshold changes with ``update_model``.
+        """
+        try:
+            return scaled_retained_budget(self._settings, getattr(self, "threshold_tokens", 0))
+        except Exception:
+            return self._settings.retained_extract_budget_chars
+
     def clone_for_agent(self) -> TameruContextEngine:
         """A per-agent copy; the store, memo and telemetry copy as fresh empty objects."""
         return copy.deepcopy(self)
@@ -446,7 +457,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         Only rows inside a pass Hermes is already running change, and Hermes' min-reclaim gate still
         decides whether that pass commits.
         """
-        room = self._settings.retained_extract_budget_chars
+        room = self._retained_budget()
         err_room = self._settings.retained_error_budget_chars
         demote: set[int] = set()
         for i in range(len(result) - 1, -1, -1):
@@ -508,6 +519,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         scope.budget -= len(content)
 
         pl = parse_payload(content)
+        line = self._terminal_line(line, pl)
         ref = make_ref(msg, content)
         if spill:   # Hermes already bounded this row; what the agent needs later is where the rest is
             return self._commit(
@@ -553,9 +565,17 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             if rendered is not None:
                 scope.room -= len(rendered)
                 return self._commit(result, idx, content, tool, ref, pl, scope, rung, rendered)
-        if free < capped:   # the retained budget (and its reservation), not the savings rule, ruled the body out
+        # The retained budget (and its reservation), not the savings rule, ruled the body out; or the original has
+        # error templates, which Hermes' one-line summary would drop (the errors rung keeps them).
+        if free < capped or error_fingerprints(pl.inner):
             return self._commit_header_or_errors(result, idx, content, tool, ref, pl, scope, line)
         return self._keep_parent(result, idx, shadow[0], tool)
+
+    @staticmethod
+    def _terminal_line(line: str, pl: HermesPayload) -> str:
+        """Hermes' terminal one-liner with the payload's real line count (it counts the JSON-encoded result's
+        one line); only for a row this plugin renders and only when the payload was unwrapped."""
+        return true_line_count(line, _line_count(pl.inner)) if pl.wrapped else line
 
     def _reserved_after(
         self, scope: _Pass, result: list[dict], idx: int, call_id_to_tool: dict, min_prune_chars: int,
@@ -749,7 +769,8 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
 
         The brief is reached when the extract was refused, mostly because it was too big. It starts at
         ``brief_chars`` (or ``brief_share`` of the result, when larger) and grows in steps up to
-        ``limit`` while an error template of the original is missing from it.
+        ``limit`` while an error template of the original is missing from it. A brief that still misses a
+        template at ``limit`` is refused (None): the ladder's ``errors`` rung keeps every template instead.
         """
         settings = self._settings
         stats = RenderStats(0, 0, 0, 0, (), "brief")
@@ -759,7 +780,6 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         while sizes[-1] < limit:   # grow in steps, stopping at the first size that keeps every template
             sizes.append(min(limit, max(sizes[-1] + 1, sizes[-1] * 3 // 2)))
         fingerprints = error_fingerprints(pl.inner)
-        best = None
         for size in sizes:
             budget = size - reserve
             rendered = body = None
@@ -771,7 +791,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                         pl.inner, budget_chars=budget, query=" ".join(query), gap_marker=_INLINING_ELISION,
                     )
                 except Exception:
-                    return best
+                    return None
                 rendered = self._body_row(parent_line, pl, ref, "brief", body)
                 if len(rendered) <= limit:
                     break
@@ -780,10 +800,9 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 rendered = None
             if rendered is None:
                 break
-            best = rendered
             if fingerprints.keys() <= error_fingerprints(body).keys():
-                break
-        return best
+                return rendered
+        return None
 
     # ---- committing rows ----------------------------------------------------------------------
     def _keep_parent(self, result: list[dict], idx: int, row: dict, tool: str) -> bool:
@@ -889,7 +908,8 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                     pl = parse_payload(content)
                     ref = make_ref(before, content)
                     new = self._header_row(
-                        summarize_tool_result(tool, raw_args, content), pl, ref, "header", _spill_note(content),
+                        self._terminal_line(summarize_tool_result(tool, raw_args, content), pl), pl, ref, "header",
+                        _spill_note(content),
                     )
                     self._store.put(ref, pl.inner, tool=tool, meta=pl.meta)
                 elif self._leaves_to_hermes(tool, raw_args, content):
@@ -897,7 +917,9 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 else:
                     pl = parse_payload(content)
                     ref = make_ref(before, content)
-                    new = self._header_row(summarize_tool_result(tool, raw_args, content), pl, ref, "header")
+                    new = self._header_row(
+                        self._terminal_line(summarize_tool_result(tool, raw_args, content), pl), pl, ref, "header",
+                    )
                     self._store.put(ref, pl.inner, tool=tool, meta=pl.meta)
                 if new is None:
                     continue

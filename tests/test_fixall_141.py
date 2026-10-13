@@ -68,7 +68,7 @@ def test_r5_an_old_brief_does_not_starve_the_newest_rows():
 
     messages, idxs = _session()
     budget = 3000
-    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget)), messages)
+    out, _ = prune_pass(make_engine(TameruSettings(retained_extract_budget_chars=budget, retained_extract_budget_ratio=0)), messages)
     rungs = _rungs(out, idxs)
     # Rows past the budget keep no body; a log's error lines survive on the ``errors`` rung (its own budget).
     assert rungs[-1] in ("extract", "brief") and rungs[0] in ("header", "errors"), rungs

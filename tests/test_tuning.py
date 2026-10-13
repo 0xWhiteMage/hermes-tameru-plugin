@@ -102,7 +102,7 @@ def _error_session() -> tuple[list[dict], int]:
 def test_a_summary_keeps_the_errors_of_a_row_that_was_cut_to_a_header_and_kept_in_the_tail():
     messages, log = _error_session()
     original = json.loads(messages[log]["content"])["output"]
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=0, errors_row_chars=0))
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=0, retained_extract_budget_ratio=0, errors_row_chars=0))
     with in_scope(engine, messages, full=True):
         out, _ = engine._prune_old_tool_results(messages, protect_tail_count=4, min_prune_chars=MIN_PRUNE_CHARS)
         assert parse_header(out[log]["content"])["rung"] == "header"
@@ -114,7 +114,7 @@ def test_a_summary_keeps_the_errors_of_a_row_that_was_cut_to_a_header_and_kept_i
 
 def test_the_errors_of_a_header_from_an_earlier_pass_are_found_by_its_ref():
     messages, log = _error_session()
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=0, errors_row_chars=0))
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=0, retained_extract_budget_ratio=0, errors_row_chars=0))
     committed, _ = prune_pass(engine, messages)
     assert parse_header(committed[log]["content"])["rung"] == "header"
     with in_scope(engine, committed):   # a later compaction: nothing was cut in this pass
@@ -129,7 +129,7 @@ def test_a_brief_stepped_down_by_a_spent_budget_keeps_its_error_lines_on_the_err
     engine = make_engine()
     committed, _ = prune_pass(engine, messages)
     assert parse_header(committed[log]["content"])["rung"] == "brief"
-    engine._settings = TameruSettings(retained_extract_budget_chars=0)
+    engine._settings = TameruSettings(retained_extract_budget_chars=0, retained_extract_budget_ratio=0)
     with in_scope(engine, committed, full=True):
         out, _ = engine._prune_old_tool_results(committed, protect_tail_count=4, min_prune_chars=MIN_PRUNE_CHARS)
     row = out[log]["content"]
@@ -150,7 +150,7 @@ def test_a_body_that_keeps_its_errors_adds_nothing_to_the_summary_outside_its_tu
 
 def test_with_the_ledger_off_the_summary_carries_no_trail():
     messages, log = _error_session()
-    engine = make_engine(TameruSettings(ledger=False, retained_extract_budget_chars=0))
+    engine = make_engine(TameruSettings(ledger=False, retained_extract_budget_chars=0, retained_extract_budget_ratio=0))
     with in_scope(engine, messages, full=True):
         engine._prune_old_tool_results(messages, protect_tail_count=4, min_prune_chars=MIN_PRUNE_CHARS)
         assert "Artifact Trail" not in engine._augment_summary_lean("## Goal\nfix it", [])
@@ -161,7 +161,7 @@ def test_errors_of_a_brief_that_a_compaction_steps_down_to_a_header_are_kept():
     engine = make_engine()
     committed, _ = prune_pass(engine, messages)
     assert parse_header(committed[log]["content"])["rung"] == "brief"
-    engine._settings = TameruSettings(retained_extract_budget_chars=0, errors_row_chars=0)   # spent: step down
+    engine._settings = TameruSettings(retained_extract_budget_chars=0, retained_extract_budget_ratio=0, errors_row_chars=0)   # spent: step down
     with in_scope(engine, committed, full=True) as scope:
         out, _ = engine._prune_old_tool_results(committed, protect_tail_count=4, min_prune_chars=MIN_PRUNE_CHARS)
         assert parse_header(out[log]["content"])["rung"] == "header" and scope.gone

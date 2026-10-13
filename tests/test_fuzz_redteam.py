@@ -153,7 +153,7 @@ def test_fuzz_prune_pass_pairing_and_stability(rounds, budget) -> None:
     for tool, text, code in rounds:
         chat.tool(tool, {"command": "pytest -q"}, _payload(tool, text, code))
     msgs = chat.finish()
-    engine = make_engine(TameruSettings(retained_extract_budget_chars=budget))
+    engine = make_engine(TameruSettings(retained_extract_budget_chars=budget, retained_extract_budget_ratio=0))
     out, _ = prune_pass(engine, [dict(m) for m in msgs])
     assert "error" not in engine._telemetry.snapshot()["events"], engine._telemetry.snapshot()
     assert [m.get("role") for m in out] == [m.get("role") for m in msgs]

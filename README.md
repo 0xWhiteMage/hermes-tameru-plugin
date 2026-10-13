@@ -142,7 +142,7 @@ plugins:
 | Setting | Default | Meaning |
 |---|---|---|
 | `enabled` | `true` | Kill switch. `false` makes the engine behave as stock Hermes (see below). |
-| `min_tool_chars` | `800` | Results shorter than this take Hermes' own one-line path. |
+| `min_tool_chars` | `400` | Results shorter than this take Hermes' own one-line path (800 in 1.4.1: a 561-char result lost its answer to Hermes' 58-char line). |
 | `max_extract_chars` | `6000` | Cap on a rendered extract row, header and markers included. |
 | `brief_chars` | `1200` | Starting size of a brief row (it grows up to `max_extract_chars` while an error fingerprint is missing). |
 | `brief_share` | `0.0` | Start the brief at this share of the result instead, when larger (0 to <1). `0.25` keeps more answers per row but, in the replay, fewer older rows keep a body. |
@@ -159,6 +159,7 @@ plugins:
 | `retained_error_budget_chars` | `8000` | Total size of `errors` rows (header plus one exemplar line per error template) kept, newest first; past it they step down to a header. |
 | `errors_row_chars` | `1600` | Cap on the exemplar lines of one `errors` row; `0` turns the rung off (rows fall to a bare header as in 1.4.1). |
 | `retained_extract_budget_chars` | `6000` | Total size of extract/brief bodies rendered rows may keep. Committed rows keep theirs newest first; a new row gets what is left, else a header. Rows beyond it step down to a header (ref kept), only inside a pass Hermes already commits. |
+| `retained_extract_budget_ratio` | `0.10` | The retained-extract budget is `max(retained_extract_budget_chars, ratio x Hermes' compaction threshold in tokens)` chars: 6,000 up to 64K windows, 9,600 at 128K, 15,000 at 200K. `0` keeps the fixed value. |
 | `prune_tail` | `tokens` | Tail protected by the proactive prune: `tokens` (the shorter of `protect_last_n` and the full compaction's tail token budget, and pass 4 also runs) or `count` (Hermes' `protect_last_n` messages, stock behaviour). |
 | `supersession` | `true` | Enable structural supersession. |
 | `ledger` | `true` | Add the artifact trail to Hermes' compaction summary. |
@@ -288,7 +289,7 @@ the pass is retried once with header-only rungs, which reclaim more.
   that includes `context_engine` (`hermes chat -t terminal,file,context_engine`). `-t terminal,file` hides it.
   Newer Hermes also logs `capability_check ... capability=tools.override decision=deny evidence=not granted` at
   every plugin load; that is Hermes probing its tool-override policy and is not an error.
-- Results under `min_tool_chars` (800) get Hermes' own one-line summary, as in stock Hermes.
+- Results under `min_tool_chars` (400) get Hermes' own one-line summary, as in stock Hermes.
 - Re-syncing the engine can change replay outputs. Rerun baseline checks and re-record only intended differences. The 1.4.1 version sync retained the existing deterministic metrics.
 
 ## Compatibility

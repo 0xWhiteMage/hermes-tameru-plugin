@@ -226,6 +226,23 @@ def render(
     return out
 
 
+# Hermes' terminal one-liner (``agent/context_compressor.py::_sum_terminal``).
+_TERMINAL_LINE_RE = re.compile(r"(?P<head>\[terminal\] ran `.*` -> exit (?:-?\d+|\?), )\d+(?P<tail> lines output)\Z", re.DOTALL)
+
+
+def true_line_count(parent_line: str, lines: int) -> str:
+    """Hermes' terminal one-liner with ``lines`` as its line count; any other parent line unchanged.
+
+    Hermes counts the newlines of the raw JSON result, so every terminal row says "1 lines output"; the
+    caller passes the line count of the unwrapped payload (the one the header's ``kept K/N lines`` uses).
+    The header builder still caps the whole line at 399 chars.
+    """
+    found = _TERMINAL_LINE_RE.fullmatch(" ".join(parent_line.splitlines())) if isinstance(parent_line, str) else None
+    if found is None:
+        return parent_line
+    return f"{found['head']}{lines}{found['tail']}"
+
+
 def _parent_of(content_or_parent_line: str) -> str:
     """The parent line of a rendered row, else the first line of the text."""
     m = _ROW_RE.match(content_or_parent_line)
