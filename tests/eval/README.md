@@ -137,6 +137,42 @@ lowercase, uuids, hex runs of 6+ and digit runs masked; capped at 160 characters
 `replay.py` so the harness does not depend on the engine under test. A test compares the two when the vendored
 engine has `error_fingerprints`.
 
+## Realism: the simulated clock and the context-overflow path
+
+`run_session(..., realistic=True)` (the default; `compare.py --old-harness` / `realistic=False` is the old harness, kept
+only for comparison) fixes two unfaithful spots of the first harness:
+
+* **A virtual clock.** Hermes' compressor keeps wall-clock guards: the structural no-op backoff (300 s), the anti-thrash
+  recovery window (300 s), the summary-failure cooldown ladder (60/300/900 s). A replay that ends in seconds never saw one
+  lapse, so after a single no-op neither engine compacted again and a 32K session sent requests up to 2.1x the window.
+  `time.monotonic` / `time.time` as Hermes' compression modules read them (every loaded module named
+  `agent.context_compressor*`, `agent.conversation_compression*`, `agent.compression*`; only their `time` name, restored
+  after the run) follow a `VirtualClock` that advances `seconds_per_request` (default **20 s**) per scripted request slot,
+  sent, rejected or skipped, so the clock is a function of the script position, never of the engine. 20 s is one agentic
+  round trip (a 5-30 s model call plus its tool run); the human's think time between turns is not added. Pass
+  `seconds_per_request=` / `compare.py --seconds-per-request N` to change it. Sensitivity (seed 0, plugin as shipped vs
+  Hermes as shipped): 64K and larger windows do not move at 5, 20 or 60 s. At 32K the outcome depends on whether the 300 s
+  backoff lapses inside the session: default 32K fails 12 / 6 / 4 turns (both engines) at 5 / 20 / 60 s, refactor 32K
+  stock 18 / 5 / 3, oncall 32K stock 6 / 6 / 2. Read the 32K cells as "what a stuck backoff costs", not as a precise number.
+* **A context-overflow path.** A provider rejects a request larger than the window. When the estimate the pre-request
+  gate already uses (`estimate_messages_tokens_rough` of what is sent, after `select_context`, plus the 3,000-token tool
+  overhead) exceeds the window, the request is not billed, `overflow_errors` counts it and the harness mirrors
+  `agent/turn_overflow.py`: `count_attempt` (the per-turn budget, `max_compression_attempts=3`, is shared with the
+  pre-request and post-tool compressions), the same gate `compress_context` applies (summary cooldown ignored, structural
+  backoff and the ineffective breaker still block), `engine.compress(bypass_cooldown=True)` with the kwargs its signature
+  accepts, progress scored as fewer messages or 5 % fewer rough tokens, then the retry. Exhausted attempts, a compression
+  that does not shrink, or a transient block (Hermes' soft defer, attempt refunded) FAIL the turn: `failed_turns` counts it
+  once, the model is not called again for the rest of that turn, but the scripted assistant/tool rows are still appended
+  (every engine ends with the same conversation content) and the next user turn tries again with a fresh budget. Failed
+  requests are never billed, so compare `cost` together with `failed_turns`. If the closing question fails, gold and error
+  retention are measured on the last request that was sent.
+
+New metrics: `overflow_errors`, `overflow_compactions`, `failed_turns` (+ `failed_turn_reasons`), `requests_over_window`
+(sent above the window: always 0 in the realistic harness), `max_request_window_ratio` (largest request sent / window) and
+`max_attempted_window_ratio` (including rejected ones). `test_small_window_replay.py` holds the 32K window (baselines in
+`baselines/w32k/`). `baselines/tameru_1_3.json` is the frozen 1.3.0 plugin recorded with the OLD harness and is not
+re-recordable (that engine is no longer vendored).
+
 ## Session shapes (`--scenario`)
 
 The default session above is one script, so every default tuned on it rests on one shape. `run_session(factory,

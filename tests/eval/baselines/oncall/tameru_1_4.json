@@ -6,6 +6,8 @@
   "seed": 0,
   "turns": 40,
   "hermes_pin": "1298c8e74baa73e1a2b90124228d017261ac6bc4",
+  "realistic": true,
+  "seconds_per_request": 20.0,
   "scenario": "oncall"
  },
  "metrics": {
@@ -32,6 +34,13 @@
   "prefix_invalidated_chars": 573424,
   "prefix_break_events": 4,
   "messages_final": 98,
+  "overflow_errors": 0,
+  "overflow_compactions": 0,
+  "failed_turns": 0,
+  "failed_turn_reasons": [],
+  "requests_over_window": 0,
+  "max_request_window_ratio": 0.7228,
+  "max_attempted_window_ratio": 0.7228,
   "gold": {
    "total": 20,
    "retained": 12,
@@ -403,11 +412,11 @@
   ]
  },
  "timing": {
-  "engine_seconds": 4.125,
+  "engine_seconds": 1.047,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 2.161,
-   "prune": 1.964
+   "compress": 0.617,
+   "prune": 0.43
   }
  }
 }

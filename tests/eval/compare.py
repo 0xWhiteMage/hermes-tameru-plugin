@@ -3,7 +3,8 @@
     HERMES_REPO_ROOT=<hermes checkout> python tests/eval/compare.py [engine ...] [--json] [--scenario NAME]
 
 Defaults to every engine in ``engines.BASELINE_ENGINES`` plus any extra registered ones named on the command
-line. ``--scenario NAME`` picks the session shape (``default``, ``oncall``, ``refactor``, ``smallrows``, ``i18n``;
+line. ``--old-harness`` runs the old replay (real clock, no context-overflow path; kept for comparison only) and
+``--seconds-per-request N`` sets the simulated clock (default 20). ``--scenario NAME`` picks the session shape (``default``, ``oncall``, ``refactor``, ``smallrows``, ``i18n``;
 see ``scenario_registry``); ``--seed N`` its seed. Not collected by pytest. Runs against a throwaway ``HERMES_HOME`` unless ``TAMERU_EVAL_HERMES_HOME=<dir>``
 or ``TAMERU_EVAL_KEEP_HERMES_HOME=1`` (keep the one in the environment).
 """
@@ -53,6 +54,8 @@ def rows(result: dict) -> list[tuple[str, str]]:
         ("cost / uncached", f"{m['cost_ratio_vs_uncached']:.3f}"),
         ("compress calls / changed list / shrank", f"{m['compress_calls']} / {m['compactions']} / {m['compactions_shrinking']}"),
         ("summary LLM calls", str(m["summary_llm_calls"])),
+        ("overflow errors / failed turns", f"{m['overflow_errors']} / {m['failed_turns']}" if "overflow_errors" in m else "n/a"),
+        ("max request / window", f"{m['max_request_window_ratio']:.2f}" if "max_request_window_ratio" in m else "n/a"),
         ("prune commits (rows)", f"{m['prune_commits']} ({m['prune_rows_demoted']})"),
         ("prefix invalidated (chars)", f"{m['prefix_invalidated_chars']:,}"),
         ("gold retained", f"{gold['retained']}/{gold['total']}  [{cats}]"),
@@ -86,7 +89,12 @@ def main(argv: list[str]) -> int:
     import scenario_registry
 
     as_json = "--json" in argv
-    options, rest = parse_options(argv, ("--scenario", "--seed"))
+    options, rest = parse_options(argv, ("--scenario", "--seed", "--seconds-per-request", "--window"))
+    run_opts = {"realistic": "--old-harness" not in argv}
+    if "--seconds-per-request" in options:
+        run_opts["seconds_per_request"] = float(options["--seconds-per-request"])
+    if "--window" in options:
+        run_opts["context_length"] = int(options["--window"])
     scenario = options.get("--scenario", scenario_registry.DEFAULT_SCENARIO)
     seed = int(options.get("--seed", "0"))
     try:
@@ -94,12 +102,13 @@ def main(argv: list[str]) -> int:
     except KeyError as exc:
         raise SystemExit(str(exc.args[0])) from None
     names = [a for a in rest if not a.startswith("--")] or list(engines.BASELINE_ENGINES)
-    results = {n: replay.run_session(lambda n=n: engines.make_engine(n), scenario=scenario, seed=seed) for n in names}
+    results = {n: replay.run_session(lambda n=n: engines.make_engine(n), scenario=scenario, seed=seed, **run_opts)
+               for n in names}
     if as_json:
         print(json.dumps({n: {"metrics": r["metrics"], "timing": r["timing"]} for n, r in results.items()}, indent=1))
         return 0
-    if scenario != scenario_registry.DEFAULT_SCENARIO or seed:
-        print(f"scenario: {scenario}  seed: {seed}")
+    if scenario != scenario_registry.DEFAULT_SCENARIO or seed or len(run_opts) > 1 or not run_opts["realistic"]:
+        print(f"scenario: {scenario}  seed: {seed}  {run_opts}")
     print(table(results))
     return 0
 

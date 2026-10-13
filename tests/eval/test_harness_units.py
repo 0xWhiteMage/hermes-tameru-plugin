@@ -3,17 +3,23 @@ from __future__ import annotations
 
 import json
 import random
+import sys
+import time
+import types
 
 import pytest
 from fixtures import hermes_payloads as hp
 from replay import (
+    OVERFLOW_RETRY_PAUSE_SECONDS,
     FakeSummarizer,
+    VirtualClock,
     _common_prefix_len,
     _Session,
     _wire,
     error_fingerprint,
     error_fingerprints,
     pairing_violations,
+    simulated_clock,
     visible_text,
 )
 from scenario import CATEGORIES, N_TURNS, build_scenario
@@ -417,3 +423,182 @@ def test_byte_stability_check_flags_rewrites_only_outside_commits():
     assert sess.rewrites == []                      # same bytes: stable
     sess._check_stability([{**row, "content": "z"}], committed=False)
     assert len(sess.rewrites) == 1 and "a" in sess.rewrites[0]
+
+
+# ---- the simulated clock ------------------------------------------------------------------------------
+def test_virtual_clock_moves_only_when_advanced_and_is_deterministic():
+    a, b = VirtualClock(20), VirtualClock(20)
+    t0, w0 = a.monotonic(), a.time()
+    assert (t0, w0) == (b.monotonic(), b.time()) and a.monotonic() == t0  # does not drift on its own
+    a.advance(300)
+    assert a.monotonic() - t0 == 300 and a.time() - w0 == 300
+
+
+def test_simulated_clock_patches_only_the_time_name_of_compression_modules_and_restores_it():
+    mod = types.ModuleType("agent.context_compressor_unit_probe")  # matches the compression-module prefix
+    mod.time = time
+    other = types.ModuleType("agent.other_unit_probe")
+    other.time = time
+    sys.modules[mod.__name__], sys.modules[other.__name__] = mod, other
+    try:
+        clock = VirtualClock(20)
+        with simulated_clock(clock):
+            assert mod.time.monotonic() == clock.monotonic() and mod.time.time() == clock.time()
+            clock.advance(301)
+            assert mod.time.monotonic() == clock.monotonic()
+            assert mod.time.perf_counter is time.perf_counter and mod.time.sleep is time.sleep  # the rest stays real
+            assert other.time is time and time.monotonic() != clock.monotonic()  # nothing else is touched
+        assert mod.time is time
+        with pytest.raises(RuntimeError), simulated_clock(clock):
+            raise RuntimeError("boom")
+        assert mod.time is time  # restored when the run raises
+    finally:
+        del sys.modules[mod.__name__], sys.modules[other.__name__]
+
+
+class _BackoffEngine(_SpyEngine):
+    """Hermes-shaped gate: ``_automatic_compression_blocked`` is true until the (virtual) clock passes ``until``."""
+
+    threshold_tokens = 0
+
+    def __init__(self, clock=None):
+        super().__init__()
+        self.clock, self.until, self.kwargs = clock, 0.0, []
+
+    def _now(self):
+        return self.clock.monotonic() if self.clock else 0.0
+
+    def _automatic_compression_blocked(self, *, ignore_cooldown=False):
+        return self._now() < self.until
+
+    def _compression_block_reason(self, *, ignore_cooldown=False):
+        return f"structural_backoff:{self.until - self._now():.0f}" if self._now() < self.until else None
+
+
+def _big(n, tail="x"):
+    return [{"role": "system", "content": "s"}, {"role": "user", "content": tail * n}]
+
+
+def _realistic(engine, window=100, clock=None, **kw):
+    return _Session(engine, None, estimate=_chars4, realistic=True, clock=clock, context_length=window, **kw)
+
+
+def test_realistic_clock_ticks_once_per_request_slot_sent_rejected_or_skipped():
+    clock = VirtualClock(20)
+    eng = _BackoffEngine(clock)
+    sess = _realistic(eng, window=10_000_000, clock=clock)
+    t0 = clock.monotonic()
+    sess.request(_big(10))
+    sess.request(_big(10))
+    assert clock.monotonic() - t0 == 40
+    sess.turn_failed = True
+    sess.request(_big(10))  # a skipped slot of a failed turn still takes its time
+    assert clock.monotonic() - t0 == 60
+
+
+# ---- the context-overflow path --------------------------------------------------------------------------
+def _shrunk(messages, keep):
+    return messages[:-1] + [dict(messages[-1], content=messages[-1]["content"][: int(len(messages[-1]["content"]) * keep)])]
+
+
+class _ShrinkingEngine(_BackoffEngine):
+    """compress() keeps ``keep`` of the last message; the signature has Hermes' ``bypass_cooldown``."""
+
+    def __init__(self, keep=0.1, clock=None):
+        super().__init__(clock)
+        self.keep = keep
+
+    def compress(self, messages, current_tokens=None, focus_topic=None, force=False, memory_context="", bypass_cooldown=False):
+        self.kwargs.append({"current_tokens": current_tokens, "bypass_cooldown": bypass_cooldown})
+        return _shrunk(messages, self.keep)
+
+
+class _PlainSignatureEngine(_ShrinkingEngine):
+    """An engine whose ``compress`` knows only ``current_tokens`` (older plugin signatures)."""
+
+    def compress(self, messages, current_tokens=None):
+        self.kwargs.append({"current_tokens": current_tokens})
+        return _shrunk(messages, self.keep)
+
+
+_OVER = 5_016  # rough tokens of ``_big(8000)`` under ``_chars4`` plus the 3,000-token tool-schema overhead
+
+
+def test_overflow_is_rejected_unbilled_compressed_with_bypass_and_retried():
+    clock = VirtualClock(20)
+    eng = _ShrinkingEngine(keep=0.1, clock=clock)
+    sess = _realistic(eng, window=4000, clock=clock)
+    sess.begin_turn()
+    out = sess.request(_big(8000))
+    assert sess.overflow_errors == 1 and sess.failed_turns == 0 and sess.turn_attempts == 1
+    assert eng.kwargs == [{"current_tokens": _OVER, "bypass_cooldown": True}]
+    assert len(sess.request_chars) == 1 and sess.request_chars[0] < 4000 * 4  # only the recovered request was sent
+    assert sess.requests_over_window == 0 and sess.max_sent_tokens <= 4000 < sess.max_attempted_tokens == _OVER
+    assert sess.overflow_compactions == 1 and sess.compactions == 1 and len(out[-1]["content"]) == 800
+    assert clock.elapsed == OVERFLOW_RETRY_PAUSE_SECONDS + 20
+
+
+def test_overflow_without_a_bypass_parameter_calls_the_engine_the_old_way():
+    eng = _PlainSignatureEngine(keep=0.1)
+    sess = _realistic(eng, window=4000)
+    sess.begin_turn()
+    sess.request(_big(8000))
+    assert eng.kwargs == [{"current_tokens": _OVER}] and sess.failed_turns == 0
+
+
+def test_overflow_budget_is_the_turns_and_exhaustion_fails_it_once_and_skips_the_rest():
+    eng = _ShrinkingEngine(keep=0.97)  # only 3 % smaller
+    sess = _realistic(eng, window=4000)
+    sess.begin_turn()
+    msgs = sess.request(_big(8000))
+    # a 3 % shrink is "no progress" in Hermes' scoring (< 5 % fewer tokens, same message count): the turn ends at once
+    assert sess.failed_turns == 1 and sess.failure_reasons == ["compression_exhausted"] and sess.overflow_errors == 1
+    assert sess.request_chars == [] and sess.cost_x100 == 0  # nothing billed
+    sess.request(msgs)  # later requests of the failed turn are skipped, not attempted
+    assert sess.overflow_errors == 1 and sess.failed_turns == 1 and eng.kwargs.__len__() == 1
+    sess.begin_turn()  # the next user turn starts with a fresh budget and tries again
+    sess.request(msgs)
+    assert sess.overflow_errors == 2 and sess.failed_turns == 2
+
+
+def test_overflow_attempts_cap_at_max_compression_attempts():
+    eng = _ShrinkingEngine(keep=0.6)  # shrinks >5 % but never enough to fit
+    sess = _realistic(eng, window=100, max_compression_attempts=3)
+    sess.begin_turn()
+    sess.request(_big(8000))
+    assert len(eng.kwargs) == 3 and sess.overflow_errors == 4  # 4th rejection: count_attempt exceeds the cap
+    assert sess.failure_reasons == ["compression_exhausted"] and sess.request_chars == []
+
+
+def test_overflow_behind_a_structural_backoff_defers_the_turn_and_refunds_the_attempt():
+    clock = VirtualClock(20)
+    eng = _ShrinkingEngine(keep=0.1, clock=clock)
+    eng.until = clock.monotonic() + 300
+    sess = _realistic(eng, window=4000, clock=clock)
+    sess.begin_turn()
+    sess.request(_big(8000))
+    assert eng.kwargs == [] and sess.turn_attempts == 0  # compress never ran, the attempt is refunded
+    assert sess.failure_reasons == ["deferred:structural_backoff"] and sess.failed_turns == 1
+    clock.advance(301)  # the backoff lapses: the next turn compresses and goes through
+    sess.begin_turn()
+    sess.request(_big(8000))
+    assert sess.failed_turns == 1 and len(eng.kwargs) == 1 and len(sess.request_chars) == 1
+
+
+def test_normal_compression_spends_the_same_per_turn_budget():
+    eng = _SpyEngine()
+    sess = _realistic(eng, window=10_000_000, max_compression_attempts=2)
+    sess.begin_turn()
+    msgs = [{"role": "system", "content": "s"}, {"role": "user", "content": "u"}]
+    for _ in range(3):
+        eng.compress_next = True
+        sess.request(list(msgs))
+    assert eng.calls.count("compress") == 2 and sess.turn_attempts == 2  # the third request finds the budget spent
+
+
+def test_unrealistic_session_keeps_the_old_behaviour():
+    sess = _Session(_SpyEngine(), None, estimate=_chars4, context_length=100)
+    sess.begin_turn()
+    sess.request(_big(8000))
+    assert sess.overflow_errors == 0 and sess.failed_turns == 0 and len(sess.request_chars) == 1
+    assert sess.requests_over_window == 1 and sess.max_sent_tokens > 100  # sent anyway; reported, not rejected

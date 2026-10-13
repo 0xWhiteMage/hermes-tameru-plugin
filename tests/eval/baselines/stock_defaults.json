@@ -5,7 +5,9 @@
   "engine_name": "compressor",
   "seed": 0,
   "turns": 30,
-  "hermes_pin": "1298c8e74baa73e1a2b90124228d017261ac6bc4"
+  "hermes_pin": "1298c8e74baa73e1a2b90124228d017261ac6bc4",
+  "realistic": true,
+  "seconds_per_request": 20.0
  },
  "metrics": {
   "turns": 30,
@@ -31,6 +33,13 @@
   "prefix_invalidated_chars": 338686,
   "prefix_break_events": 2,
   "messages_final": 78,
+  "overflow_errors": 0,
+  "overflow_compactions": 0,
+  "failed_turns": 0,
+  "failed_turn_reasons": [],
+  "requests_over_window": 0,
+  "max_request_window_ratio": 0.759,
+  "max_attempted_window_ratio": 0.759,
   "gold": {
    "total": 17,
    "retained": 6,
@@ -322,10 +331,10 @@
   ]
  },
  "timing": {
-  "engine_seconds": 0.18,
+  "engine_seconds": 0.017,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 0.179,
+   "compress": 0.017,
    "prune": 0.0
   }
  }

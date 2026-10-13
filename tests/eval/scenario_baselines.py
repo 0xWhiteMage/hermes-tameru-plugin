@@ -17,12 +17,15 @@ NOTE = (
 )
 
 
-def baseline_path(name: str, scenario: str = "default") -> Path:
+def baseline_path(name: str, scenario: str = "default", window: int | None = None) -> Path:
+    """``window`` (tokens) selects a non-default window: ``baselines/w<N>k/<scenario>/<engine>.json``."""
+    if window is not None:
+        return BASELINES / f"w{window // 1000}k" / scenario / f"{name}.json"
     return BASELINES / f"{name}.json" if scenario == "default" else BASELINES / scenario / f"{name}.json"
 
 
-def write_baseline(name: str, result: dict, scenario: str = "default") -> None:
-    path = baseline_path(name, scenario)
+def write_baseline(name: str, result: dict, scenario: str = "default", window: int | None = None) -> None:
+    path = baseline_path(name, scenario, window)
     path.parent.mkdir(parents=True, exist_ok=True)
     doc = {
         "_note": NOTE,
@@ -34,7 +37,7 @@ def write_baseline(name: str, result: dict, scenario: str = "default") -> None:
     path.write_text(json.dumps(doc, indent=1, sort_keys=False, ensure_ascii=False) + "\n", encoding="utf-8")
 
 
-def load_baseline(name: str, scenario: str = "default") -> dict:
+def load_baseline(name: str, scenario: str = "default", window: int | None = None) -> dict:
     """``{"metrics", "series"}`` of the saved baseline (what an exact comparison needs)."""
-    saved = json.loads(baseline_path(name, scenario).read_text(encoding="utf-8"))
+    saved = json.loads(baseline_path(name, scenario, window).read_text(encoding="utf-8"))
     return {"metrics": saved["metrics"], "series": saved["series"]}

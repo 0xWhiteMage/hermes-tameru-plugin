@@ -20,6 +20,19 @@ Hermes runs a check per iteration of its tool loop: before the first request of 
 (``compress_after_tool_results``: the compress gate, else the proactive prune). A turn with R tool rounds
 makes R + 1 requests: the first is a preflight, the other R follow tool results.
 
+Two things make the replay faithful to a real host (``realistic=True``, the default of ``run_session``):
+
+* a simulated clock. Hermes' compressor keeps wall-clock guards (structural no-op backoff 300 s, anti-thrash
+  recovery 300 s, summary-failure cooldown ladder 60/300/900 s) that a replay finishing in seconds would never see
+  lapse. ``time.monotonic`` / ``time.time`` as the compression modules read them run on a virtual clock that
+  advances ``seconds_per_request`` per model request (see ``VirtualClock``);
+* a context-overflow path. A real provider rejects a request larger than the window; Hermes
+  (``agent/turn_overflow.py``) then compresses with ``bypass_cooldown=True, trigger="overflow"`` and retries, up to
+  ``max_compression_attempts`` per turn, else the turn fails. A rejected request is never billed or counted as sent
+  (see ``_Session._recover_overflow``).
+
+``realistic=False`` is the old harness (real clock, oversized requests simply sent), kept only for comparison.
+
 No network: the summary LLM that ``ContextCompressor`` calls (``agent.context_compressor.call_llm`` via
 ``_call_summary_llm``) is replaced by a deterministic, lossy fake (first 200 chars of every turn; the
 previous summary's entries are cut to 120 chars on each iterative update). Hermes' own deterministic
@@ -33,12 +46,13 @@ Hermes is imported lazily so this module can be imported (and skipped) without i
 """
 from __future__ import annotations
 
+import inspect
 import json
 import re
 import sys
 import time
 from collections.abc import Callable, Iterable
-from contextlib import contextmanager
+from contextlib import contextmanager, nullcontext
 from pathlib import Path
 from typing import Any
 
@@ -58,6 +72,13 @@ CACHE_WRITE = 1.25  # new (uncached) chars cost 1.25x
 SUMMARY_FIRST_CHARS = 200  # the fake summarizer keeps this much of every turn
 SUMMARY_CARRY_CHARS = 120  # ... and this much of each entry of the previous summary
 SUMMARY_MAX_CHARS = 9_000  # ... and never more than this per summary
+SECONDS_PER_REQUEST = 20.0  # virtual seconds one model request (plus its tool execution) takes; see VirtualClock
+MAX_COMPRESSION_ATTEMPTS = 3  # Hermes' ``compression.max_attempts`` default (agent_init), shared by every gate of a turn
+OVERFLOW_RETRY_PAUSE_SECONDS = 2.0  # ``time.sleep(2)`` in agent/turn_overflow.py between an overflow compression and its retry
+_CLOCK_MONOTONIC_START = 100_000.0  # fixed bases keep the virtual clock (and so every baseline) deterministic
+_CLOCK_WALL_START = 1_900_000_000.0
+#: module-name prefixes of Hermes' compression code whose ``time`` the virtual clock replaces
+_CLOCKED_MODULE_PREFIXES = ("agent.context_compressor", "agent.conversation_compression", "agent.compression")
 WIRE_KEYS = ("role", "content", "name", "tool_calls", "tool_call_id")  # what reaches the provider
 
 
@@ -289,6 +310,85 @@ def patched_summary_llm(summarizer: FakeSummarizer):
 
 
 # =================================================================================================
+# Simulated clock
+# =================================================================================================
+class VirtualClock:
+    """A deterministic stand-in for ``time.monotonic`` / ``time.time`` that only moves when ``advance`` is called.
+
+    The harness advances it by ``seconds_per_request`` after every scripted request slot (``_Session.request``), and by
+    ``OVERFLOW_RETRY_PAUSE_SECONDS`` after an overflow compression (Hermes sleeps 2 s there). The default of 20 s is
+    the wall time of one agentic round trip: a model call is typically 5-30 s and the tool run after it a few more;
+    the human's think time between user turns is deliberately NOT added (it would only make Hermes' backoffs lapse
+    sooner, so leaving it out keeps the replay on the conservative side for the engines). ``tests/eval/README.md``
+    reports how the matrix moves at 5, 20 and 60 s.
+    """
+
+    def __init__(self, seconds_per_request: float = SECONDS_PER_REQUEST) -> None:
+        self.seconds_per_request = float(seconds_per_request)
+        self.elapsed = 0.0
+
+    def advance(self, seconds: float) -> None:
+        self.elapsed += float(seconds)
+
+    def monotonic(self) -> float:
+        return _CLOCK_MONOTONIC_START + self.elapsed
+
+    def time(self) -> float:
+        return _CLOCK_WALL_START + self.elapsed
+
+
+class _ClockedTime:
+    """The ``time`` module with ``monotonic`` and ``time`` replaced; everything else (sleep, perf_counter...) is real."""
+
+    def __init__(self, clock: VirtualClock) -> None:
+        self._clock = clock
+
+    def monotonic(self) -> float:
+        return self._clock.monotonic()
+
+    def time(self) -> float:
+        return self._clock.time()
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(time, name)
+
+
+def _clocked_modules() -> list[Any]:
+    """Hermes' compression modules that did ``import time`` (found by name prefix, so a new helper module is covered)."""
+    import importlib
+
+    for name in ("agent.context_compressor", "agent.context_compressor_prellm", "agent.context_compressor_summary",
+                 "agent.conversation_compression", "agent.conversation_compression_telemetry"):
+        try:
+            importlib.import_module(name)
+        except ImportError:
+            pass
+    return [
+        mod for name, mod in sorted(sys.modules.items())
+        if name.startswith(_CLOCKED_MODULE_PREFIXES) and getattr(mod, "time", None) is time
+    ]
+
+
+@contextmanager
+def simulated_clock(clock: VirtualClock):
+    """Run the block with the compression modules reading ``clock`` instead of the wall clock.
+
+    Narrow on purpose: only the ``time`` name inside Hermes' compression modules is replaced (every other module,
+    the tool-result persistence, the engines' own ``perf_counter`` timing and the vendored Tameru TTL stamps keep
+    the real clock), and it is restored on exit even when the run raises.
+    """
+    mods = _clocked_modules()
+    fake = _ClockedTime(clock)
+    for mod in mods:
+        mod.time = fake
+    try:
+        yield clock
+    finally:
+        for mod in mods:
+            mod.time = time
+
+
+# =================================================================================================
 # The session loop
 # =================================================================================================
 def prepare_engine(engine: Any, context_length: int = CONTEXT_LENGTH) -> None:
@@ -298,12 +398,34 @@ def prepare_engine(engine: Any, context_length: int = CONTEXT_LENGTH) -> None:
 
 
 class _Session:
-    def __init__(self, engine: Any, scenario: Scenario | None, estimate: Callable[[list[dict]], int] | None = None) -> None:
+    """One replayed conversation. ``realistic`` adds the simulated clock's ticks, the per-turn compression budget and
+    the context-overflow path (all off by default here so the unit tests can drive a bare session; ``run_session``
+    turns them on)."""
+
+    def __init__(
+        self, engine: Any, scenario: Scenario | None, estimate: Callable[[list[dict]], int] | None = None, *,
+        realistic: bool = False, clock: VirtualClock | None = None, context_length: int = CONTEXT_LENGTH,
+        max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
+    ) -> None:
         if estimate is None:  # Hermes' own rough estimator, as the host uses before a request
             from agent.model_metadata import estimate_messages_tokens_rough as estimate
         self._estimate = estimate
         self.engine = engine
         self.scenario = scenario
+        self.realistic = realistic
+        self.clock = clock
+        self.window = int(context_length)
+        self.max_attempts = int(max_compression_attempts)
+        # overflow path / budget state
+        self.turn_attempts = 0  # Hermes' per-turn ``compression_attempts`` (every gate shares it)
+        self.turn_failed = False
+        self.overflow_errors = 0  # requests the provider would have rejected (estimate > window); never billed
+        self.overflow_compactions = 0
+        self.failed_turns = 0
+        self.failure_reasons: list[str] = []
+        self.requests_over_window = 0  # requests SENT with an estimate above the window (only the old harness has any)
+        self.max_sent_tokens = 0
+        self.max_attempted_tokens = 0
         # metrics
         self.request_chars: list[int] = []
         self.cached_chars: list[int] = []
@@ -341,7 +463,10 @@ class _Session:
         dt = time.perf_counter() - t0
         self.engine_seconds_by_op["should_compress"] += dt
         self.engine_seconds += dt
-        if should:
+        budget_left = not self.realistic or self.turn_attempts < self.max_attempts
+        if should and budget_left:
+            if self.realistic:
+                self.turn_attempts += 1
             before = sum(len(_wire(m)) for m in messages)
             t0 = time.perf_counter()
             out = eng.compress(messages, current_tokens=est)
@@ -420,13 +545,152 @@ class _Session:
                     self.rewrites.append(f"request {len(self.request_chars) + 1}: {cid}")
         self._prev_rows = rows
 
+    # -- context overflow (the provider rejects a request larger than the window) -----------------
+    def begin_turn(self) -> None:
+        """A new user turn: Hermes' per-turn compression budget and failure flag start over."""
+        self.turn_attempts = 0
+        self.turn_failed = False
+
+    def _overflow_gate_reason(self) -> str | None:
+        """Why Hermes' ``compress_context`` would no-op an overflow attempt, or None.
+
+        ``_automatic_compression_gate_blocks(agent, bypass_cooldown=True)``: the summary-failure cooldown is ignored
+        (the provider proved the request does not fit) but the structural no-op backoff and the ineffective-
+        compaction breaker still apply. Engines without Hermes' gate (``_automatic_compression_blocked``) have none.
+        """
+        eng = self.engine
+        blocked = getattr(type(eng), "_automatic_compression_blocked", None)
+        if not callable(blocked):
+            return None
+        try:
+            ignore = "ignore_cooldown" in inspect.signature(blocked).parameters
+        except (TypeError, ValueError):
+            ignore = False
+        if not (blocked(eng, ignore_cooldown=True) if ignore else blocked(eng)):
+            return None
+        reason_fn = getattr(eng, "_compression_block_reason", None)
+        reason = None
+        if callable(reason_fn):
+            try:
+                reason = reason_fn(ignore_cooldown=True)
+            except TypeError:
+                reason = reason_fn()
+        return reason if isinstance(reason, str) and reason else "unknown"
+
+    def _compress_kwargs(self, current_tokens: int) -> dict[str, Any]:
+        """What ``agent.conversation_compression._supported_compression_kwargs`` passes an overflow attempt: the
+        engine's own ``compress`` signature decides whether ``bypass_cooldown`` reaches it."""
+        candidates = {"current_tokens": current_tokens, "bypass_cooldown": True}
+        try:
+            params = inspect.signature(self.engine.compress).parameters
+        except (TypeError, ValueError):
+            return {"current_tokens": current_tokens}
+        if any(p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()):
+            return candidates
+        return {k: v for k, v in candidates.items() if k in params}
+
+    def _fail_turn(self, reason: str) -> None:
+        self.turn_failed = True
+        self.failed_turns += 1
+        self.failure_reasons.append(reason)
+        self.events.append({"request": len(self.request_chars), "kind": "turn_failed", "reason": reason})
+
+    def _recover_overflow(self, messages: list[dict], sent: list[dict]) -> tuple[list[dict], list[dict]]:
+        """Mirror ``agent/turn_overflow.py::_recover_context_length``, one provider rejection at a time.
+
+        "Does the request overflow" uses the estimate the pre-request gate already uses: rough tokens of what is sent
+        (after ``select_context``) plus ``TOOLS_OVERHEAD_TOKENS``, against the window. Each rejection counts an overflow
+        error, then ``count_attempt`` (the budget is the turn's: pre-request and post-tool compressions spent some of it
+        already; more than ``max_compression_attempts`` ends the turn, ``compression_exhausted``), then ONE
+        ``engine.compress(bypass_cooldown=True)`` (the kwargs the engine accepts; ``trigger="overflow"`` is host
+        telemetry and never reaches ``ContextCompressor.compress``), scored by ``compress_scored_by_tokens`` (fewer
+        messages or 5 % fewer rough tokens = shrank). A compression that did not shrink the request ends the turn
+        (``cannot be shrunk further``). A transient block (structural no-op backoff, summary cooldown) is Hermes'
+        soft defer: the attempt is refunded and the turn ends WITHOUT ``compression_exhausted``. A failed turn is
+        recorded once (``failed_turns``) and the rest of its requests are skipped by ``request``.
+        """
+        eng = self.engine
+        while True:
+            est = self._estimate(sent) + TOOLS_OVERHEAD_TOKENS
+            self.max_attempted_tokens = max(self.max_attempted_tokens, est)
+            if est <= self.window:
+                return messages, sent
+            self.overflow_errors += 1
+            self.turn_attempts += 1
+            if self.turn_attempts > self.max_attempts:
+                self._fail_turn("compression_exhausted")
+                return messages, sent
+            reason = self._overflow_gate_reason()
+            original_len = len(messages)
+            original_tokens = self._estimate(messages)
+            if reason is not None:
+                self.events.append({"request": len(self.request_chars), "kind": "overflow_blocked", "reason": reason})
+                if reason.startswith(("cooldown", "structural_backoff")):
+                    self.turn_attempts -= 1  # refunded: a defer is not evidence the session is incompressible
+                    self._fail_turn("deferred:" + reason.split(":")[0])
+                else:
+                    self._fail_turn("compression_exhausted")
+                return messages, sent
+            before = sum(len(_wire(m)) for m in messages)
+            t0 = time.perf_counter()
+            out = eng.compress(messages, **self._compress_kwargs(est))
+            dt = time.perf_counter() - t0
+            self.engine_seconds_by_op["compress"] += dt
+            self.engine_seconds += dt
+            self.compress_calls += 1
+            if out is not messages:
+                self.compactions += 1
+                self.overflow_compactions += 1
+                self.compactions_shrinking += len(out) < len(messages)
+                self.events.append(
+                    {"request": len(self.request_chars), "kind": "overflow_compress", "messages_before": len(messages),
+                     "messages_after": len(out), "chars_before": before, "chars_after": sum(len(_wire(m)) for m in out)}
+                )
+            else:
+                self.events.append({"request": len(self.request_chars), "kind": "overflow_compress_noop"})
+            messages = out
+            new_tokens = self._estimate(messages)
+            shrank = len(messages) < original_len or (new_tokens > 0 and new_tokens < original_tokens * 0.95)
+            if not shrank:
+                self._fail_turn("compression_exhausted")
+                return messages, sent
+            if self.clock is not None:
+                self.clock.advance(OVERFLOW_RETRY_PAUSE_SECONDS)
+            sent = self._select(messages)
+
     # -- one model request ----------------------------------------------------------------------
     def request(self, messages: list[dict]) -> list[dict]:
-        """Preflight (may compact the persisted transcript), then send. Returns the persisted transcript."""
+        """One scripted request slot: preflight (may compact the persisted transcript), then send. Returns the
+        persisted transcript.
+
+        Realistic mode: a request over the window is rejected (not billed) and recovered as Hermes does; when the
+        turn fails, this and the turn's remaining requests are not sent at all. The virtual clock advances by
+        ``seconds_per_request`` for EVERY slot, sent, rejected or skipped, so it is a function of the script's
+        position and never of the engine: a failed turn still takes the time of the requests it would have made
+        (and the user's retry), otherwise a session stuck behind a 300 s backoff would never see it lapse.
+        """
+        try:
+            return self._request(messages)
+        finally:
+            if self.clock is not None:
+                self.clock.advance(self.clock.seconds_per_request)
+
+    def _request(self, messages: list[dict]) -> list[dict]:
+        if self.turn_failed:
+            return messages  # the failed turn already ended; Hermes would not call the model again
         before = messages
         messages = self.preflight(messages, after_tools=bool(messages) and messages[-1].get("role") == "tool")
-        self._check_stability(messages, committed=messages is not before)
         sent = self._select(messages)
+        if self.realistic:
+            messages, sent = self._recover_overflow(messages, sent)
+        self._check_stability(messages, committed=messages is not before)
+        if self.turn_failed:
+            return messages
+        sent_tokens = self._estimate(sent) + TOOLS_OVERHEAD_TOKENS
+        self.max_sent_tokens = max(self.max_sent_tokens, sent_tokens)
+        self.max_attempted_tokens = max(self.max_attempted_tokens, sent_tokens)
+        if sent_tokens > self.window:
+            self.requests_over_window += 1
         wire = [_wire(m) for m in sent]
         total = sum(len(w) + 1 for w in wire)
         if self._prev_wire is None:
@@ -454,9 +718,14 @@ class _Session:
         self._prev_wire, self._prev_total = wire, total
         self.last_request = sent
         # provider usage for this request (rough tokens + overhead), fed back like Hermes does
-        prompt_tokens = self._estimate(sent) + TOOLS_OVERHEAD_TOKENS
+        prompt_tokens = sent_tokens
         self.last_usage = {"prompt_tokens": prompt_tokens, "completion_tokens": 120, "total_tokens": prompt_tokens + 120}
+        # Hermes (turn_usage): a provider-confirmed recovery re-arms the turn's compression budget
+        compaction_pending = bool(getattr(self.engine, "_verify_compaction_cleared_threshold", False))
         self.engine.update_from_response(dict(self.last_usage))
+        threshold = int(getattr(self.engine, "threshold_tokens", 0) or 0)
+        if self.realistic and self.turn_attempts and compaction_pending and 0 < prompt_tokens < threshold:
+            self.turn_attempts = 0
         return messages
 
 
@@ -477,12 +746,23 @@ def _tool_row(cid: str, step) -> dict:
 
 def run_session(
     engine_factory: Callable[[], Any], *, turns: int | None = None, seed: int = 0, keep_final_request: bool = False,
-    context_length: int = CONTEXT_LENGTH, scenario: str = DEFAULT_SCENARIO,
+    context_length: int = CONTEXT_LENGTH, scenario: str = DEFAULT_SCENARIO, realistic: bool = True,
+    seconds_per_request: float = SECONDS_PER_REQUEST, max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
 ) -> dict:
     """Replay the scripted session against ``engine_factory()`` and return the metrics.
 
     ``scenario`` names the script (``scenario_registry``; ``default`` is the original 30-turn session) and
     ``turns`` cuts it short (``None``: its natural length).
+
+    ``realistic`` (default) runs the session on a simulated clock (``seconds_per_request`` virtual seconds per model
+    request, so Hermes' wall-clock backoffs lapse as they would live) with the context-overflow path: a request whose
+    estimate exceeds ``context_length`` is rejected, never billed, and recovered like ``agent/turn_overflow.py`` does
+    (up to ``max_compression_attempts`` compressions per turn). A turn that cannot be recovered FAILS: the model is
+    not called again for the rest of that turn, but the script's own rows (the assistant's tool calls, the tool
+    results, its final reply) are still appended, so every engine ends with the same conversation content and the
+    next user turn tries again against the grown transcript. If the closing question fails, gold and error retention
+    are measured on the last request that was sent. ``realistic=False`` is the old harness (real clock, any request
+    size is sent and billed), kept only to compare with it.
 
     Returns ``{"meta", "metrics", "series", "timing"[, "final_request"]}``. ``metrics`` and ``series`` are
     fully deterministic for a given (engine, turns, seed); ``timing`` is wall-clock and is not.
@@ -490,9 +770,21 @@ def run_session(
     spec = get_spec(scenario)
     turns = spec.turns if turns is None else turns
     script = spec.build(seed, turns)
-    engine = engine_factory()
-    prepare_engine(engine, context_length)
-    sess = _Session(engine, script)
+    clock = VirtualClock(seconds_per_request) if realistic else None
+    with simulated_clock(clock) if clock is not None else nullcontext():  # the engine is built on the clock it runs on
+        engine = engine_factory()
+        prepare_engine(engine, context_length)
+        sess = _Session(
+            engine, script, realistic=realistic, clock=clock, context_length=context_length,
+            max_compression_attempts=max_compression_attempts,
+        )
+        summarizer, final = _play(sess, script, seed)
+    return _result(sess, summarizer, final, script, engine, turns, seed, context_length, scenario, realistic,
+                   seconds_per_request, keep_final_request)
+
+
+def _play(sess: _Session, script: Scenario, seed: int) -> tuple[FakeSummarizer, list[dict]]:
+    """Drive the script through ``sess``; returns the fake summarizer and the final request."""
     summarizer = FakeSummarizer()
     call_counter = 0
 
@@ -505,6 +797,7 @@ def run_session(
     with patched_summary_llm(summarizer):
         for turn in script.turns:
             messages.append({"role": "user", "content": turn.user})
+            sess.begin_turn()
             for rnd in turn.rounds:
                 messages = sess.request(messages)
                 ids = [new_call_id() for _ in rnd.steps]
@@ -513,10 +806,18 @@ def run_session(
                     messages.append(_tool_row(cid, st))
             messages = sess.request(messages)
             messages.append({"role": "assistant", "content": turn.final})
-            sess.turn_complete(messages)
+            if not sess.turn_failed:
+                sess.turn_complete(messages)
         messages.append({"role": "user", "content": script.final_question})
+        sess.begin_turn()
         messages = sess.request(messages)
-    final = sess.last_request
+    return summarizer, sess.last_request
+
+
+def _result(
+    sess: _Session, summarizer: FakeSummarizer, final: list[dict], script: Scenario, engine: Any, turns: int, seed: int,
+    context_length: int, scenario: str, realistic: bool, seconds_per_request: float, keep_final_request: bool,
+) -> dict:
     final_text = visible_text(final)
 
     # ---- gold retention -----------------------------------------------------------------------
@@ -564,6 +865,13 @@ def run_session(
         "prefix_invalidated_chars": sum(sess.invalidated_chars),
         "prefix_break_events": sess.prefix_breaks,
         "messages_final": len(final),
+        "overflow_errors": sess.overflow_errors,
+        "overflow_compactions": sess.overflow_compactions,
+        "failed_turns": sess.failed_turns,
+        "failed_turn_reasons": list(sess.failure_reasons),
+        "requests_over_window": sess.requests_over_window,
+        "max_request_window_ratio": round(sess.max_sent_tokens / context_length, 4),
+        "max_attempted_window_ratio": round(sess.max_attempted_tokens / context_length, 4),
         "gold": {
             "total": n_total,
             "retained": n_kept,
@@ -595,6 +903,9 @@ def run_session(
     }
     meta = {"engine": type(engine).__name__, "engine_name": getattr(engine, "name", None), "seed": seed,
             "turns": turns, "hermes_pin": "1298c8e74baa73e1a2b90124228d017261ac6bc4"}
+    meta["realistic"] = realistic
+    if realistic:
+        meta["seconds_per_request"] = seconds_per_request
     if scenario != DEFAULT_SCENARIO:  # the default session's meta stays exactly what it was
         meta["scenario"] = scenario
     result = {
