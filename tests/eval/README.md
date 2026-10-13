@@ -164,7 +164,9 @@ only for comparison) fixes two unfaithful spots of the first harness:
   that does not shrink, or a transient block (Hermes' soft defer, attempt refunded) FAIL the turn: `failed_turns` counts it
   once, the model is not called again for the rest of that turn, but the scripted assistant/tool rows are still appended
   (every engine ends with the same conversation content) and the next user turn tries again with a fresh budget. Failed
-  requests are never billed, so compare `cost` together with `failed_turns`. If the closing question fails, gold and error
+  requests are never billed, so compare `cost` together with `failed_turns`; where the failed turns differ the fair
+  figure is the cost per answered turn, `cost_cache_priced / (turns - failed_turns)` (`test_small_window_replay.cost_per_answered_turn`;
+  per request billed is `cost / requests`). If the closing question fails, gold and error
   retention are measured on the last request that was sent.
 
 New metrics: `overflow_errors`, `overflow_compactions`, `failed_turns` (+ `failed_turn_reasons`), `requests_over_window`

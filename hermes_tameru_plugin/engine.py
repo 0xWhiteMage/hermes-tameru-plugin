@@ -39,7 +39,7 @@ from typing import Any, NamedTuple
 
 from .config import (
     TameruSettings, compression_kwargs, load_settings, prune_default_applies, prune_regrowth_tokens,
-    prune_trigger_follows_window, read_hermes_config, scaled_error_budget, scaled_prune_tokens,
+    prune_trigger_follows_window, reprune_gate_applies, read_hermes_config, scaled_error_budget, scaled_prune_tokens,
     scaled_retained_budget,
 )
 from .hermes_compat import (
@@ -428,7 +428,10 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         """
         ratio = self._settings.reprune_target_ratio
         rearm = getattr(self, "_proactive_prune_rearm_tokens", 0)
-        if not self._regrowth_active() or ratio <= 0 or not isinstance(rearm, int) or rearm <= 0:
+        if (
+            not self._regrowth_active() or ratio <= 0 or not isinstance(rearm, int) or rearm <= 0
+            or not reprune_gate_applies(self._settings, getattr(self, "threshold_tokens", 0))
+        ):
             return min_reclaim
         try:
             target = round(ratio * int(getattr(self, "threshold_tokens", 0) or 0))

@@ -6,7 +6,9 @@ prune is meant to replace: a 200K session regrew raw rows for the rest of its li
 against stock Hermes, which compacted and reset). ``prune_regrowth_ratio`` shortens the runway to a share of the
 threshold and ``reprune_target_ratio`` makes a later commit worth its cache break: it must leave the prompt at or
 below that share of the threshold, as a compaction would. Both apply only to the plugin's own, window-scaled
-trigger; a user's value, an explicit argument and small windows keep Hermes' behaviour.
+trigger (above 85K tokens of window, or under ~57K where ``small_window_prune_ratio`` replaces a fixed trigger that
+would never fire); a user's value, an explicit argument and a 64K window keep Hermes' behaviour. The re-prune target
+gate applies to the large windows only: on a small one the fixed part of the prompt alone is ~0.3 of the threshold.
 """
 from __future__ import annotations
 
@@ -20,6 +22,7 @@ from hermes_tameru_plugin.config import (
     TameruSettings,
     prune_regrowth_tokens,
     prune_trigger_follows_window,
+    reprune_gate_applies,
 )
 from hermes_tameru_plugin.engine import TameruContextEngine
 from hermes_tameru_plugin.hermes_compat import message_budget_tokens
@@ -72,9 +75,20 @@ def test_prune_regrowth_tokens(threshold, expected):
 @pytest.mark.parametrize(("threshold", "expected"), [
     (0, False), (None, False), ("junk", False), (54_400, False),   # 64K window: the 48K floor sets the trigger
     (64_000, False), (64_001, True), (96_000, True), (192_000, True),
+    (27_200, True), (40_800, True), (48_000, True),                # under ~57K: the fixed trigger is not below the threshold
+    (48_001, False), (51_000, False),
 ])
 def test_prune_trigger_follows_window(threshold, expected):
     assert prune_trigger_follows_window(TameruSettings(), threshold) is expected
+
+
+@pytest.mark.parametrize(("threshold", "expected"), [
+    (0, False), (None, False), ("junk", False), (27_200, False), (40_800, False), (54_400, False), (64_000, False),
+    (64_001, True), (96_000, True), (192_000, True),
+])
+def test_the_reprune_target_gate_is_for_large_windows(threshold, expected):
+    assert reprune_gate_applies(TameruSettings(), threshold) is expected
+    assert not reprune_gate_applies(TameruSettings(default_proactive_prune_ratio=0), 150_000)
 
 
 def test_the_trigger_never_follows_the_window_when_scaling_is_off():
@@ -168,7 +182,9 @@ def test_a_compaction_rearms_the_plugin_trigger(user_config):
     assert engine._regrowth_trigger(engine.proactive_prune_tokens) == engine.proactive_prune_tokens
 
 
-@pytest.mark.parametrize("how", ["user", "argument", "small_window", "disabled"])
+@pytest.mark.parametrize("how", [
+    "user", "argument", pytest.param("small_window", marks=pytest.mark.real_hermes), "disabled",   # 64K: Hermes' threshold
+])
 def test_only_the_plugins_own_window_scaled_trigger_changes(user_config, how):
     kwargs: dict = {}
     window = 200_000
@@ -196,3 +212,24 @@ def test_a_clone_keeps_the_rule(user_config):
     engine.prune_tool_results_only(_logs(4).finish(), 500_000)
     clone = copy.deepcopy(engine)
     assert clone._regrowth_trigger(clone.proactive_prune_tokens) == engine._regrowth_trigger(engine.proactive_prune_tokens)
+
+
+# ---- a small window ------------------------------------------------------------------------------
+@pytest.mark.real_hermes   # the compaction threshold of a 32K / 64K window is Hermes'
+def test_a_32k_window_follows_the_window_with_regrowth_but_without_the_target_gate(user_config):
+    engine = _engine(window=32_000, proactive_prune_min_reclaim_tokens=0)
+    assert engine.threshold_tokens == 27_200 and engine.proactive_prune_tokens == 16_320
+    assert engine._regrowth_active()
+    messages = _logs(4).finish()
+    gap = prune_regrowth_tokens(engine._settings, engine.threshold_tokens)
+    pruned, count = engine.prune_tool_results_only(messages, 500_000)
+    assert pruned is not messages and count >= 3
+    assert engine._proactive_prune_rearm_tokens == message_budget_tokens(pruned) + gap
+    # the target gate would ask a re-prune to leave <= 0.3 of the threshold; here it asks nothing extra
+    assert engine._reprune_min_reclaim(_grow(pruned, gap), 123) == 123
+
+
+@pytest.mark.real_hermes
+def test_a_64k_window_keeps_hermes_runway(user_config):
+    engine = _engine(window=64_000)
+    assert engine.proactive_prune_tokens == 48_000 and not engine._regrowth_active()
