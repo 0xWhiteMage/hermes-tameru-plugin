@@ -60,7 +60,7 @@ class TameruSettings:
     telemetry_log: str = ""                    # JSONL path; "" = off
     default_proactive_prune_tokens: int = 48_000          # only if compression.proactive_prune_tokens is not set
     default_proactive_prune_ratio: float = 0.70           # ...then at least this share of Hermes' compaction threshold
-    default_proactive_prune_min_result_chars: int = 2000  # only if compression.proactive_prune_min_result_chars is not set
+    default_proactive_prune_min_result_chars: int = 8000  # Hermes' own default; only if compression.proactive_prune_min_result_chars is not set
 
 
 # ---- value parsers: raw -> value, ValueError when the raw value is unusable -----------------------

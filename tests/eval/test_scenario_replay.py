@@ -40,20 +40,16 @@ MIN_COMPACTIONS = {"oncall": 2, "refactor": 1, "smallrows": 1, "i18n": 1}  # of 
 
 #: ``(scenario, check, engine)`` -> why the plugin loses it (measured numbers; see docs/REPORT-1.4.1.md section 9).
 KNOWN_LOSSES: dict[tuple[str, str, str], str] = {
-    ("refactor", "cost", "tameru_1_4_product"): (
-        "LOSS +3.7%: 1,605,281 vs Hermes as shipped 1,547,352 char-eq (HEAD b7bb68c, seed 0 only: seeds 1-3 win by 0.9-3.8%). The proactive prune at request 29 "
-        "rewrites 11 rows early in the prefix (66,956 chars written, 186,781 -> 70,494 chars) but does not avoid the compaction: "
-        "the transcript regrows to the threshold and compacts at request 64 anyway (57,179 written), then rewrites again at "
-        "request 78 (27,843). Three rewrites (152K chars written) against Hermes' two compactions (122K); total writes 524,478 vs "
-        "482,701 chars, input 10.02M vs 9.92M chars. The plugin still keeps 14/17 gold (13/17) and 9/9 error templates (0/9)."
-    ),
     ("smallrows", "cost", "tameru_1_4_product"): (
-        "LOSS +21.7%: 2,065,136 vs Hermes as shipped 1,696,390 char-eq (HEAD b7bb68c, seed 0; +21.7..23.2% over seeds 0-3). "
-        "Rows are 0.8-3K, so the plugin's 2,000-char prune floor reaches only the 2-3K rows: the prune at request 37 demotes 8 "
-        "rows and saves 17K chars but rewrites the prefix from the first of them (150,278 chars written); the one at request 77 "
-        "saves 20K chars and writes 113,074. Each delays the compaction (44 instead of 41; none at all before the session ends, "
-        "final request 199,032 chars against Hermes' 101,617, mean context over the last 30 requests 180K vs 123K). Writes "
-        "685,925 vs 503,384 chars, input 12.76M vs 11.17M chars. It keeps 14/18 gold (9/18) and 26/38 error templates (10/38)."
+        "LOSS +2.0%: 1,730,835 vs Hermes as shipped 1,696,390 char-eq (seed 0). Since the plugin's prune floor is Hermes' own "
+        "8,000 chars (it was 2,000: +21.7% here, small prunes paying full-suffix cache rewrites), no row of this scenario is "
+        "pruned and the run equals the equal-gates one: the loss is the summary's Artifact Trail and Errors ledger (80,008 vs "
+        "75,264 chars after the first compaction), which buys 21/38 error templates against 10/38."
+    ),
+    ("smallrows", "gold:decision", "tameru_1_4_product"): (
+        "LOSS 3/4 vs 4/4 decision facts (seed 0): D3, as for tameru_1_4 below (the run is identical since the 8,000-char prune "
+        "floor): the plugin's first compaction keeps 68 messages against Hermes' 94, so the user turn carrying D3 falls into the "
+        "first summary and the fake summarizer drops it."
     ),
     ("refactor", "cost", "tameru_1_4"): (
         "LOSS +2.0%: 1,528,492 vs stock (prune on at 48K) 1,499,065 char-eq (HEAD b7bb68c, seed 0; +1.9..+6.7% over seeds 0-3). Same single prune (request 29) "

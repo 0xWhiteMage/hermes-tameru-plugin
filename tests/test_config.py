@@ -60,7 +60,7 @@ def test_defaults_match_the_contract():
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.70,
-        "default_proactive_prune_min_result_chars": 2000,
+        "default_proactive_prune_min_result_chars": 8000,
     }
 
 
@@ -443,7 +443,7 @@ def test_nothing_raises_with_an_empty_hermes_home(hermes_home, monkeypatch, init
     assert isinstance(merged, dict) and isinstance(raw, dict)
     kwargs, warnings = compression_kwargs(merged, raw, settings, init_params)
     assert warnings == []
-    assert kwargs["proactive_prune_tokens"] == 48_000 and kwargs["proactive_prune_min_result_chars"] == 2000
+    assert kwargs["proactive_prune_tokens"] == 48_000 and kwargs["proactive_prune_min_result_chars"] == 8000
 
 
 @pytest.mark.real_hermes
@@ -600,13 +600,13 @@ def test_kwargs_missing_from_init_params_are_dropped_with_a_warning():
     section = {"threshold": 0.7, "tail_mode": "legacy", "proactive_prune_tokens": 5}
     params = {"threshold_percent", "proactive_prune_tokens", "proactive_prune_min_result_chars"}
     kwargs, warnings = kwargs_for(section, params=params)
-    assert kwargs == {"threshold_percent": 0.7, "proactive_prune_tokens": 5, "proactive_prune_min_result_chars": 2000}
+    assert kwargs == {"threshold_percent": 0.7, "proactive_prune_tokens": 5, "proactive_prune_min_result_chars": 8000}
     assert len(warnings) == 1 and "compression.tail_mode" in warnings[0] and "'tail_mode'" in warnings[0]
 
 
 def test_keys_absent_from_the_config_are_left_to_the_compressor():
     kwargs, warnings = compression_kwargs({"compression": {"threshold": 0.7}}, {}, TameruSettings(), set(EXPECTED_MAP.values()))
-    assert kwargs == {"threshold_percent": 0.7, "proactive_prune_tokens": 48_000, "proactive_prune_min_result_chars": 2000}
+    assert kwargs == {"threshold_percent": 0.7, "proactive_prune_tokens": 48_000, "proactive_prune_min_result_chars": 8000}
     assert warnings == []
 
 
@@ -618,7 +618,7 @@ def test_unset_proactive_keys_take_the_plugin_defaults_whatever_merged_holds():
     """Hermes' merged config always has the keys (with its own defaults); only raw says if the user set them."""
     kwargs, _ = compression_kwargs({"compression": dict(HERMES_DEFAULTS)}, {}, TameruSettings(), set(EXPECTED_MAP.values()))
     assert kwargs["proactive_prune_tokens"] == 48_000
-    assert kwargs["proactive_prune_min_result_chars"] == 2000
+    assert kwargs["proactive_prune_min_result_chars"] == 8000
     assert kwargs["threshold_percent"] == 0.5, "other keys follow merged"
 
 
@@ -634,7 +634,7 @@ def test_each_proactive_key_is_detected_on_its_own():
     kwargs, _ = compression_kwargs(merged, {"compression": {"proactive_prune_min_result_chars": 9000}}, TameruSettings(), params)
     assert (kwargs["proactive_prune_tokens"], kwargs["proactive_prune_min_result_chars"]) == (48_000, 9000)
     kwargs, _ = compression_kwargs(merged, {"compression": {"proactive_prune_tokens": 0}}, TameruSettings(), params)
-    assert (kwargs["proactive_prune_tokens"], kwargs["proactive_prune_min_result_chars"]) == (0, 2000)
+    assert (kwargs["proactive_prune_tokens"], kwargs["proactive_prune_min_result_chars"]) == (0, 8000)
 
 
 def test_an_explicit_zero_is_respected_as_the_users_opt_out():
@@ -660,7 +660,7 @@ def test_a_bad_explicit_proactive_value_is_dropped_not_defaulted():
     merged = {"compression": {"proactive_prune_tokens": "lots"}}
     params = {"proactive_prune_tokens", "proactive_prune_min_result_chars"}
     kwargs, warnings = compression_kwargs(merged, merged, TameruSettings(), params)
-    assert kwargs == {"proactive_prune_min_result_chars": 2000}
+    assert kwargs == {"proactive_prune_min_result_chars": 8000}
     assert len(warnings) == 1 and "compression.proactive_prune_tokens" in warnings[0]
 
 

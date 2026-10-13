@@ -166,7 +166,7 @@ plugins:
 | `telemetry_log` | `""` | Path of a JSONL file for render events; empty means off. |
 | `default_proactive_prune_tokens` | `48000` | Floor of the plugin's proactive-prune trigger, used only if you did not set `compression.proactive_prune_tokens`. |
 | `default_proactive_prune_ratio` | `0.70` | The plugin's trigger is `max(default_proactive_prune_tokens, ratio x Hermes' compaction threshold)`, re-derived when the model changes, so a large window is not pruned long before it fills. `0` keeps the fixed floor. |
-| `default_proactive_prune_min_result_chars` | `2000` | Value used for `compression.proactive_prune_min_result_chars` only if you did not set it. |
+| `default_proactive_prune_min_result_chars` | `8000` | Value used for `compression.proactive_prune_min_result_chars` only if you did not set it: Hermes' own default (was 2,000; across five replay scenarios that cost 3.5% more than Hermes as shipped, +21.7% on many 1-3K results, for no more facts or error templates than 8,000). |
 
 Environment variable names: `TAMERU_HERMES_ENABLED`, `TAMERU_HERMES_MIN_TOOL_CHARS`,
 `TAMERU_HERMES_MAX_EXTRACT_CHARS`, `TAMERU_HERMES_BRIEF_CHARS`, `TAMERU_HERMES_MAX_RISK`,
@@ -199,7 +199,7 @@ compressor's constructor itself, using the same table as Hermes' `_parse_compres
 
 Two of them have plugin defaults: unless your own config file sets them, `proactive_prune_tokens` is
 `max(48,000, 0.7 x Hermes' compaction threshold)` (48,000 on 32K and 64K windows, 105,000 on a 200K window whose
-threshold is 150,000) and `proactive_prune_min_result_chars` is 2,000 (the `default_*` settings above). Hermes
+threshold is 150,000) and `proactive_prune_min_result_chars` is 8,000, Hermes' own (the `default_*` settings above). Hermes
 itself ships the proactive prune off (`proactive_prune_tokens: 0`); setting either value explicitly wins. An
 argument the running Hermes does not accept is dropped with a warning. The plugin also applies Hermes' Codex
 threshold autoraise when the model is selected.
