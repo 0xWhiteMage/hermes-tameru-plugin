@@ -30,6 +30,21 @@ All notable changes to this project are documented here. The format follows
 - Catalogue-admission validation passes all 14 checks, including safe security scan, capability matching and no runtime core override.
 - Revise Hermes PR #94102 towards a catalogue entry pinned to the verified standalone plugin. The in-tree vendored engine exceeded Hermes code-health limits; the plugin source stays in its own repository.
 
+### Fixed (serving red-team, round 3)
+- **Web, browser and MCP results keep Hermes' untrusted-data wrapper.** The `errors` rung (and any body the ladder
+  keeps) of a `web_extract` / `web_search` / `browser_*` / `mcp_*` result sat outside the wrapper, where stock Hermes
+  keeps no page text at all; `tameru_expand` handed such originals back unwrapped; the artifact trail copied their error
+  lines into the summary. Now bodies are re-wrapped, expand answers are wrapped whole, and the ledger skips them.
+- **The artifact trail is redacted** by Hermes' own compaction redactor like every other section it appends (URL
+  credentials, API keys that the plugin's probable-credential filter does not know).
+- **`tameru_expand` finds a ref after a compaction that rotated the session** (the originals stay in the parent
+  session; the archive read now covers the compression lineage).
+- **Building the engine no longer looks the placeholder model `pending` up in the model catalogue** (a network call of
+  up to 15 s per agent start when the catalogue is unreachable, plus a warning); `register()` hands the compressor a
+  stand-in window until Hermes' `update_model` sizes it.
+- A `grep` that needs a child process answers with a clear error when `sys.executable` is empty; a NaN, infinite or
+  out-of-range `compression.threshold` no longer reaches `update_model`; `plugin.yaml` uses Hermes' `label` field.
+
 ## [1.4.1] - 2026-10-12
 
 Source/package update; GitHub tag and Release pending. This includes the live-session,

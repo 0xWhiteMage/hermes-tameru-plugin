@@ -506,7 +506,9 @@ def test_the_scan_is_read_once_per_lookup_callable():
     assert db.calls == [], "nothing is read before the first lookup"
     assert lookup(ref) == text and lookup(ref) == text and lookup("00000000") is None
     assert lookup("00000000") is None
-    assert db.calls == [("sess-1", True, {})], "one read, with the compaction-archived rows included"
+    assert db.calls == [("sess-1", True, {"include_ancestors": True})], (
+        "one read, with the compaction-archived rows and the compression lineage included"
+    )
 
 
 def test_the_scan_is_bounded_to_the_newest_rows():
