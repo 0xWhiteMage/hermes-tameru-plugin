@@ -393,3 +393,30 @@ def test_the_ledger_is_redacted_by_hermes_own_redactor() -> None:
     sample = ("ERROR HF token " + "hf" + "_abcdefghijklmnopqrstuvwxyzABCDEFGH invalid\nERROR " + "AI" + "zaSyA-abcdefghijklmnopqrstuvwxyz012345 quota")
     assert redact_compaction_text(sample) == _redact_compaction_text(sample)
     assert "abcdefghijklmnopqrstuvwxyzABCDEFGH" not in redact_compaction_text(sample)
+
+
+# ---- engine.py: Codex autoraise when disabled, memo char bound ----
+@pytest.mark.real_hermes
+def test_a_disabled_engine_keeps_the_codex_autoraise_of_the_built_in_compressor() -> None:
+    from types import SimpleNamespace
+
+    import agent.agent_init as agent_init
+    from agent.context_compressor import ContextCompressor
+
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    raised = agent_init._compression_threshold(SimpleNamespace(model="gpt-5.5", provider="openai-codex"), {"threshold": 0.5})[0]
+    built_in = ContextCompressor(model="gpt-5.5", threshold_percent=raised, quiet_mode=True,
+                                 config_context_length=272_000, provider="openai-codex")
+    engine = TameruContextEngine(settings=TameruSettings(enabled=False), quiet_mode=True, config_context_length=272_000)
+    engine.update_model("gpt-5.5", 272_000, "", "", "openai-codex", "codex_responses")
+    assert engine.threshold_tokens == built_in.threshold_tokens
+
+
+def test_the_memo_is_bounded_by_characters_too() -> None:
+    from hermes_tameru_plugin.engine import _Extract, _Memo
+
+    memo = _Memo(max_entries=1000, max_chars=100)
+    for i in range(50):
+        memo.put((i,), _Extract("x" * 30, False, "low"))
+    assert len(memo) <= 3 and memo.get((49,)) is not None and memo.get((0,)) is None

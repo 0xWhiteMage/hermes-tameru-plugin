@@ -107,6 +107,7 @@ _ERROR_LINE_CHARS = 300                            # an errors row keeps at most
 _FIXED_RETRIES = 2                                 # fixed-budget extract attempts after an oversized one
 _MEMO_ENTRIES = 2048
 _MEMO_MAX_TEXT = 50_000       # a bigger extract is recomputed rather than held
+_MEMO_MAX_CHARS = 4_000_000   # ...and the memo as a whole holds at most this many chars of extracts
 _LINE_BREAK_RE = re.compile(r"\r\n|\r|\n")
 _SPILL_PATH_RE = re.compile(r"^Full output saved to: (\S[^\n]*)$", re.MULTILINE)   # Hermes' <persisted-output> block
 _VERSION_RE = re.compile(r"^version:\s*(\S+)", re.MULTILINE)
@@ -127,8 +128,10 @@ class _Extract(NamedTuple):
 class _Memo:
     """Bounded LRU of extracts. A copy is a fresh empty one, so a cloned agent shares nothing."""
 
-    def __init__(self, max_entries: int = _MEMO_ENTRIES) -> None:
+    def __init__(self, max_entries: int = _MEMO_ENTRIES, max_chars: int = _MEMO_MAX_CHARS) -> None:
         self._max = max_entries
+        self._max_chars = max_chars
+        self._chars = 0
         self._items: OrderedDict[tuple, _Extract] = OrderedDict()
         self._lock = threading.Lock()
 
@@ -141,24 +144,28 @@ class _Memo:
 
     def put(self, key: tuple, value: _Extract) -> None:
         with self._lock:
+            old = self._items.pop(key, None)
+            if old is not None:
+                self._chars -= len(old.text)
             self._items[key] = value
-            self._items.move_to_end(key)
-            while len(self._items) > self._max:
-                self._items.popitem(last=False)
+            self._chars += len(value.text)
+            while len(self._items) > self._max or self._chars > self._max_chars:
+                self._chars -= len(self._items.popitem(last=False)[1].text)
 
     def clear(self) -> None:
         with self._lock:
             self._items.clear()
+            self._chars = 0
 
     def __len__(self) -> int:
         with self._lock:
             return len(self._items)
 
     def __copy__(self) -> _Memo:
-        return _Memo(self._max)
+        return _Memo(self._max, self._max_chars)
 
     def __deepcopy__(self, memo: dict) -> _Memo:
-        return _Memo(self._max)
+        return _Memo(self._max, self._max_chars)
 
 
 @dataclass
@@ -224,7 +231,7 @@ def _plugin_version() -> str:
     try:
         found = _VERSION_RE.search(Path(__file__).with_name("plugin.yaml").read_text("utf-8"))
         return found.group(1) if found else "unknown"
-    except OSError:
+    except (OSError, ValueError):   # unreadable, or not UTF-8
         return "unknown"
 
 
@@ -298,8 +305,10 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
 
     # ---- lifecycle ----------------------------------------------------------------------------
     def update_model(self, model: str, context_length: int, *args: Any, **kwargs: Any) -> None:
-        """Seed Hermes' threshold with its Codex autoraise (host-side only for the built-in engine)."""
-        if self._settings.enabled and hasattr(self, "_config_threshold_percent"):
+        """Seed Hermes' threshold with its Codex autoraise (host-side only for the built-in engine).
+
+        Also with the plugin off: ``enabled: false`` is the built-in compressor, which has the autoraise."""
+        if hasattr(self, "_config_threshold_percent"):
             try:
                 provider = kwargs.get("provider", args[2] if len(args) > 2 else "")
                 section = read_hermes_config()[0].get("compression")
@@ -313,7 +322,10 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
 
     def _scale_prune_trigger(self) -> None:
         """Re-derive the plugin-supplied proactive-prune trigger from Hermes' current compaction threshold."""
-        if getattr(self, "_scaled_prune", False):
+        # Reading threshold_tokens resolves the context window; for the constructor's placeholder model that is a
+        # catalogue lookup over the network. Hermes sizes the engine with update_model right after building it, and
+        # that call lands here again with the window known.
+        if getattr(self, "_scaled_prune", False) and getattr(self, "_resolved_context_length", None) is not None:
             try:
                 self.proactive_prune_tokens = scaled_prune_tokens(
                     self._settings, getattr(self, "threshold_tokens", 0),
