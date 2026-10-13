@@ -326,8 +326,9 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         """Re-derive the plugin-supplied proactive-prune trigger from Hermes' current compaction threshold."""
         # Reading threshold_tokens resolves the context window; for the constructor's placeholder model that is a
         # catalogue lookup over the network. Hermes sizes the engine with update_model right after building it, and
-        # that call lands here again with the window known.
-        if getattr(self, "_scaled_prune", False) and getattr(self, "_resolved_context_length", None) is not None:
+        # that call lands here again with the window known. A host without lazy window resolution (no
+        # ``_resolved_context_length`` attribute) has the window already and is scaled straight away.
+        if getattr(self, "_scaled_prune", False) and getattr(self, "_resolved_context_length", 0) is not None:
             try:
                 self.proactive_prune_tokens = scaled_prune_tokens(
                     self._settings, getattr(self, "threshold_tokens", 0),
