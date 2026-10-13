@@ -31,7 +31,9 @@ Where Hermes writes a one-line summary, the plugin runs a deterministic ladder:
 3. **Brief.** Otherwise a structural brief (error exemplars, query lines, warnings, head and tail; JSON-aware for
    JSON). It starts at `brief_chars` and grows in steps, up to the extract cap, until it holds an exemplar of
    every error fingerprint of the original.
-4. **Header.** Otherwise, or for old rows once the retained-extract budget is spent, a header-only row.
+4. **Errors / header.** Otherwise, in the pressure pass, or for old rows once the retained-extract budget is spent:
+   the header plus one exemplar line per error template of the original (the `errors` rung, with its own budget,
+   `retained_error_budget_chars`), or a header-only row when the result has no error lines.
 5. **Hermes' own line** as the last resort.
 
 Properties:
@@ -154,12 +156,15 @@ plugins:
 | `store_max_entries` | `512` | Originals kept in memory for `tameru_expand` (LRU). |
 | `store_max_chars` | `32000000` | Total characters of originals kept in memory (LRU). |
 | `pass_char_budget` | `4000000` | Original characters the ladder may process in one pass; rows beyond it use Hermes' line. |
+| `retained_error_budget_chars` | `8000` | Total size of `errors` rows (header plus one exemplar line per error template) kept, newest first; past it they step down to a header. |
+| `errors_row_chars` | `1600` | Cap on the exemplar lines of one `errors` row; `0` turns the rung off (rows fall to a bare header as in 1.4.1). |
 | `retained_extract_budget_chars` | `6000` | Total size of extract/brief bodies rendered rows may keep. Committed rows keep theirs newest first; a new row gets what is left, else a header. Rows beyond it step down to a header (ref kept), only inside a pass Hermes already commits. |
 | `prune_tail` | `tokens` | Tail protected by the proactive prune: `tokens` (the shorter of `protect_last_n` and the full compaction's tail token budget, and pass 4 also runs) or `count` (Hermes' `protect_last_n` messages, stock behaviour). |
 | `supersession` | `true` | Enable structural supersession. |
 | `ledger` | `true` | Add the artifact trail to Hermes' compaction summary. |
 | `telemetry_log` | `""` | Path of a JSONL file for render events; empty means off. |
-| `default_proactive_prune_tokens` | `48000` | Value used for `compression.proactive_prune_tokens` only if you did not set it. |
+| `default_proactive_prune_tokens` | `48000` | Floor of the plugin's proactive-prune trigger, used only if you did not set `compression.proactive_prune_tokens`. |
+| `default_proactive_prune_ratio` | `0.70` | The plugin's trigger is `max(default_proactive_prune_tokens, ratio x Hermes' compaction threshold)`, re-derived when the model changes, so a large window is not pruned long before it fills. `0` keeps the fixed floor. |
 | `default_proactive_prune_min_result_chars` | `2000` | Value used for `compression.proactive_prune_min_result_chars` only if you did not set it. |
 
 Environment variable names: `TAMERU_HERMES_ENABLED`, `TAMERU_HERMES_MIN_TOOL_CHARS`,
@@ -191,8 +196,10 @@ compressor's constructor itself, using the same table as Hermes' `_parse_compres
 | `tail_mode` | `tail_mode` |
 | `model_thresholds` | `model_thresholds` |
 
-Two of them have plugin defaults: unless your own config file sets them, `proactive_prune_tokens` is 48,000 and
-`proactive_prune_min_result_chars` is 2,000 (the `default_*` settings above). Setting them explicitly wins. An
+Two of them have plugin defaults: unless your own config file sets them, `proactive_prune_tokens` is
+`max(48,000, 0.7 x Hermes' compaction threshold)` (48,000 on 32K and 64K windows, 105,000 on a 200K window whose
+threshold is 150,000) and `proactive_prune_min_result_chars` is 2,000 (the `default_*` settings above). Hermes
+itself ships the proactive prune off (`proactive_prune_tokens: 0`); setting either value explicitly wins. An
 argument the running Hermes does not accept is dropped with a warning. The plugin also applies Hermes' Codex
 threshold autoraise when the model is selected.
 
@@ -257,6 +264,13 @@ the pass is retried once with header-only rungs, which reclaim more.
   category beats stock only narrowly (2 of 6 and 1 of 6 facts against 0 of 6).
 - A row whose original was never stored (store evicted, credential-looking content, or a restart without a
   reachable session archive) cannot be expanded.
+- Stock Hermes ships the proactive prune off. Against that out-of-the-box Hermes, the replay (64K window) costs
+  7.1% less in o200k tokens (5.7% in chars), keeps 13 of 17 gold facts against 6 and 7 of 7 error templates
+  against 0, with 1 compaction against 2. The larger savings quoted against "stock" elsewhere (about 22%) are
+  against Hermes with the proactive prune opted in at 48K. Once a session passes the prune trigger on a large
+  window, the prune trades facts for cost: on a 200K window this session keeps 11 of 17 facts against 17 for
+  out-of-the-box Hermes (13% cheaper, every error template kept); on 256K it is left exactly as Hermes leaves it.
+  See [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md) section 9.
 - The final request in the replay is still larger than stock's (123 KB against 84 KB, 1.46x): two large late
   results arrive after the last cache-breaking rewrite and stay verbatim. Total input and cache-priced cost are
   lower than stock's.

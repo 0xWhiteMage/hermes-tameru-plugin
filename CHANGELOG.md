@@ -5,6 +5,25 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The plugin's proactive-prune trigger follows the window.** Unless you set `compression.proactive_prune_tokens`,
+  it is `max(default_proactive_prune_tokens, default_proactive_prune_ratio x Hermes' compaction threshold)` (48,000
+  and 0.70), re-derived when the model changes: 48K on 32K/64K windows, 105K on a 200K window. The fixed 48K trigger
+  pruned large windows long before they filled (200K replay: 13/17 gold facts against 17/17 for Hermes as shipped).
+- **New `errors` rung.** A row past the retained-extract budget, or in the pressure pass, keeps one exemplar line per
+  error template under its header instead of dropping to a bare header (`retained_error_budget_chars` 8,000,
+  `errors_row_chars` 1,600; `0` turns it off). On 128K-200K windows the plugin had kept 0-1 of 7 error templates;
+  now 7/7 at every window measured. The header grammar gains the rung; older rows still parse.
+
+### Added
+- Replay: a `stock_defaults` engine (Hermes as shipped, proactive prune off) with a baseline and acceptance test,
+  `run_session(context_length=...)`, and large-window tests (128K, 200K, 256K).
+
+### Corrected
+- Cost claims against "stock Hermes" (about 20-22% cheaper) were measured against Hermes with the proactive prune
+  opted in at 48K. Against Hermes as shipped the replay is 5.7% cheaper in chars and 7.1% in o200k tokens, with
+  13/17 gold facts against 6/17 and 7/7 error templates against 0/7 ([REPORT-1.4.1.md](docs/REPORT-1.4.1.md) §9).
+
 ### Contribution audit
 - Resynchronise the vendored engine with the BOM-tolerant CLI/cache/recovery reads; upstream now passes 1,172 tests with 3 skipped.
 

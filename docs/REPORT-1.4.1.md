@@ -289,6 +289,75 @@ Code at `725fc9c` / engine `91f00e0`, `tests/test_fuzz_redteam.py` with `FUZZ_RA
   keyword argument) stay unflagged: lexically they are code. Only whole-line env/YAML assignments are caught.
 - The grep timeout is untested on Windows.
 
+## 9. Hermes as shipped, large windows, and error lines past the budget (2026-10-13)
+
+A red-team pass on the evaluation itself. All numbers: the 30-turn replay, seed 0, real Hermes at `main` `63d0b94`
+(1,427 real-Hermes tests pass there and at the CI pin `a0a4992`); costs are cache-priced (read 0.1x, write 1.25x),
+in chars as the harness reports and in o200k tokens from a re-pricing of every request.
+
+### The "stock" baseline was not Hermes as shipped
+
+The replay's `stock` engine runs Hermes' proactive prune at 48K tokens. Hermes ships it off
+(`proactive_prune_tokens: 0`, `hermes_cli/config_defaults.py`). A user who switches from out-of-the-box Hermes to
+the plugin is compared with that, so the replay now has a `stock_defaults` engine and baseline
+(`tests/eval/baselines/stock_defaults.json`) and an acceptance test against it.
+
+| 64K window | Hermes as shipped | Hermes, prune at 48K | plugin, equal gates | plugin as shipped |
+|---|---:|---:|---:|---:|
+| cost, chars | 1,048,851 | 1,273,007 | 1,019,675 (−2.8%) | 989,114 (**−5.7%**) |
+| cost, o200k tokens | 370,086 | 442,162 | 354,251 (−4.3%) | 343,939 (**−7.1%**) |
+| compactions | 2 | 1 | 1 | 1 |
+| gold facts (recall/artifact/continuation/decision) | 6/17 (0/2/2/2) | 10/17 (0/3/3/4) | 13/17 (2/4/3/4) | 13/17 (2/4/3/4) |
+| error templates | 0/7 | 0/7 | 7/7 | 7/7 |
+| re-fetch: calls (facts missing) | 4 (8) | 3 (4) | 2 (2) | 2 (2) |
+
+The "about 22% cheaper than stock" figure quoted for 1.4.0 holds against Hermes with the prune opted in (−22.2%
+in tokens here); against Hermes as shipped it is **−5.7% (chars) / −7.1% (tokens)**, with twice the gold facts,
+every error template and one compaction fewer.
+
+### A fixed 48K trigger pruned large windows long before they filled
+
+The plugin enables the proactive prune at 48K tokens by default. On a 200K window this session never reaches
+Hermes' compaction threshold, so out-of-the-box Hermes keeps all 17 facts; the fixed trigger pruned it twice. The
+trigger is now `max(48,000, default_proactive_prune_ratio x compaction threshold)` with ratio 0.70 (your choice
+among the options measured), re-derived whenever Hermes changes the model. Hermes `main` compacts at 75% of the
+window (the old pin: 85%), so the trigger is 48K up to 64K windows, 67,200 at 128K, 105,000 at 200K, 134,400 at
+256K. Explicit user values and explicit constructor arguments are never rescaled.
+
+### Rows past the budget lost their error lines
+
+The same window sweep showed the plugin keeping **0 or 1 of 7 error templates** on 128K and 200K windows: rows
+past the 6,000-char retained-extract budget (or in the pressure pass) dropped to a bare header, and with no
+compaction there was no summary ledger to carry their errors. Such rows now land on a new **`errors` rung**: the
+header plus one exemplar line per error template (at most `errors_row_chars`, 1,600), counted against a budget of
+their own (`retained_error_budget_chars`, 8,000). A result with no error lines still gets a bare header. The rung
+was added to the header grammar (`fold|extract|brief|errors|header|superseded`); every row an earlier version wrote
+still parses.
+
+| window | Hermes as shipped: cost, gold, errors | plugin before (fixed 48K, no `errors` rung) | **plugin now** |
+|---|---|---|---|
+| 32K | 1,098,548, 8/17, 0/7 | 795,161, 9/17, 7/7 | 795,161 (−27.6%), 9/17, 7/7 |
+| 64K | 1,048,851, 6/17, 0/7 | 989,114, 13/17, 7/7 | 989,114 (−5.7%), 13/17, 7/7 |
+| 128K | 1,357,458, 9/17, 0/7 (1 compaction) | 1,280,941, 13/17, **1/7** | 1,365,337 (+0.6%), 13/17, 7/7, 0 compactions |
+| 200K | 1,870,570, 17/17, 7/7 | 1,280,941, 13/17, **1/7** | 1,622,456 (−13.3%), 11/17, 7/7 |
+| 256K | 1,870,570, 17/17, 7/7 | 1,280,941, 13/17, **1/7** | identical to Hermes (17/17, 7/7) |
+
+(Costs in chars. "Before" is the same code with `default_proactive_prune_ratio=0` and `errors_row_chars=0`, i.e. 1.4.1's behaviour, on the same Hermes. 32K and 64K are unchanged: there the trigger stays 48K and compaction summaries already carried the errors.) What remains is the proactive prune's
+inherent trade-off: once a session passes the trigger, facts go for cost (200K: 11/17 against 17/17, 13% cheaper),
+but no longer any error template. Tests: `tests/test_prune_scaling.py`, the `errors` rung tests in
+`tests/test_ladder.py`, `tests/test_idempotency.py` and `tests/test_tuning.py`, and in `tests/eval`
+`test_acceptance_the_shipped_plugin_beats_hermes_defaults`,
+`test_a_session_under_the_scaled_trigger_is_left_exactly_as_stock_leaves_it` and
+`test_large_windows_keep_every_error_template`.
+
+### Also found
+
+- Hermes' own one-line summary of a `terminal` result counts newlines in the JSON-encoded payload, so every terminal
+  row reads "1 lines output" (stock Hermes too); the Tameru header next to it carries the true count. Not changed
+  here (it is Hermes' line); worth an upstream Hermes issue.
+- The replay's seeds only vary filler values; its structure (and the defaults tuned on it) is one session shape.
+  More scenario shapes remain the most useful next evaluation step.
+
 ## Reproduce
 
 ```bash
