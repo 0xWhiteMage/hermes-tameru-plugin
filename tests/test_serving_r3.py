@@ -276,7 +276,7 @@ def test_register_builds_the_engine_without_a_catalogue_lookup(monkeypatch) -> N
     monkeypatch.setattr(cc, "get_model_context_length", spy)
     registered: list = []
     plugin.register(type("Ctx", (), {"register_context_engine": staticmethod(registered.append)})())
-    assert len(registered) == 1 and asked
+    assert len(registered) == 1 and all(configured for _, configured in asked)   # no lookup, or one that is answered
     engine = registered[0]
     engine.update_model("some-model", 200_000, "", "", "", "")      # what Hermes does next
     assert engine.context_length == 200_000
