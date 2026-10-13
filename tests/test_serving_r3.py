@@ -381,7 +381,10 @@ def test_the_ledger_redacts_url_credentials_and_assigned_secrets() -> None:
     turns[0]["tool_calls"][0]["function"]["arguments"] = json.dumps(
         {"command": "psql postgres://app:hunter2@db.prod/main -c 'select 1'"})
     ledger = build_ledger(turns)
-    assert "hunter2" not in ledger and "db.prod/main" in ledger and "Errors:" in ledger
+    # The password never reaches the summary. Engine 1.4.2's wider secrets screen withholds the whole command
+    # (and the error line naming the URL); Hermes' redactor masks only the password when the screen misses one.
+    assert "hunter2" not in ledger and "exit 1" in ledger
+    assert "db.prod/main" in ledger or "<redacted>" in ledger
 
 
 @pytest.mark.real_hermes

@@ -198,29 +198,40 @@ def _line_separator(text: str) -> str:
     return "\r\n" if "\r\n" in text else "\n"
 
 
+_RECORD_SPECIAL_RE = re.compile('["\r\n]')
+
+
 def _split_delimited_records(text: str) -> list[str] | None:
+    # Perf (v1.4.2): jump from one quote / line break to the next instead of
+    # stepping through every character; the records are identical.
     records: list[str] = []
     start = 0
     index = 0
     in_quotes = False
-    while index < len(text):
+    length = len(text)
+    search = _RECORD_SPECIAL_RE.search
+    while True:
+        found = search(text, index)
+        if found is None:
+            break
+        index = found.start()
         char = text[index]
         if char == '"':
-            if in_quotes and index + 1 < len(text) and text[index + 1] == '"':
+            if in_quotes and index + 1 < length and text[index + 1] == '"':
                 index += 2
                 continue
             in_quotes = not in_quotes
             index += 1
             continue
-        if not in_quotes and char in {"\n", "\r"}:
+        if not in_quotes:
             records.append(text[start:index])
-            if char == "\r" and index + 1 < len(text) and text[index + 1] == "\n":
+            if char == "\r" and index + 1 < length and text[index + 1] == "\n":
                 index += 1
             start = index + 1
         index += 1
     if in_quotes:
         return None
-    if start < len(text):
+    if start < length:
         records.append(text[start:])
     elif text.endswith(("\n", "\r")):
         records.append("")
@@ -304,11 +315,14 @@ def detect_format(text: str) -> str:
         return "tsv"
     if delimiter == ",":
         return "csv"
-    if len(re.findall(r"(?im)^\s*(?:CREATE|INSERT|UPDATE|DELETE|SELECT|ALTER|DROP|WITH)\b", value)) >= 2:
+    # ``^\s*`` in a multiline pattern also eats newlines, so a run of blank
+    # lines was rescanned from every line start (quadratic): same-line
+    # whitespace only, which finds the same lines.
+    if len(re.findall(r"(?im)^[^\S\n]*(?:CREATE|INSERT|UPDATE|DELETE|SELECT|ALTER|DROP|WITH)\b", value)) >= 2:
         return "sql"
     if (
-        len(re.findall(r"(?m)^\s*\[[^\]\n]+\]\s*$", value)) >= 2
-        and re.search(r"(?m)^\s*[A-Za-z_][\w.-]*\s*=", value)
+        len(re.findall(r"(?m)^[^\S\n]*\[[^\]\n]+\]\s*$", value)) >= 2
+        and re.search(r"(?m)^[^\S\n]*[A-Za-z_][\w.-]*\s*=", value)
     ):
         return "ini"
     if re.search(r"(?m)^#{1,6}\s+|^```|^~~~", value):
