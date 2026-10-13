@@ -3,7 +3,10 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
-## [Unreleased]
+## [1.5.0] - 2026-10-13
+
+Summary and measurements: [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md). Release steps: [docs/RELEASING.md](docs/RELEASING.md).
+Vendors Tameru 1.5.0 (`933aa33`). Verified against Hermes `a0a4992` (CI pin), `63d0b94` and `6e7b83a2f1` (main, 2026-10-13).
 
 ### Fixed
 - **The proactive prune ran on no window under ~64K.** The plugin's trigger is `max(48,000, 0.75 x threshold)`, and a
@@ -58,6 +61,32 @@ All notable changes to this project are documented here. The format follows
 - Cost claims against "stock Hermes" (about 20-22% cheaper) were measured against Hermes with the proactive prune
   opted in at 48K. Against Hermes as shipped the replay is 5.7% cheaper in chars and 7.1% in o200k tokens, with
   13/17 gold facts against 6/17 and 7/7 error templates against 0/7 ([REPORT-1.4.1.md](docs/REPORT-1.4.1.md) §9).
+
+### Fixed (engine, Tameru 1.5.0)
+- Quadratic time on blank-line runs and on long single-word or many-term queries (over 20 s each; now milliseconds);
+  a crash on a lone surrogate in the query; the receipt no longer copies the whole input (credentials on dropped
+  lines included); `contains_secret` knows 70 of 80 common credential shapes (29 before), which the recovery store and
+  the artifact trail rely on; weak (plain-word) queries keep diffs in whole hunks and keep grep definition lines.
+- About 4.6x faster on the per-result call sequence (outputs byte-identical; the real-Hermes suite runs in ~80 s
+  instead of ~150 s with more tests). Same-text memoization is bounded (2 KB to 1M chars).
+
+### Fixed (engine.py, serving red-team)
+- No model-catalogue lookup until Hermes has sized the window; a disabled engine keeps the built-in compressor's
+  Codex threshold autoraise (the kill switch is now exactly stock); the extract memo is bounded by characters (4M) as
+  well as entries; an unreadable `plugin.yaml` no longer raises in `get_status`. On hosts that size the window
+  eagerly (no `_resolved_context_length`), the trigger is scaled straight away.
+
+### Added (replay harness)
+- **Realistic replay.** A simulated clock (20 s per request) so Hermes' 300 s no-op and anti-thrash backoffs lapse
+  as they would in a live session, and a context-overflow path mirroring `agent/turn_overflow.py` (a request over the
+  window is rejected unbilled and forces a compression, three attempts per turn, then the turn fails). New metrics:
+  `overflow_errors`, `failed_turns`, `max_request_window_ratio`, cost per answered turn. The previous harness billed
+  32K requests up to 2.1x the window, which made 32K look 17-28% cheaper than it is; 64K and larger windows are
+  identical on both harnesses. `--old-harness` reproduces the old baselines byte for byte.
+- 32K and 48K acceptance tests (`tests/eval/test_small_window_replay.py`), large-window tests, a kill-switch
+  byte-parity test against stock, serving tests (isolation across 12 concurrent agents, fault injection, untrusted
+  wrappers, redaction, session rotation).
+- `hermes_tameru_plugin/README.md` for the Hermes catalogue page; `docs/RELEASING.md`.
 
 ### Contribution audit
 - Resynchronise the vendored engine with the BOM-tolerant CLI/cache/recovery reads; upstream now passes 1,172 tests with 3 skipped.

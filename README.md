@@ -5,7 +5,7 @@ compaction for [Hermes Agent](https://github.com/NousResearch/hermes-agent), as 
 source changes). Source and package metadata identify **1.5.0**; a GitHub tag/Release is pending.
 The vendored engine is synchronised with the reviewed Tameru 1.5.0 source. Compatibility is verified
 against Hermes `a0a4992`, the current Hermes PR base (see [Compatibility](#compatibility)).
-Changes and historical measurements: [CHANGELOG.md](CHANGELOG.md) and [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md).
+Changes and measurements: [CHANGELOG.md](CHANGELOG.md) and [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md); releasing: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## What it does
 
@@ -262,24 +262,21 @@ the pass is retried once with header-only rungs, which reclaim more.
 
 ## Limitations
 
-- The plugin hooks private Hermes methods. It is tested against Hermes `a0a4992` (and nightly against `main`);
+- The plugin hooks private Hermes methods. It is tested against Hermes `a0a4992` (CI pin) and `6e7b83a2f1` (`main`, 2026-10-13), and nightly against `main`;
   a Hermes refactor can disable it (safely, as above) until the plugin is updated.
 - It is extractive: an extract or brief keeps lines, not meaning. Facts that were only in a cut region are gone
   from the context until the model calls `tameru_expand` (or re-runs the tool). In the replay the "recall" probe
   category beats stock only narrowly (2 of 6 and 1 of 6 facts against 0 of 6).
 - A row whose original was never stored (store evicted, credential-looking content, or a restart without a
   reachable session archive) cannot be expanded.
-- Stock Hermes ships the proactive prune off. Against that out-of-the-box Hermes, the replay (64K window) costs
-  7.1% less in o200k tokens (5.7% in chars), keeps 13 of 17 gold facts against 6 and 7 of 7 error templates
-  against 0, with 1 compaction against 2. The larger savings quoted against "stock" elsewhere (about 22%) are
-  against Hermes with the proactive prune opted in at 48K. Once a session passes the prune trigger on a large
-  window, the prune trades facts for cost: on a 200K window this session keeps 11 of 17 facts against 17 for
-  out-of-the-box Hermes (13% cheaper, every error template kept); on 256K it is left exactly as Hermes leaves it.
-  See [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md) section 9.
-- The final request in the replay is still larger than stock's (123 KB against 84 KB, 1.46x): two large late
-  results arrive after the last cache-breaking rewrite and stay verbatim. Total input and cache-priced cost are
-  lower than stock's.
-- Replay numbers come from one scripted 30-turn session with a fake lossy summarizer and Hermes' rough token
+- Stock Hermes ships the proactive prune off. Against that out-of-the-box Hermes, on a realistic replay of five
+  session shapes at six window sizes (32K-256K, two seeds), 1.5.0 fails no turn on a context overflow (Hermes: 76),
+  keeps 854 gold facts against 705 and 912 error templates against 510, and runs 47 full compactions against 106.
+  Cost per answered turn is lower in 34 of 60 cells and higher in 8 (mean -7.7%): the "many small outputs" shape
+  (+1.6% to +8.9% at 32K-64K: nothing is prunable and the artifact trail lengthens the summary) and refactor at 48K
+  (+3-4%). Where Hermes would never compact (most 200K/256K sessions) the plugin leaves the session exactly as Hermes
+  does. See [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md).
+- Replay numbers come from scripted 30-turn sessions with a fake lossy summarizer and Hermes' rough token
   estimator, not from live models. See [tests/eval/README.md](tests/eval/README.md) and
   [docs/compaction-research.md](docs/compaction-research.md) section 7 for the measured results and their limits.
 - Output whose extract cannot shrink under `max_extract_chars` (big logs, very large `grep` output) ends as a
