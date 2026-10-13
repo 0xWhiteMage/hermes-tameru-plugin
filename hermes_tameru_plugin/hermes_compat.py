@@ -361,6 +361,24 @@ def tool_calls_by_id(messages: list[dict]) -> dict[str, tuple[str, Any]]:
     return calls(messages)
 
 
+def _local_message_budget_tokens(messages: list[dict]) -> int:
+    """Local mirror of ``agent.context_compressor._estimate_msg_budget_tokens`` summed over ``messages`` (chars/4)."""
+    total = 0
+    for msg in messages:
+        content = msg.get("content") or ""
+        total += (len(content) + 3) // 4 + 10 if isinstance(content, str) else 10
+        total += sum((len(str(tc)) + 3) // 4 for tc in msg.get("tool_calls") or [] if isinstance(tc, dict))
+    return total
+
+
+def message_budget_tokens(messages: list[dict]) -> int:
+    """Hermes' prompt-token estimate of ``messages`` as its prune gates measure it (message bodies only)."""
+    one = _hermes("agent.context_compressor", "_estimate_msg_budget_tokens")
+    if callable(one):
+        return sum(int(one(m)) for m in messages)
+    return _local_message_budget_tokens(messages)
+
+
 def _local_is_synthetic_user_row(content: str) -> bool:
     """Local mirror of ``agent.context_compressor._synthetic_user_row``."""
     if not isinstance(content, str) or not content.strip():

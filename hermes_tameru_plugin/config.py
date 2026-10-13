@@ -60,8 +60,10 @@ class TameruSettings:
     ledger: bool = True
     telemetry_log: str = ""                    # JSONL path; "" = off
     default_proactive_prune_tokens: int = 48_000          # only if compression.proactive_prune_tokens is not set
-    default_proactive_prune_ratio: float = 0.70           # ...then at least this share of Hermes' compaction threshold
+    default_proactive_prune_ratio: float = 0.75           # ...then at least this share of Hermes' compaction threshold
     default_proactive_prune_min_result_chars: int = 8000  # Hermes' own default; only if compression.proactive_prune_min_result_chars is not set
+    reprune_target_ratio: float = 0.30         # ...and commits only if it leaves the prompt at or below this share of the threshold (a compaction leaves ~0.2); 0 = no such gate
+    prune_regrowth_ratio: float = 0.20         # after a prune commit, the next may fire once the prompt regrew by this share of Hermes' compaction threshold (plugin-supplied trigger only); 0 = Hermes' full trigger-sized runway
 
 
 # ---- value parsers: raw -> value, ValueError when the raw value is unusable -----------------------
@@ -206,6 +208,8 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "default_proactive_prune_tokens": _min_int(0),
     "default_proactive_prune_ratio": _parse_savings,
     "default_proactive_prune_min_result_chars": _min_int(0),
+    "prune_regrowth_ratio": _parse_savings,
+    "reprune_target_ratio": _parse_savings,
 }
 
 
@@ -450,6 +454,40 @@ def scaled_prune_tokens(settings: TameruSettings, threshold_tokens: Any) -> int:
     if floor <= 0 or threshold <= 0 or settings.default_proactive_prune_ratio <= 0:
         return floor
     return max(floor, round(settings.default_proactive_prune_ratio * threshold))
+
+
+def prune_trigger_follows_window(settings: TameruSettings, threshold_tokens: Any) -> bool:
+    """True when ``default_proactive_prune_ratio * threshold`` (not the fixed floor) sets the plugin's trigger.
+
+    That is a window big enough for a prune to leave room to regrow before the compaction (above ~85K tokens with
+    Hermes' default threshold). On a smaller one the trigger sits at the threshold and a compaction follows
+    within a request or two, so the regrowth rules below do not apply.
+    """
+    try:
+        threshold = int(threshold_tokens or 0)
+    except (TypeError, ValueError, OverflowError):
+        return False
+    floor, ratio = settings.default_proactive_prune_tokens, settings.default_proactive_prune_ratio
+    return floor > 0 and ratio > 0 and threshold > 0 and round(ratio * threshold) > floor
+
+
+def prune_regrowth_tokens(settings: TameruSettings, threshold_tokens: Any) -> int:
+    """Tokens the prompt must regrow after a prune commit before the plugin's next prune may fire (0 = Hermes' runway).
+
+    Hermes demands a full trigger-sized regrowth (``max(reclaimed, proactive_prune_tokens)``) so a commit's cache
+    break is never paid twice cheaply. On a large window that runway (0.75 of the compaction threshold) is longer
+    than the stretch to the compaction a prune is meant to replace, so the session regrew raw rows for the
+    rest of its life while stock Hermes' next compaction threw them away: oncall 200K cost +23.7%, default
+    128K +4.0%. A commit rewrites the prefix from its first changed row: it pays back once about half of the
+    prompt is reclaimed and ~10 requests remain, which a regrowth of ``prune_regrowth_ratio * threshold`` reaches.
+    """
+    try:
+        threshold = int(threshold_tokens or 0)
+    except (TypeError, ValueError, OverflowError):
+        return 0
+    if threshold <= 0 or settings.prune_regrowth_ratio <= 0:
+        return 0
+    return round(settings.prune_regrowth_ratio * threshold)
 
 
 def scaled_retained_budget(settings: TameruSettings, threshold_tokens: Any) -> int:

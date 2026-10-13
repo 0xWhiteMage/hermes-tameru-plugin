@@ -6,9 +6,19 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **A prune is followed by the next prune after a regrowth of `prune_regrowth_ratio` (0.20) of the threshold, not Hermes' full
+  trigger-sized runway (0.7), and only if it leaves the prompt at or below `reprune_target_ratio` (0.30) of the threshold.**
+  Hermes' runway outlasted the stretch to the compaction a prune is meant to replace, so a 128K-256K session regrew raw
+  rows for the rest of its life while stock Hermes compacted and reset (replay vs Hermes as shipped: oncall 200K +23.7%
+  cost, default 128K +4.0%; now -9.0% and -5.6%, with more gold facts and every error template). Window-scaled trigger
+  only; small windows, a user's `compression.proactive_prune_tokens` and an explicit argument are untouched.
+- **`default_proactive_prune_ratio` 0.70 -> 0.75.** With the later prune following on regrowth (above), the first prune can
+  wait: on the 200K replay (Hermes as shipped never compacts; peak 0.731 of the threshold) the plugin no longer prunes at
+  all and keeps 17/17 gold facts instead of 14/17 (that cell was -9.9% cost, now identical to Hermes as shipped), for
+  1.5-2.8 points of cost on four 128K/200K cells that remain 4-19% below Hermes as shipped. Set 0.70 to restore the old trigger.
 - **The plugin's proactive-prune trigger follows the window.** Unless you set `compression.proactive_prune_tokens`,
   it is `max(default_proactive_prune_tokens, default_proactive_prune_ratio x Hermes' compaction threshold)` (48,000
-  and 0.70), re-derived when the model changes: 48K on 32K/64K windows, 105K on a 200K window. The fixed 48K trigger
+  and 0.75), re-derived when the model changes: 48K on 32K/64K windows, 112.5K on a 200K window. The fixed 48K trigger
   pruned large windows long before they filled (200K replay: 13/17 gold facts against 17/17 for Hermes as shipped).
 - **New `errors` rung.** A row past the retained-extract budget, or in the pressure pass, keeps one exemplar line per
   error template under its header instead of dropping to a bare header (`retained_error_budget_chars` 8,000,

@@ -695,3 +695,30 @@ def test_module_lookup_does_not_remember_a_failed_import(compat, monkeypatch):
     assert compat._module(name) is late  # a module that appears (or is swapped) later is seen
     monkeypatch.setitem(sys.modules, name, None)
     assert compat._module(name) is None  # a blocked import stays "unavailable", never raises
+
+
+def _budget_messages() -> list[dict]:
+    return [
+        {"role": "system", "content": "You are an engineer."},
+        {"role": "user", "content": "why did the gateway time out? " * 7},
+        {"role": "assistant", "content": "", "tool_calls": [
+            {"id": "a", "type": "function", "function": {"name": "terminal", "arguments": '{"command": "tail app.log"}'}},
+        ]},
+        {"role": "tool", "tool_call_id": "a", "content": "x" * 1001},
+        {"role": "assistant", "content": None},
+    ]
+
+
+def test_message_budget_tokens_equals_hermes(compat, cc):
+    messages = _budget_messages()
+    expected = sum(cc._estimate_msg_budget_tokens(m) for m in messages)
+    assert compat.message_budget_tokens(messages) == expected
+    assert compat._local_message_budget_tokens(messages) == expected
+    assert compat.message_budget_tokens([]) == compat._local_message_budget_tokens([]) == 0
+
+
+def test_message_budget_tokens_fallback_is_pinned(compat):
+    # chars/4 rounded up + 10 per message + chars/4 of each tool-call envelope
+    assert compat._local_message_budget_tokens([{"role": "tool", "content": "x" * 1001}]) == 251 + 10
+    assert compat._local_message_budget_tokens([{"role": "assistant", "content": None}]) == 10
+    assert compat._local_message_budget_tokens([{"role": "user", "content": [{"type": "text", "text": "hi"}]}]) == 10
