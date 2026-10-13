@@ -1,6 +1,7 @@
 """Deterministic, offline replay of a 30-turn simulated Hermes session against a context engine.
 
-``run_session(engine_factory, turns=30, seed=0)`` drives ``scenario.build_scenario`` through a loop that
+``run_session(engine_factory, turns=None, seed=0, scenario="default")`` drives a scripted session (the original
+30-turn one, ``scenario.build_scenario``, or another named in ``scenario_registry``) through a loop that
 mimics the Hermes conversation loop (``agent/turn_preflight.py``):
 
     before every model request:
@@ -45,7 +46,8 @@ _HERE = Path(__file__).resolve().parent
 if str(_HERE) not in sys.path:
     sys.path.insert(0, str(_HERE))
 
-from scenario import CATEGORIES, N_TURNS, Scenario, build_scenario
+from scenario import CATEGORIES, Scenario
+from scenario_registry import DEFAULT_SCENARIO, get_spec
 
 # --- simulation constants (documented in tests/eval/README.md) -------------------------------------
 MODEL = "test-model"
@@ -474,18 +476,23 @@ def _tool_row(cid: str, step) -> dict:
 
 
 def run_session(
-    engine_factory: Callable[[], Any], *, turns: int = N_TURNS, seed: int = 0, keep_final_request: bool = False,
-    context_length: int = CONTEXT_LENGTH,
+    engine_factory: Callable[[], Any], *, turns: int | None = None, seed: int = 0, keep_final_request: bool = False,
+    context_length: int = CONTEXT_LENGTH, scenario: str = DEFAULT_SCENARIO,
 ) -> dict:
     """Replay the scripted session against ``engine_factory()`` and return the metrics.
+
+    ``scenario`` names the script (``scenario_registry``; ``default`` is the original 30-turn session) and
+    ``turns`` cuts it short (``None``: its natural length).
 
     Returns ``{"meta", "metrics", "series", "timing"[, "final_request"]}``. ``metrics`` and ``series`` are
     fully deterministic for a given (engine, turns, seed); ``timing`` is wall-clock and is not.
     """
-    scenario = build_scenario(seed, turns)
+    spec = get_spec(scenario)
+    turns = spec.turns if turns is None else turns
+    script = spec.build(seed, turns)
     engine = engine_factory()
     prepare_engine(engine, context_length)
-    sess = _Session(engine, scenario)
+    sess = _Session(engine, script)
     summarizer = FakeSummarizer()
     call_counter = 0
 
@@ -494,9 +501,9 @@ def run_session(
         call_counter += 1
         return f"call_{seed:02d}{call_counter:06d}"
 
-    messages: list[dict] = [{"role": "system", "content": scenario.system_prompt}]
+    messages: list[dict] = [{"role": "system", "content": script.system_prompt}]
     with patched_summary_llm(summarizer):
-        for turn in scenario.turns:
+        for turn in script.turns:
             messages.append({"role": "user", "content": turn.user})
             for rnd in turn.rounds:
                 messages = sess.request(messages)
@@ -507,7 +514,7 @@ def run_session(
             messages = sess.request(messages)
             messages.append({"role": "assistant", "content": turn.final})
             sess.turn_complete(messages)
-        messages.append({"role": "user", "content": scenario.final_question})
+        messages.append({"role": "user", "content": script.final_question})
         messages = sess.request(messages)
     final = sess.last_request
     final_text = visible_text(final)
@@ -515,7 +522,7 @@ def run_session(
     # ---- gold retention -----------------------------------------------------------------------
     by_cat: dict[str, dict] = {}
     for cat in CATEGORIES:
-        facts = [g for g in scenario.gold if g.category == cat]
+        facts = [g for g in script.gold if g.category == cat]
         kept = [g.id for g in facts if g.needle in final_text]
         by_cat[cat] = {
             "total": len(facts),
@@ -523,13 +530,13 @@ def run_session(
             "retention": round(len(kept) / len(facts), 4) if facts else None,
             "missing": [g.id for g in facts if g.needle not in final_text],
         }
-    n_total = len(scenario.gold)
-    n_kept = sum(1 for g in scenario.gold if g.needle in final_text)
-    needed = [g for g in scenario.gold if g.needed]
+    n_total = len(script.gold)
+    n_kept = sum(1 for g in script.gold if g.needle in final_text)
+    needed = [g for g in script.gold if g.needed]
     missing_needed = [g for g in needed if g.needle not in final_text]
 
     # ---- error fingerprints from the large incident log ---------------------------------------
-    log_fps = set(error_fingerprints("\n".join(scenario.error_lines)))
+    log_fps = set(error_fingerprints("\n".join(script.error_lines)))
     final_fps = set(error_fingerprints(final_text))
     kept_fps = log_fps & final_fps
 
@@ -586,9 +593,12 @@ def run_session(
         "invalidated_chars": sess.invalidated_chars,
         "events": sess.events,
     }
+    meta = {"engine": type(engine).__name__, "engine_name": getattr(engine, "name", None), "seed": seed,
+            "turns": turns, "hermes_pin": "1298c8e74baa73e1a2b90124228d017261ac6bc4"}
+    if scenario != DEFAULT_SCENARIO:  # the default session's meta stays exactly what it was
+        meta["scenario"] = scenario
     result = {
-        "meta": {"engine": type(engine).__name__, "engine_name": getattr(engine, "name", None), "seed": seed,
-                 "turns": turns, "hermes_pin": "1298c8e74baa73e1a2b90124228d017261ac6bc4"},
+        "meta": meta,
         "metrics": metrics,
         "series": series,
         "timing": {

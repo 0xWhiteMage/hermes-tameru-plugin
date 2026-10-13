@@ -137,6 +137,33 @@ lowercase, uuids, hex runs of 6+ and digit runs masked; capped at 160 characters
 `replay.py` so the harness does not depend on the engine under test. A test compares the two when the vendored
 engine has `error_fingerprints`.
 
+## Session shapes (`--scenario`)
+
+The default session above is one script, so every default tuned on it rests on one shape. `run_session(factory,
+scenario=NAME)`, `compare.py --scenario NAME [--seed N]` and `test_scenario_replay.py` select a named scenario
+(`scenario_registry.py`; `default` is unchanged and keeps `baselines/<engine>.json`). Each other scenario has gold facts
+in all four probe categories (user, assistant and tool sources), error lines whose fingerprints are followed, its own
+baselines in `baselines/<scenario>/<engine>.json` (`stock_defaults`, `stock`, `tameru_1_4`, `tameru_1_4_product`,
+compared exactly) and a Hermes-free shape test (`test_scenario_units.py`).
+
+| Scenario | Turns | Shape |
+|---|---|---|
+| `oncall` | 40 | log heavy: `kubectl` / `journalctl` / `docker logs`, one worker log tailed six times while it grows, Prometheus / orders-API / events JSON dumps; Hermes as shipped compacts 4 times on the 64K window |
+| `refactor` | 35 | seven 9-18 KB files read -> patched -> re-read, `rg` / `search_files` and `pytest` re-run as a rename advances (all outputs from one virtual repo, so re-reads show the edits); supersession heavy |
+| `smallrows` | 40 | 190 results of 0.8-3 KB (manifests, pins, health JSON, short logs, `git log`, TODO greps), 5-7 parallel calls per round; Hermes' 8,000-char prune floor never fires |
+| `i18n` | 32 | CJK / Arabic / Russian logs, ticket JSON, message catalogs (`ensure_ascii=False`), a catalog patched and re-read, user text in Japanese |
+
+Files: `scenario_kit.py` (script builder), `scenarios_extra.py` (`oncall`), `scenarios_refactor.py`,
+`scenarios_rows.py` (`smallrows`, `i18n`), `payloads_extra.py` / `payloads_rows.py` (seeded generators, independent of
+`PYTHONHASHSEED`), `scenario_baselines.py` (paths, `TAMERU_WRITE_BASELINES=1`). Record the new baselines with
+`TAMERU_WRITE_BASELINES=1 ... pytest tests/eval/test_scenario_replay.py` (that file alone: the default session's
+baselines are not re-recorded as a side effect).
+
+Acceptance per scenario: the plugin as shipped against Hermes as shipped (`tameru_1_4_product` vs `stock_defaults`: cost
+<=, gold >= in every category, error templates >=, no pairing violations, no rewrite between commits) and the equal-gates
+plugin against `stock`. A check the plugin loses is a strict `xfail` in `KNOWN_LOSSES` (with the measured numbers),
+never a loosened assertion; the day it is won again the test fails and the entry must go.
+
 ## Baselines (Hermes pin `1298c8e`, seed 0)
 
 | | stock Hermes | Tameru 1.3.0 |
@@ -289,5 +316,5 @@ stale on purpose (they pin the engine's output): re-record them and read the dif
 - The summarizer is a fake. Absolute retention numbers say how much each *engine* preserves around a lossy
   summary, not how a real model would summarize.
 - Token pressure uses Hermes' rough character-based estimator plus a fixed overhead, not provider usage.
-- The scenario is one story at one seed. Seeds change the random content (log lines, ids, source filler) but
+- The default scenario is one story at one seed (see the session shapes above for the others). Seeds change the random content (log lines, ids, source filler) but
   not the script; pass `seed=` to `run_session` to check that a result is not an artifact of seed 0.

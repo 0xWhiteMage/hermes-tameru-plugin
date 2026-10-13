@@ -1,9 +1,10 @@
 """Print a side-by-side metrics table for registered engines (used when tuning, and for the docs).
 
-    HERMES_REPO_ROOT=<hermes checkout> python tests/eval/compare.py [engine ...] [--json]
+    HERMES_REPO_ROOT=<hermes checkout> python tests/eval/compare.py [engine ...] [--json] [--scenario NAME]
 
 Defaults to every engine in ``engines.BASELINE_ENGINES`` plus any extra registered ones named on the command
-line. Not collected by pytest. Runs against a throwaway ``HERMES_HOME`` unless ``TAMERU_EVAL_HERMES_HOME=<dir>``
+line. ``--scenario NAME`` picks the session shape (``default``, ``oncall``, ``refactor``, ``smallrows``, ``i18n``;
+see ``scenario_registry``); ``--seed N`` its seed. Not collected by pytest. Runs against a throwaway ``HERMES_HOME`` unless ``TAMERU_EVAL_HERMES_HOME=<dir>``
 or ``TAMERU_EVAL_KEEP_HERMES_HOME=1`` (keep the one in the environment).
 """
 from __future__ import annotations
@@ -82,14 +83,43 @@ def main(argv: list[str]) -> int:
     import engines
     import replay
 
+    import scenario_registry
+
     as_json = "--json" in argv
-    names = [a for a in argv if not a.startswith("--")] or list(engines.BASELINE_ENGINES)
-    results = {n: replay.run_session(lambda n=n: engines.make_engine(n)) for n in names}
+    options, rest = parse_options(argv, ("--scenario", "--seed"))
+    scenario = options.get("--scenario", scenario_registry.DEFAULT_SCENARIO)
+    seed = int(options.get("--seed", "0"))
+    try:
+        scenario_registry.get_spec(scenario)  # fail early, listing the registered names
+    except KeyError as exc:
+        raise SystemExit(str(exc.args[0])) from None
+    names = [a for a in rest if not a.startswith("--")] or list(engines.BASELINE_ENGINES)
+    results = {n: replay.run_session(lambda n=n: engines.make_engine(n), scenario=scenario, seed=seed) for n in names}
     if as_json:
         print(json.dumps({n: {"metrics": r["metrics"], "timing": r["timing"]} for n, r in results.items()}, indent=1))
         return 0
+    if scenario != scenario_registry.DEFAULT_SCENARIO or seed:
+        print(f"scenario: {scenario}  seed: {seed}")
     print(table(results))
     return 0
+
+
+def parse_options(argv: list[str], valued: tuple[str, ...]) -> tuple[dict[str, str], list[str]]:
+    """Split ``--opt value`` / ``--opt=value`` pairs for the options in ``valued`` from the other arguments."""
+    options: dict[str, str] = {}
+    rest: list[str] = []
+    it = iter(argv)
+    for arg in it:
+        key, eq, val = arg.partition("=")
+        if key in valued:
+            if not eq:
+                val = next(it, "")
+            if not val:
+                raise SystemExit(f"{key} needs a value")
+            options[key] = val
+        else:
+            rest.append(arg)
+    return options, rest
 
 
 if __name__ == "__main__":
