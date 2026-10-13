@@ -2,8 +2,8 @@
 
 [Tameru](https://github.com/0xWhiteMage/tameru-compaction-system) deterministic, extractive context
 compaction for [Hermes Agent](https://github.com/NousResearch/hermes-agent), as a standalone plugin (no Hermes
-source changes). Source and package metadata identify **1.4.1**; a GitHub tag/Release is pending.
-The vendored engine is synchronised with the reviewed Tameru 1.4.1 source. Compatibility is verified
+source changes). Source and package metadata identify **1.5.0**; a GitHub tag/Release is pending.
+The vendored engine is synchronised with the reviewed Tameru 1.5.0 source. Compatibility is verified
 against Hermes `a0a4992`, the current Hermes PR base (see [Compatibility](#compatibility)).
 Changes and historical measurements: [CHANGELOG.md](CHANGELOG.md) and [docs/REPORT-1.4.1.md](docs/REPORT-1.4.1.md).
 
