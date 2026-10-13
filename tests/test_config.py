@@ -60,7 +60,7 @@ def test_defaults_match_the_contract():
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.70,
-        "default_proactive_prune_min_result_chars": 8000,
+        "default_proactive_prune_min_result_chars": 8000, "reprune_target_ratio": 0.30, "prune_regrowth_ratio": 0.20,
     }
 
 
@@ -99,6 +99,8 @@ ENV_SAMPLES = {
     "default_proactive_prune_tokens": ("0", 0),
     "default_proactive_prune_ratio": ("0.5", 0.5),
     "default_proactive_prune_min_result_chars": ("500", 500),
+    "prune_regrowth_ratio": ("0.1", 0.1),
+    "reprune_target_ratio": ("0.4", 0.4),
 }
 
 
@@ -268,6 +270,8 @@ BAD_ENV = [
     ("default_proactive_prune_tokens", "-1"), ("default_proactive_prune_ratio", "1.5"),
     ("retained_extract_budget_ratio", "1.0"), ("retained_extract_budget_ratio", "-0.1"),
     ("retained_extract_budget_ratio", "nan"), ("retained_extract_budget_ratio", "wide"),
+    ("prune_regrowth_ratio", "1.0"), ("prune_regrowth_ratio", "-0.1"), ("prune_regrowth_ratio", "soon"),
+    ("reprune_target_ratio", "1.5"), ("reprune_target_ratio", "nan"),
 ]
 
 

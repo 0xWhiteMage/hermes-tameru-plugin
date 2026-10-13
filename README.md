@@ -167,6 +167,8 @@ plugins:
 | `default_proactive_prune_tokens` | `48000` | Floor of the plugin's proactive-prune trigger, used only if you did not set `compression.proactive_prune_tokens`. |
 | `default_proactive_prune_ratio` | `0.70` | The plugin's trigger is `max(default_proactive_prune_tokens, ratio x Hermes' compaction threshold)`, re-derived when the model changes, so a large window is not pruned long before it fills. `0` keeps the fixed floor. |
 | `default_proactive_prune_min_result_chars` | `8000` | Value used for `compression.proactive_prune_min_result_chars` only if you did not set it: Hermes' own default (was 2,000; across five replay scenarios that cost 3.5% more than Hermes as shipped, +21.7% on many 1-3K results, for no more facts or error templates than 8,000). |
+| `prune_regrowth_ratio` | `0.20` | After a prune commit the next one may fire once the prompt has regrown by `ratio x Hermes' compaction threshold` (Hermes: a full trigger-sized runway, 0.7 of it). Applies only to the plugin's own window-scaled trigger (windows above ~91K); a `compression.proactive_prune_tokens` of yours, an explicit constructor argument and small windows keep Hermes' rule. `0` keeps Hermes' runway. |
+| `reprune_target_ratio` | `0.30` | A later prune (one after the first commit) is declined unless it leaves the prompt at or below `ratio x compaction threshold` (a compaction leaves ~0.2): a prune that keeps much more than that gains little over the compaction it delays, and breaks the cache just the same. Same scope as `prune_regrowth_ratio`. `0` turns the gate off. |
 
 Environment variable names: `TAMERU_HERMES_ENABLED`, `TAMERU_HERMES_MIN_TOOL_CHARS`,
 `TAMERU_HERMES_MAX_EXTRACT_CHARS`, `TAMERU_HERMES_BRIEF_CHARS`, `TAMERU_HERMES_MAX_RISK`,

@@ -38,8 +38,9 @@ from pathlib import Path
 from typing import Any, NamedTuple
 
 from .config import (
-    TameruSettings, compression_kwargs, load_settings, prune_default_applies, read_hermes_config,
-    scaled_prune_tokens, scaled_retained_budget,
+    TameruSettings, compression_kwargs, load_settings, prune_default_applies, prune_regrowth_tokens,
+    prune_trigger_follows_window,
+    read_hermes_config, scaled_prune_tokens, scaled_retained_budget,
 )
 from .hermes_compat import (
     LEAN_STUB_RE,
@@ -50,6 +51,7 @@ from .hermes_compat import (
     elision_marker,
     is_persisted_block,
     marker_artifact_re,
+    message_budget_tokens,
     probe_seams,
     refused_summary,
     session_db_usable,
@@ -360,6 +362,9 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         scope = self._new_scope(messages)
         token = _SCOPE.set(scope)
         started = time.perf_counter()
+        trigger, min_reclaim = self.proactive_prune_tokens, self.proactive_prune_min_reclaim_tokens
+        self.proactive_prune_tokens = self._regrowth_trigger(trigger)
+        self.proactive_prune_min_reclaim_tokens = self._reprune_min_reclaim(messages, min_reclaim)
         try:
             # Counters of a pass Hermes declines to commit (it returns the input object) are dropped:
             # nothing was rewritten, so no row was rendered and no character saved.
@@ -372,10 +377,58 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 with self._telemetry.hold() as held:
                     res = parent(messages, current_tokens, *args, **kwargs)
                     held.keep = res[0] is not messages
+            if res[0] is not messages:
+                self._arm_regrowth(res[0])
             return res
         finally:
+            self.proactive_prune_tokens, self.proactive_prune_min_reclaim_tokens = trigger, min_reclaim
             _SCOPE.reset(token)
             self._telemetry.time(time.perf_counter() - started)
+
+    def _regrowth_active(self) -> bool:
+        """The regrowth re-arm applies to the plugin's own, window-scaled trigger; a user's or caller's value is Hermes'."""
+        return (
+            bool(getattr(self, "_scaled_prune", False)) and self._settings.prune_regrowth_ratio > 0
+            and prune_trigger_follows_window(self._settings, getattr(self, "threshold_tokens", 0))
+        )
+
+    def _regrowth_trigger(self, trigger: int) -> int:
+        """The trigger gate while a prune is armed: Hermes' rearm gate (message tokens) then decides alone."""
+        if not self._regrowth_active():
+            return trigger
+        rearm = getattr(self, "_proactive_prune_rearm_tokens", 0)
+        return min(trigger, rearm) if isinstance(rearm, int) and not isinstance(rearm, bool) and rearm > 0 else trigger
+
+    def _reprune_min_reclaim(self, messages: list[dict], min_reclaim: int) -> int:
+        """Hermes' minimum reclaim, raised on a re-prune so that it leaves at most ``reprune_target_ratio`` of the threshold.
+
+        A prune that leaves much more than a compaction would (about 0.2 of the threshold) gains little over waiting
+        for the compaction, which resets the prompt for good, while its commit breaks the cache just the same.
+        """
+        ratio = self._settings.reprune_target_ratio
+        rearm = getattr(self, "_proactive_prune_rearm_tokens", 0)
+        if not self._regrowth_active() or ratio <= 0 or not isinstance(rearm, int) or rearm <= 0:
+            return min_reclaim
+        try:
+            target = round(ratio * int(getattr(self, "threshold_tokens", 0) or 0))
+            return max(min_reclaim, message_budget_tokens(messages) - target) if target > 0 else min_reclaim
+        except Exception:
+            return min_reclaim
+
+    def _arm_regrowth(self, pruned: list[dict]) -> None:
+        """After a commit, shorten Hermes' rearm runway to ``prune_regrowth_ratio`` of the compaction threshold."""
+        if not self._regrowth_active():
+            return
+        try:
+            gap = prune_regrowth_tokens(self._settings, getattr(self, "threshold_tokens", 0))
+            rearm = getattr(self, "_proactive_prune_rearm_tokens", 0)
+            if gap <= 0 or not isinstance(rearm, int) or isinstance(rearm, bool):
+                return
+            lowered = message_budget_tokens(pruned) + max(gap, int(getattr(self, "proactive_prune_min_reclaim_tokens", 0)))
+            if lowered < rearm:
+                self._proactive_prune_rearm_tokens = lowered
+        except Exception:
+            self._telemetry.count("error", where="regrowth")
 
     def compress(
         self, messages, current_tokens=None, focus_topic=None, force=False, memory_context="",

@@ -6,6 +6,12 @@ All notable changes to this project are documented here. The format follows
 ## [Unreleased]
 
 ### Changed
+- **A prune is followed by the next prune after a regrowth of `prune_regrowth_ratio` (0.20) of the threshold, not Hermes' full
+  trigger-sized runway (0.7), and only if it leaves the prompt at or below `reprune_target_ratio` (0.30) of the threshold.**
+  Hermes' runway outlasted the stretch to the compaction a prune is meant to replace, so a 128K-256K session regrew raw
+  rows for the rest of its life while stock Hermes compacted and reset (replay vs Hermes as shipped: oncall 200K +23.7%
+  cost, default 128K +4.0%; now -9.0% and -5.6%, with more gold facts and every error template). Window-scaled trigger
+  only; small windows, a user's `compression.proactive_prune_tokens` and an explicit argument are untouched.
 - **The plugin's proactive-prune trigger follows the window.** Unless you set `compression.proactive_prune_tokens`,
   it is `max(default_proactive_prune_tokens, default_proactive_prune_ratio x Hermes' compaction threshold)` (48,000
   and 0.70), re-derived when the model changes: 48K on 32K/64K windows, 105K on a 200K window. The fixed 48K trigger
