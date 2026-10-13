@@ -108,6 +108,25 @@ def parse_header(content: str) -> dict | None:
     }
 
 
+def for_summary(content: str) -> str:
+    """``content`` as the summarizer and Hermes' anchor index should read it (anything but a current row: as is).
+
+    A header-only row (its text is gone) is cut to Hermes' own one-line summary that opens it: the counts, the
+    omitted categories and the ``ref`` are bookkeeping of the prompt cache and the recovery tool, not facts a
+    summary can use, and they made every such row two to four times as long as Hermes' line. Any other rung keeps
+    its header (it says the body is partial) without the ``ref``: Hermes' anchor index reads a 16-hex ref as a
+    commit hash, so an unlabelled list of the refs of rows that are gone crowded real commit ids out of it.
+    """
+    if not isinstance(content, str) or TAMERU_TAG not in content[:HEADER_MAX_LEN + 200]:
+        return content
+    m = _ROW_RE.match(content)
+    if m is None:
+        return content
+    if m["rung"] == "header" and m.end() == len(content):
+        return m["parent"]
+    return content[:m.start("ref") - len(" ref=")] + "]" + content[m.end():]
+
+
 def header_parent(content: str) -> str | None:
     """Hermes' own one-line summary that opens a current row's header, else None."""
     m = _ROW_RE.match(content) if isinstance(content, str) else None

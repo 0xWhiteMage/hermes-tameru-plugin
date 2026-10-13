@@ -160,6 +160,7 @@ plugins:
 | `errors_row_chars` | `1600` | Cap on the exemplar lines of one `errors` row; `0` turns the rung off (rows fall to a bare header as in 1.4.1). |
 | `retained_extract_budget_chars` | `6000` | Total size of extract/brief bodies rendered rows may keep. Committed rows keep theirs newest first; a new row gets what is left, else a header. Rows beyond it step down to a header (ref kept), only inside a pass Hermes already commits. |
 | `retained_extract_budget_ratio` | `0.10` | The retained-extract budget is `max(retained_extract_budget_chars, ratio x Hermes' compaction threshold in tokens)` chars: 6,000 up to 64K windows, 9,600 at 128K, 15,000 at 200K. `0` keeps the fixed value. |
+| `small_window_threshold_tokens` | `54400` | Reference compaction threshold (a 64K window under Hermes main's 85%). Below it `retained_extract_budget_chars` and `retained_error_budget_chars` shrink in proportion (a 32K window, threshold 27,200: 3,000 and 4,000 chars): the fixed sizes are twice the share of the context there, so the post-compaction context came out bigger and the next compaction came sooner. From the reference up nothing changes. `0` keeps the fixed sizes. |
 | `prune_tail` | `tokens` | Tail protected by the proactive prune: `tokens` (the shorter of `protect_last_n` and the full compaction's tail token budget, and pass 4 also runs) or `count` (Hermes' `protect_last_n` messages, stock behaviour). |
 | `supersession` | `true` | Enable structural supersession. |
 | `ledger` | `true` | Add the artifact trail to Hermes' compaction summary. |

@@ -23,13 +23,18 @@ PROTECT_LAST_N = 4
 
 
 def make_engine(settings: TameruSettings | None = None, **kwargs: Any) -> TameruContextEngine:
-    """An engine with Hermes' prune gates open; ``kwargs`` go to ``ContextCompressor``."""
+    """An engine with Hermes' prune gates open; ``kwargs`` go to ``ContextCompressor``.
+
+    The stub's 64K window has a 32K-token compaction threshold, below the small-window reference
+    (``small_window_threshold_tokens``): the default here keeps the retained budgets at their fixed sizes, so the
+    ladder tests stay about the ladder. ``test_small_window_scaling`` covers the scaling.
+    """
     options: dict[str, Any] = {
         "quiet_mode": True, "config_context_length": 64_000, "proactive_prune_tokens": 1,
         "proactive_prune_min_reclaim_tokens": 0, "proactive_prune_min_result_chars": MIN_PRUNE_CHARS,
         "protect_last_n": PROTECT_LAST_N,
     }
-    return TameruContextEngine(settings=settings or TameruSettings(), **{**options, **kwargs})
+    return TameruContextEngine(settings=settings or TameruSettings(small_window_threshold_tokens=0), **{**options, **kwargs})
 
 
 class Chat:

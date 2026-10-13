@@ -14,6 +14,17 @@ All notable changes to this project are documented here. The format follows
   error template under its header instead of dropping to a bare header (`retained_error_budget_chars` 8,000,
   `errors_row_chars` 1,600; `0` turns it off). On 128K-200K windows the plugin had kept 0-1 of 7 error templates;
   now 7/7 at every window measured. The header grammar gains the rung; older rows still parse.
+- **Small windows keep less.** The retained-extract and retained-error budgets shrink in proportion below a 64K
+  window's compaction threshold (`small_window_threshold_tokens`, 54,400): 3,000 and 4,000 chars at 32K. At 32K the
+  fixed sizes were twice the share of the context, the post-compaction context came out bigger and the plugin
+  compacted sooner (replay, i18n at 32K, four seeds: 20 compactions against Hermes' 8; now 8, with 56 gold facts
+  against 48). From a 64K window up nothing changes.
+- **The summarizer and Hermes' anchor index read a Tameru row as Hermes would.** A header-only row is cut to Hermes'
+  own one-line summary and every other rung loses its `ref=` (`render.for_summary`, applied in
+  `_serialize_records_for_summary` and `_augment_summary_lean`; the transcript is not touched). Each ref used to land
+  in the summary's "commits:" anchor list (16 hex chars read as a commit hash, ~18 chars each, unlabelled, ahead of the
+  real commit ids), and each header-only row was 2-4x Hermes' line in the summarizer prompt (replay, smallrows at
+  32K: summary prompts 199,109 chars, now 166,006; Hermes 112,113).
 
 ### Added
 - Replay: a `stock_defaults` engine (Hermes as shipped, proactive prune off) with a baseline and acceptance test,

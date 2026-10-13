@@ -58,7 +58,7 @@ def test_defaults_match_the_contract():
         "enabled": True, "min_tool_chars": 400, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
         "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (),
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
-        "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "errors_row_chars": 1600, "prune_tail": "tokens",
+        "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "small_window_threshold_tokens": 54_400, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.70,
         "default_proactive_prune_min_result_chars": 8000,
     }
@@ -91,6 +91,7 @@ ENV_SAMPLES = {
     "retained_extract_budget_chars": ("2000", 2000),
     "retained_extract_budget_ratio": ("0.25", 0.25),
     "retained_error_budget_chars": ("100", 100),
+    "small_window_threshold_tokens": ("40000", 40_000),
     "errors_row_chars": ("0", 0),
     "prune_tail": (" COUNT ", "count"),
     "supersession": ("0", False),

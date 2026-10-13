@@ -41,10 +41,12 @@ MIN_COMPACTIONS = {"oncall": 2, "refactor": 1, "smallrows": 1, "i18n": 1}  # of 
 #: ``(scenario, check, engine)`` -> why the plugin loses it (measured numbers; see docs/REPORT-1.4.1.md section 9).
 KNOWN_LOSSES: dict[tuple[str, str, str], str] = {
     ("smallrows", "cost", "tameru_1_4_product"): (
-        "LOSS +2.0%: 1,730,835 vs Hermes as shipped 1,696,390 char-eq (seed 0). Since the plugin's prune floor is Hermes' own "
+        "LOSS +1.7%: 1,725,663 vs Hermes as shipped 1,696,390 char-eq (seed 0; was +2.0% before the summarizer read a Tameru row "
+        "as Hermes' line: summary prompts 69,360 chars, were 81,833, Hermes 53,085). Since the plugin's prune floor is Hermes' own "
         "8,000 chars (it was 2,000: +21.7% here, small prunes paying full-suffix cache rewrites), no row of this scenario is "
-        "pruned and the run equals the equal-gates one: the loss is the summary's Artifact Trail and Errors ledger (80,008 vs "
-        "75,264 chars after the first compaction), which buys 21/38 error templates against 10/38."
+        "pruned and the run equals the equal-gates one: the loss is the summary's Artifact Trail (2.5K) and the Anchor Index "
+        "lines for the error templates it keeps (79,378 vs 75,264 chars after the first compaction; the same run without the "
+        "ledger is +0.3%), which buys 21/38 error templates against 10/38."
     ),
     ("smallrows", "gold:decision", "tameru_1_4_product"): (
         "LOSS 3/4 vs 4/4 decision facts (seed 0): D3, as for tameru_1_4 below (the run is identical since the 8,000-char prune "
@@ -52,16 +54,16 @@ KNOWN_LOSSES: dict[tuple[str, str, str], str] = {
         "first summary and the fake summarizer drops it."
     ),
     ("refactor", "cost", "tameru_1_4"): (
-        "LOSS +2.0%: 1,528,492 vs stock (prune on at 48K) 1,499,065 char-eq (HEAD b7bb68c, seed 0; +1.9..+6.7% over seeds 0-3). Same single prune (request 29) "
+        "LOSS +1.8%: 1,526,442 vs stock (prune on at 48K) 1,499,065 char-eq (seed 0; +1.9..+6.7% over seeds 0-3 before the summary view). Same single prune (request 29) "
         "and compaction (57) as stock, but every context after a rewrite is 3-4K chars bigger: 86,310 vs 83,078 after the "
-        "prune (brief/errors/header text where stock keeps 80-character one-liners) and 56,672 vs 52,430 after the compaction "
+        "prune (brief/errors/header text where stock keeps 80-character one-liners) and 56,153 vs 52,430 after the compaction "
         "(Artifact Trail + Errors ledger in the summary). That is the price of 9/9 error templates (stock 1/9)."
     ),
     ("smallrows", "cost", "tameru_1_4"): (
-        "LOSS +2.0%: 1,730,835 vs stock 1,696,390 char-eq (HEAD b7bb68c, seed 0; +1.3..2.1% over seeds 0-3). Neither engine "
+        "LOSS +1.7%: 1,725,663 vs stock 1,696,390 char-eq (seed 0; was +2.0%, +1.3..2.1% over seeds 0-3, before the summary view). Neither engine "
         "prunes (no 8,000-char result exists); both compact at requests 41 and 79. The plugin's summary carries the Artifact "
-        "Trail and Errors ledger: 80,008 vs 75,264 chars after the first compaction and 79,309 vs 75,760 after the second, "
-        "bought 21/38 error templates against 10/38."
+        "Trail and the Anchor Index lines of the error templates: 79,378 vs 75,264 chars after the first compaction and 78,657 vs "
+        "75,760 after the second, bought 21/38 error templates against 10/38."
     ),
     ("smallrows", "gold:decision", "tameru_1_4"): (
         "LOSS 3/4 vs 4/4 decision facts (HEAD b7bb68c, seed 0): D3 (user, 'Do not bump its base image until its schema migration "

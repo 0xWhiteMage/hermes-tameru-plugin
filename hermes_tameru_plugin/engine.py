@@ -39,7 +39,7 @@ from typing import Any, NamedTuple
 
 from .config import (
     TameruSettings, compression_kwargs, load_settings, prune_default_applies, read_hermes_config,
-    scaled_prune_tokens, scaled_retained_budget,
+    scaled_error_budget, scaled_prune_tokens, scaled_retained_budget,
 )
 from .hermes_compat import (
     LEAN_STUB_RE,
@@ -73,6 +73,7 @@ from .render import (
     render,
     retarget_rung,
     true_line_count,
+    for_summary,
 )
 from .supersede import SupersessionIndex, build_index, superseded_by
 from .tameru.compress_context import (
@@ -330,6 +331,13 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         except Exception:
             return self._settings.retained_extract_budget_chars
 
+    def _retained_error_budget(self) -> int:
+        """The retained ``errors``-row budget now (``_retained_budget``'s counterpart)."""
+        try:
+            return scaled_error_budget(self._settings, getattr(self, "threshold_tokens", 0))
+        except Exception:
+            return self._settings.retained_error_budget_chars
+
     def clone_for_agent(self) -> TameruContextEngine:
         """A per-agent copy; the store, memo and telemetry copy as fresh empty objects."""
         return copy.deepcopy(self)
@@ -458,7 +466,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         decides whether that pass commits.
         """
         room = self._retained_budget()
-        err_room = self._settings.retained_error_budget_chars
+        err_room = self._retained_error_budget()
         demote: set[int] = set()
         for i in range(len(result) - 1, -1, -1):
             msg = result[i]
@@ -942,7 +950,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
     # ---- summary ledger -----------------------------------------------------------------------
     def _augment_summary_lean(self, summary, turns_to_summarize):
         """Hermes' lean sections plus, with ``ledger`` on, the exact artifact trail."""
-        out = super()._augment_summary_lean(summary, turns_to_summarize)
+        out = super()._augment_summary_lean(summary, self._summary_view(turns_to_summarize))
         if not (self._settings.enabled and self._settings.ledger and self._seams.augment):
             return out
         try:
@@ -956,6 +964,30 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         except Exception:
             self._telemetry.count("error", where="ledger")
             return out
+
+    @staticmethod
+    def _summary_view(turns: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        """``turns`` with the Tameru rows cut to what a summary can use (``render.for_summary``).
+
+        Only rows that change are copied; the transcript itself is never touched.
+        """
+        out = []
+        for msg in turns:
+            content = msg.get("content") if isinstance(msg, dict) and msg.get("role") == "tool" else None
+            seen = for_summary(content) if isinstance(content, str) else content
+            out.append(msg if seen is content else {**msg, "content": seen})
+        return out
+
+    def _serialize_records_for_summary(self, turns):
+        """Hermes' records for the summarizer, from the summary view of ``turns``."""
+        if not (self._settings.enabled and self._seams.augment):
+            return super()._serialize_records_for_summary(turns)
+        try:
+            view = self._summary_view(turns)
+        except Exception:
+            self._telemetry.count("error", where="summary_view")
+            view = turns
+        return super()._serialize_records_for_summary(view)
 
     def _bodyless_originals(self) -> list[str]:
         """Originals of the rows that hold no text of them any more, wherever they sit in the transcript.
