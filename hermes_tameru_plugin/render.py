@@ -31,6 +31,7 @@ from collections import Counter
 from dataclasses import dataclass
 from typing import Literal
 
+from .hermes_compat import is_untrusted_tool, wrap_untrusted, wrapped_intact
 from .tameru.compress_context import classify_line
 
 TAMERU_TAG = " [tameru:"
@@ -233,11 +234,32 @@ def build_header(
     return _compose(_one_line(parent_line), stats.rung, counts, pieces, ref, max_len)
 
 
+_PARENT_TOOL_RE = re.compile(r"\s*\[([^\]\s]+)\]")
+
+
+def guard_untrusted_body(parent_line: str, body: str) -> str:
+    """``body`` inside Hermes' untrusted-data block when the row is a web, browser or MCP result.
+
+    Hermes wraps those results as data, and stock Hermes drops their text altogether when it prunes them. A body
+    kept by the ladder (the errors rung keeps lines from the middle of the page) must not reach the model
+    stripped of that wrapper. A body that is still one intact block is left as it is; any other is wrapped anew,
+    with the delimiter tokens already inside it defanged. The tool is the ``[name]`` Hermes opens its summary with.
+    """
+    found = _PARENT_TOOL_RE.match(parent_line) if isinstance(parent_line, str) else None
+    if found is None or not body or not is_untrusted_tool(found.group(1)) or wrapped_intact(body):
+        return body
+    return wrap_untrusted(found.group(1), body)
+
+
 def render(
     parent_line: str, stats: RenderStats, ref: str, *, meta_line: str = "", body: str = "",
 ) -> str:
-    """Header, then the optional meta line and body, each on its own line."""
+    """Header, then the optional meta line and body, each on its own line.
+
+    The body of a web, browser or MCP result stays inside Hermes' untrusted-data block (``guard_untrusted_body``).
+    """
     out = build_header(parent_line, stats, ref)
+    body = guard_untrusted_body(parent_line, body)
     if meta_line:
         out += "\n" + meta_line
     if body:

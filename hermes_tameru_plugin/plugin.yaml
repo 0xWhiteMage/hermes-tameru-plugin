@@ -1,5 +1,5 @@
 name: tameru
-display_name: Tameru (貯める)
+label: Tameru (貯める)
 description: "Tameru 1.4.1 deterministic extractive context compaction: query-aware per-result pruning inside Hermes' own gates, with a tameru_expand recovery tool"
 version: 1.4.1
 license: MIT

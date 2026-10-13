@@ -26,8 +26,9 @@ original text of the summarized tool results, so a lossy summarizer cannot drop 
 log held; they live in their own budget (``ERRORS_CHARS``, on top of ``max_chars``) and the most
 recently seen win when they do not all fit.
 
-The text never contains ``User asked:`` (Hermes' summary validator reads it as a user claim), and a
-path or command that holds a probable credential is shown as ``<redacted>``.
+The text never contains ``User asked:`` (Hermes' summary validator reads it as a user claim), a
+path or command that holds a probable credential is shown as ``<redacted>``, and the whole section goes through
+Hermes' own compaction redactor, as every other section of the summary does (URL credentials, API keys).
 
 Import-safe: stdlib, sibling modules and the vendored engine only, nothing happens at import time.
 """
@@ -44,7 +45,10 @@ from .hermes_compat import (
     DUPLICATE_PREFIX,
     LEAN_STUB_RE,
     PRUNED_PLACEHOLDER,
+    has_untrusted_wrapper,
     is_persisted_block,
+    is_untrusted_tool,
+    redact_compaction_text,
     refused_summary,
     tool_calls_by_id,
 )
@@ -331,8 +335,9 @@ def build_ledger(
     ``store`` supplies the originals of Tameru-rendered rows. ``previous`` is the summary from
     before ``turns`` (Hermes' ``_previous_summary``, which does not yet account for them): the
     entries of its Artifact Trail section come first, so the trail accumulates across compactions.
-    ``skip_tools`` names tools whose results are not scanned for errors (instructions, memory);
-    ``extra_originals`` are texts of results outside ``turns`` whose bodies are gone (also scanned).
+    ``skip_tools`` names tools whose results are not scanned for errors (instructions, memory). Web, browser
+    and MCP results are never scanned either: a stranger wrote them, and the summary would carry their lines
+    without Hermes' untrusted-data wrapper. ``extra_originals`` are texts of results outside ``turns`` whose bodies are gone (also scanned).
     Files and Commands never exceed ``max_chars``, the Errors lines ``ERRORS_CHARS``.
     """
     files: dict[str, _FileEntry] = {}
@@ -344,6 +349,8 @@ def build_ledger(
 
     def scan(text: str) -> None:
         nonlocal scan_room
+        if has_untrusted_wrapper(text):   # a page's own lines are data; the summary is not the place for them
+            return
         if text and len(text) <= scan_room:
             scan_room -= len(text)
             _note_errors(errors, clock, text)
@@ -359,7 +366,7 @@ def build_ledger(
         elif msg.get("role") == "tool" and msg.get("tool_call_id"):
             tool, raw_args = calls.get(str(msg["tool_call_id"]), ("", None))
             content = text_of(msg.get("content"))
-            if tool not in skip_tools and len(content) >= _ERROR_SCAN_MIN_CHARS:
+            if tool not in skip_tools and not is_untrusted_tool(tool) and len(content) >= _ERROR_SCAN_MIN_CHARS:
                 scan(_original_text(content, store))
             if tool != "terminal" and tool not in _FILE_OPS:
                 continue
@@ -396,7 +403,7 @@ def build_ledger(
         kept = _fit(error_items, ERRORS_CHARS - len("Errors:") - 1)
         if kept:
             out += ["Errors:", *kept]
-    return "\n".join([HEADING, *out]) if out else ""
+    return redact_compaction_text("\n".join([HEADING, *out])) if out else ""
 
 
 def merge_into_summary(summary: str, ledger: str) -> str:

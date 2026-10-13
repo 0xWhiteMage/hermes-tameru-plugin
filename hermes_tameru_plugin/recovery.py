@@ -9,7 +9,8 @@ before 1.4.1 carry its first 8 hex, which still resolve). Two places can hand th
   ``session_lookup_factory`` finds a ref again after gateway eviction, a restart or ``--resume``.
 
 ``expand`` is the body of the ``tameru_expand`` tool: exact original lines by range or regex, as
-JSON, never raising. A miss says how to search the session instead.
+JSON, never raising. A miss says how to search the session instead. The answer for the original of a web,
+browser or MCP result comes inside Hermes' untrusted-data block, as that result did.
 
 Import-safe: stdlib and the vendored engine only, nothing happens at import time. ``render`` is
 imported when a lookup first runs, so a plugin dir without it still loads.
@@ -26,6 +27,7 @@ from collections.abc import Callable
 from dataclasses import dataclass, field
 from typing import Any
 
+from .hermes_compat import has_untrusted_wrapper, is_untrusted_tool, wrap_untrusted
 from .tameru.compress_context import contains_secret
 
 EXPAND_TOOL_NAME = "tameru_expand"
@@ -131,6 +133,8 @@ def _grep_hits(
     ``timeout`` seconds (the child is killed) or the child could not run."""
     if _linear_pattern(pattern.pattern):
         return [i for i, text in enumerate(texts) if pattern.search(text)], ""
+    if not sys.executable:   # an embedded interpreter has no program to start
+        return None, "grep could not run in a child process (no Python executable); use a literal pattern"
     payload = json.dumps({"p": pattern.pattern, "t": texts}).encode("ascii")
     try:
         done = subprocess.run(
@@ -142,7 +146,7 @@ def _grep_hits(
             f"grep timed out after {timeout:g} s and was stopped: the pattern backtracks too much on this output; "
             "simplify it (a literal word, or fewer .* / \\w* repeats)"
         )
-    except (OSError, ValueError) as exc:
+    except (OSError, ValueError, TypeError) as exc:
         return None, f"grep could not run in a child process ({type(exc).__name__}); use a literal pattern"
     try:
         hits = json.loads(done.stdout.decode("ascii"))
@@ -323,7 +327,8 @@ def expand(
     text, line breaks included. Output stops at ``max_chars`` (``truncated``); a single line
     longer than that is cut. The original comes from ``store``, else from ``session_lookup``
     (a hit is cached in the store). A miss or bad arguments yield ``{"error": ...}``; this never
-    raises.
+    raises. The answer for a web, browser or MCP result (the store knows the tool; an archived one is
+    told by Hermes' wrapper at the start of its text) is wrapped whole as untrusted data, like the result was.
 
     A ``grep`` with any repeat or alternation runs in a child process killed after ``grep_timeout`` seconds (an
     error asks the model to simplify the pattern); each line is searched in its first ``grep_line_chars`` chars
@@ -372,6 +377,12 @@ def _expand(
             )
 
     original = store.get(ref)
+    tool = ""
+    if original is not None:
+        try:
+            tool = store.entry(ref).tool   # the tool decides whether the answer is untrusted data
+        except Exception:
+            tool = ""
     if original is None and session_lookup is not None:
         try:
             original = session_lookup(ref)
@@ -430,7 +441,10 @@ def _expand(
         result["matched_lines"] = returned
         if capped:
             result["lines_capped"] = capped
-    return json.dumps(result, ensure_ascii=False)
+    answer = json.dumps(result, ensure_ascii=False)
+    if is_untrusted_tool(tool) or has_untrusted_wrapper(original):
+        return wrap_untrusted(tool if is_untrusted_tool(tool) else EXPAND_TOOL_NAME, answer)
+    return answer
 
 
 # ---- the session-archive lookup --------------------------------------------------------------
@@ -475,13 +489,27 @@ def _ref_index(
     return index
 
 
+def _archived_messages(session_db: Any, session_id: str) -> list:
+    """Every row of ``session_id`` the archive holds, compaction-archived ones included.
+
+    After a compaction that rotated the session (Hermes' parent -> child split) the rows a ref names stay in the
+    parent session, so the read covers the verified compression lineage when this Hermes can (``include_ancestors``);
+    an older ``get_messages`` without that argument gives the session alone.
+    """
+    try:
+        return session_db.get_messages(session_id, include_compacted=True, include_ancestors=True)
+    except TypeError:
+        return session_db.get_messages(session_id, include_compacted=True)
+
+
 def session_lookup_factory(
     session_db: Any, session_id: str, make_ref: Callable[[dict, str], str],
 ) -> Callable[[str], str | None]:
     """A ``ref -> original text | None`` lookup over the archived tool rows of ``session_id``.
 
     The first call reads ``session_db.get_messages(session_id, include_compacted=True)`` (the
-    compaction-archived originals included) and keeps the last ``MAX_SCAN_ROWS`` rows. Each tool
+    compaction-archived originals included, and after a session rotation those of the parent sessions)
+    and keeps the last ``MAX_SCAN_ROWS`` rows. Each tool
     row that is not itself a Tameru render gets the ref ``make_ref`` would have minted for it, and
     a match returns its content. The scan is cached for the life of the returned callable, which
     never raises: any failure is a miss.
@@ -495,7 +523,7 @@ def session_lookup_factory(
             from .render import is_tameru_rendered
 
             if rows is None:
-                messages = session_db.get_messages(session_id, include_compacted=True)
+                messages = _archived_messages(session_db, session_id)
                 rows = [
                     (row, row["content"]) for row in messages[-MAX_SCAN_ROWS:]
                     if isinstance(row, dict) and row.get("role") == "tool"
