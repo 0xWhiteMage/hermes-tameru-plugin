@@ -59,7 +59,7 @@ class TameruSettings:
     ledger: bool = True
     telemetry_log: str = ""                    # JSONL path; "" = off
     default_proactive_prune_tokens: int = 48_000          # only if compression.proactive_prune_tokens is not set
-    default_proactive_prune_ratio: float = 0.70           # ...then at least this share of Hermes' compaction threshold
+    default_proactive_prune_ratio: float = 0.75           # ...then at least this share of Hermes' compaction threshold
     default_proactive_prune_min_result_chars: int = 8000  # Hermes' own default; only if compression.proactive_prune_min_result_chars is not set
     reprune_target_ratio: float = 0.30         # ...and commits only if it leaves the prompt at or below this share of the threshold (a compaction leaves ~0.2); 0 = no such gate
     prune_regrowth_ratio: float = 0.20         # after a prune commit, the next may fire once the prompt regrew by this share of Hermes' compaction threshold (plugin-supplied trigger only); 0 = Hermes' full trigger-sized runway
@@ -436,7 +436,7 @@ def scaled_prune_tokens(settings: TameruSettings, threshold_tokens: Any) -> int:
 def prune_trigger_follows_window(settings: TameruSettings, threshold_tokens: Any) -> bool:
     """True when ``default_proactive_prune_ratio * threshold`` (not the fixed floor) sets the plugin's trigger.
 
-    That is a window big enough for a prune to leave room to regrow before the compaction (above ~91K tokens with
+    That is a window big enough for a prune to leave room to regrow before the compaction (above ~85K tokens with
     Hermes' default threshold). On a smaller one the trigger sits at the threshold and a compaction follows
     within a request or two, so the regrowth rules below do not apply.
     """
@@ -452,7 +452,7 @@ def prune_regrowth_tokens(settings: TameruSettings, threshold_tokens: Any) -> in
     """Tokens the prompt must regrow after a prune commit before the plugin's next prune may fire (0 = Hermes' runway).
 
     Hermes demands a full trigger-sized regrowth (``max(reclaimed, proactive_prune_tokens)``) so a commit's cache
-    break is never paid twice cheaply. On a large window that runway (0.7 of the compaction threshold) is longer
+    break is never paid twice cheaply. On a large window that runway (0.75 of the compaction threshold) is longer
     than the stretch to the compaction a prune is meant to replace, so the session regrew raw rows for the
     rest of its life while stock Hermes' next compaction threw them away: oncall 200K cost +23.7%, default
     128K +4.0%. A commit rewrites the prefix from its first changed row: it pays back once about half of the

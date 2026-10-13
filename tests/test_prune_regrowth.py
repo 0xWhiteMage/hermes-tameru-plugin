@@ -1,7 +1,7 @@
 """After a prune commit the plugin's next prune follows the window, not Hermes' full-trigger runway.
 
 Hermes asks for a regrowth of ``max(reclaimed, proactive_prune_tokens)`` before the next commit. With the plugin's
-window-scaled trigger (0.7 of the compaction threshold) that is longer than the stretch to the compaction the
+window-scaled trigger (0.75 of the compaction threshold) that is longer than the stretch to the compaction the
 prune is meant to replace: a 200K session regrew raw rows for the rest of its life (oncall 200K replay: +23.7% cost
 against stock Hermes, which compacted and reset). ``prune_regrowth_ratio`` shortens the runway to a share of the
 threshold and ``reprune_target_ratio`` makes a later commit worth its cache break: it must leave the prompt at or
@@ -71,7 +71,7 @@ def test_prune_regrowth_tokens(threshold, expected):
 
 @pytest.mark.parametrize(("threshold", "expected"), [
     (0, False), (None, False), ("junk", False), (54_400, False),   # 64K window: the 48K floor sets the trigger
-    (68_572, False), (68_573, True), (96_000, True), (192_000, True),
+    (64_000, False), (64_001, True), (96_000, True), (192_000, True),
 ])
 def test_prune_trigger_follows_window(threshold, expected):
     assert prune_trigger_follows_window(TameruSettings(), threshold) is expected

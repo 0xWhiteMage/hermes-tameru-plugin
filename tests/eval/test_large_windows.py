@@ -29,16 +29,8 @@ WINDOWS = (128_000, 200_000, 256_000)
 SCENARIOS = tuple(registry.scenario_names())
 CELLS = [(s, w) for s in SCENARIOS for w in WINDOWS]
 
-#: ``(scenario, window, check)`` -> why the plugin loses it.
-KNOWN_LOSSES: dict[tuple[str, int, str], str] = {
-    ("default", 200_000, "gold"): (
-        "LOSS 14/17 vs 17/17 gold facts (recall R1 ORD-90417, R5 deploy-9d41, R6 ORD-77031: needles inside 300-400 line "
-        "logs), for -9.9% cost. Hermes as shipped never compacts this session (peak 109.7K estimated tokens against a "
-        "150K threshold); the plugin's trigger (0.70 x 150K = 105K) is crossed once, at request 53 of 62, and the prune "
-        "cuts 13 rows from 412K to 100K chars. Any prune of a session that would not have compacted trades such facts "
-        "for cost; a trigger above 0.731 of the threshold (this session's peak) would not prune it at all."
-    ),
-}
+#: ``(scenario, window, check)`` -> why the plugin loses it (measured numbers). Empty: it loses nothing here.
+KNOWN_LOSSES: dict[tuple[str, int, str], str] = {}
 
 _CACHE: dict[tuple[str, int, str], dict] = {}
 

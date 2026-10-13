@@ -51,9 +51,9 @@ def test_small_windows_keep_the_fixed_trigger_and_large_ones_prune_later(user_co
     small = engine.proactive_prune_tokens
     engine.update_model("test-model", 200_000)   # a model switch to a bigger window rescales
     large = engine.proactive_prune_tokens
-    assert small == 48_000 or small == _expected(engine) and engine.threshold_tokens * 0.7 > 48_000
+    assert small == 48_000 or small == _expected(engine) and engine.threshold_tokens * 0.75 > 48_000
     assert large == _expected(engine)
-    if engine.threshold_tokens * 0.7 > 48_000:
+    if engine.threshold_tokens * 0.75 > 48_000:
         assert large > small
 
 
@@ -92,7 +92,7 @@ def test_a_clone_keeps_scaling(user_config):
 
 
 @pytest.mark.parametrize(("threshold", "expected"), [
-    (0, 48_000), (None, 48_000), ("junk", 48_000), (54_400, 48_000), (108_800, 76_160), (170_000, 119_000),
+    (0, 48_000), (None, 48_000), ("junk", 48_000), (54_400, 48_000), (108_800, 81_600), (170_000, 127_500),
 ])
 def test_scaled_prune_tokens(threshold, expected):
     assert scaled_prune_tokens(TameruSettings(), threshold) == expected

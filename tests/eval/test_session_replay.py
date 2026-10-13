@@ -253,7 +253,7 @@ def _large(name: str, window: int) -> dict:
 
 
 def test_a_session_under_the_scaled_trigger_is_left_exactly_as_stock_leaves_it():
-    """256K window: the session never reaches the plugin's trigger (70% of Hermes' compaction threshold), so it is
+    """256K window: the session never reaches the plugin's trigger (75% of Hermes' compaction threshold), so it is
     replayed exactly as Hermes as shipped replays it: every fact kept, same cost. The fixed 48K trigger it
     replaced pruned this session twice and kept 13 of 17 gold facts and 1 of 7 error templates."""
     theirs, ours = _large("stock_defaults", 256_000), _large("tameru_1_4_product", 256_000)
