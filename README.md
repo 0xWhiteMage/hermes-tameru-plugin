@@ -1,5 +1,7 @@
 # hermes-tameru-plugin
 
+![Tameru (貯める): big tool outputs, kept small. Nothing lost.](docs/assets/hero.png)
+
 [Tameru](https://github.com/0xWhiteMage/tameru-compaction-system) deterministic, extractive context compaction for
 [Hermes Agent](https://github.com/NousResearch/hermes-agent), as a standalone context-engine plugin (no Hermes source
 changes). **Version 1.5.0**, vendoring Tameru 1.5.0.
@@ -91,7 +93,7 @@ prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 cha
   `[tameru:<rung> kept K/N lines (KC of TC chars) ... ref=<16 hex>]`. Hermes' envelope fields (`exit_code`,
   `error`, `total_lines`) stay on a compact meta line, so Hermes' own regexes still match; gaps use Hermes' elision
   marker.
-- **Recovery: `tameru_expand(ref, start_line, end_line, grep, max_chars)`.** Returns the exact original lines (a
+- **Recovery: `tameru_expand(ref, start_line, end_line, grep, max_chars)`** (展開, *tenkai*: "unfold"). Returns the exact original lines (a
   range, or the lines matching a regex) as JSON, capped at `max_chars` (default 12,000; at most 50,000) with a
   continuation hint. Originals come from a per-agent in-memory store and, when Hermes' session database is
   reachable, from the compaction archive, so a ref also resolves after a restart, `--resume` or a session rotation.

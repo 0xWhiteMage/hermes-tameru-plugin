@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased]
+
+### Changed
+- **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
+  rewritten for users: what the plugin does, a real before/after example, the `tameru_expand` tool and what to know
+  before installing. A hero banner (`docs/assets/hero.png`, 2:1) heads the repository README.
+- **`tameru_expand` description.** Opens with "Tameru Expand (展開, tenkai: unfold)" and says in plain words that it
+  brings back the exact text of a shortened tool output. Arguments and behaviour are unchanged.
+- **`plugin.yaml` description** reworded for people browsing plugins.
+
 ## [1.5.0] - 2026-10-13
 
 Summary and measurements: [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md). Release steps: [docs/RELEASING.md](docs/RELEASING.md).

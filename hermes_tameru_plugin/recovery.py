@@ -51,8 +51,8 @@ _GREP_CHILD = (
 EXPAND_SCHEMA: dict[str, Any] = {
     "name": EXPAND_TOOL_NAME,
     "description": (
-        "Recover the exact original text of a tool output that was pruned to save context. "
-        "A pruned tool result starts with a one-line summary ending in "
+        "Tameru Expand (展開, tenkai: unfold): get back the full, exact text of an earlier tool output that "
+        "Tameru shortened to save context. A shortened tool result starts with a one-line summary ending in "
         "[tameru:... ref=xxxxxxxxxxxxxxxx]; pass those hex characters (16, or 8 on older rows) as ref. Returns the original "
         "lines (1-based, inclusive start_line..end_line), or only the lines matching a "
         "case-insensitive regex given as grep (matched_lines lists their line numbers). Output is "
