@@ -421,15 +421,16 @@ def _expand(
     truncated = False
     for n in chosen:
         line = texts[n - 1] + (breaks[n - 1] if n <= len(breaks) else "")
-        if used + len(line) > limit:
+        overhead = len(str(n)) + 2 if pattern is not None else 0
+        if used + len(line) + overhead > limit:
             truncated = True
             if not content:   # one oversized line: its head, so the call still makes progress
-                content.append(line[:limit])
+                content.append(line[:max(0, limit - overhead)])
                 returned.append(n)
             break
         content.append(line)
         returned.append(n)
-        used += len(line)
+        used += len(line) + overhead
     result: dict[str, Any] = {
         "ref": ref,
         "total_lines": total,
