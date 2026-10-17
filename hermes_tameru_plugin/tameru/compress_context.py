@@ -29,6 +29,7 @@ from .agent_formats import (
     apply_agent_adapters,
     detect_test_runner,
     is_numbered_code,
+    is_diagnostic_line,
     preprocess_test_output,
     rejects_table,
 )
@@ -675,10 +676,16 @@ _ERROR_LINE_HINT_RE = re.compile(
 )
 
 
+_DIAG_EXEMPLAR_CAP = 32
+
+
 def _is_error_line(line: str) -> bool:
     """Level-tagged error, ``XxxError:``/``Exception:`` head, traceback head or
-    Go panic — the lines :func:`error_fingerprints` keys on."""
+    Go panic, or a multi-language compiler/test/runtime diagnostic
+    (agent_formats.DIAGNOSTIC_LINE_RE) — the lines :func:`error_fingerprints` keys on."""
     capped = line[:_RX_LINE_CAP]
+    if is_diagnostic_line(capped) and _ERR_NEGATED_RE.search(capped) is None:
+        return True
     if _ERROR_LINE_HINT_RE.search(capped) is None:
         return False
     s = _without_zero_counts(capped)
@@ -1820,6 +1827,11 @@ def _term_in_text(term: str, lower: str) -> bool:
     return re.search(rf"\b{re.escape(term)}\b", lower) is not None
 
 
+def _dup_fp(text: str) -> str:
+    """Duplicate-block key: lowercased, volatile fields masked per line (``mask_template``), capped at 240."""
+    return " ".join(mask_template(line.lower()) for line in text[:4000].split("\n"))[:240]
+
+
 def score_blocks(
     blocks: list[dict[str, Any]],
     query: str,
@@ -1918,7 +1930,7 @@ def score_blocks(
     for ent, span in bridge_entities.items():
         bridge_by_lower.setdefault(ent.lower(), []).append(span)
     for b in blocks:
-        fp = re.sub(r"\s+", " ", b["text"].lower())[:240]
+        fp = _dup_fp(b["text"])
         if len(fp) > 20:
             fp_counts[fp] = fp_counts.get(fp, 0) + 1
         for e in entities:
@@ -1991,7 +2003,8 @@ def score_blocks(
     # level-tagged error fingerprint (ERROR/FATAL/CRITICAL/PANIC/FAIL*) is an
     # "error exemplar". It is exempt from the stale-error penalty/cap, and the
     # selectors keep it even when the floor-saturated path reduces to
-    # `_important`. Tracebacks and non-log content are unaffected.
+    # `_important`. Non-log, non-code content uses code-tool diagnostic lines
+    # (``DIAGNOSTIC_CODE_LINE_RE``), capped at ``_DIAG_EXEMPLAR_CAP`` blocks.
     error_exemplar_ids: set[int] = set()
     if content_type == "log":
         seen_error_fps: set[str] = set()
@@ -2001,6 +2014,23 @@ def score_blocks(
                     fp = _error_fp(line)
                     if fp not in seen_error_fps:
                         seen_error_fps.add(fp)
+                        error_exemplar_ids.add(b["id"])
+    elif content_type != "code":
+        # v1.6.0 (multilang): compiler/test/runtime diagnostics (DIAGNOSTIC_CODE_LINE_RE) in non-log output
+        # .NET/Kotlin/Swift errors, Ruby/PHP/JS runtime errors, non-English error levels) keep one
+        # exemplar block per fingerprint too; bounded so a wall of distinct warnings cannot pin all.
+        seen_diag_fps: set[str] = set()
+        for b in blocks:
+            if len(error_exemplar_ids) >= _DIAG_EXEMPLAR_CAP:
+                break
+            for line in b["text"].splitlines():
+                if (
+                    is_diagnostic_line(line[:_RX_LINE_CAP], code_only=True)
+                    and _ERR_NEGATED_RE.search(line[:_RX_LINE_CAP]) is None
+                ):
+                    fp = _error_fp(line)
+                    if fp not in seen_diag_fps:
+                        seen_diag_fps.add(fp)
                         error_exemplar_ids.add(b["id"])
 
     # Weak-query adaptive floor (rate-distortion H(Q) theory):
@@ -2202,7 +2232,7 @@ def score_blocks(
             score += 0.35
         if idx == n - 1:
             score += 0.45
-        fp = re.sub(r"\s+", " ", b["text"].lower())[:240]
+        fp = _dup_fp(b["text"])
         dup = fp_counts.get(fp, 0)
         if dup > 1:
             score -= min(3.0, dup * 0.8)
