@@ -771,6 +771,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 pin_patterns=list(settings.protect_patterns) or None, gap_marker=elision_marker,
                 inline_short_gaps=True,
                 anchor_errors=settings.anchor_errors,
+                prose_brief=settings.prose_brief,
                 recursion_markers=(TAMERU_TAG.strip(),), min_savings_ratio=settings.min_savings,
                 **fixed,
             )

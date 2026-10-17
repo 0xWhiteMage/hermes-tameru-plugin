@@ -56,7 +56,7 @@ def init_params(compressor_cls) -> set[str]:
 def test_defaults_match_the_contract():
     assert dataclasses.asdict(TameruSettings()) == {
         "enabled": True, "min_tool_chars": 400, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
-        "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (), "anchor_errors": True,
+        "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (), "anchor_errors": True, "prose_brief": True,
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "small_window_threshold_tokens": 54_400, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.75, "small_window_prune_ratio": 0.60,
@@ -83,6 +83,7 @@ ENV_SAMPLES = {
     "exempt_tools": ("a, b", ("a", "b")),
     "protect_patterns": (r"\bID-\d+\b", (r"\bID-\d+\b",)),
     "anchor_errors": ("off", False),
+    "prose_brief": ("no", False),
     "expand_tool": ("no", False),
     "expand_grep_timeout": ("0.5", 0.5),
     "expand_grep_line_chars": ("4000", 4000),

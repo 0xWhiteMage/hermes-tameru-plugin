@@ -186,6 +186,7 @@ plugins:
 | `exempt_tools` | `[]` | Extra tool names left to Hermes (added to the built-in exempt set). |
 | `protect_patterns` | `[]` | Regexes; matching lines are pinned in extracts. |
 | `anchor_errors` | `true` | With no usable query, compress a result around its errors (compiler/test/runtime diagnostics in many languages). |
+| `prose_brief` | `true` | With no usable query on prose or docs (any language, incl. CJK), keep a structure-preserving extractive brief; the original stays expandable. |
 | `supersession` | `true` | Structural supersession. |
 | `pass_char_budget` | `4000000` | Original characters the ladder may process in one pass; rows beyond it use Hermes' line. |
 

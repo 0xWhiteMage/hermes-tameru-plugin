@@ -45,6 +45,7 @@ class TameruSettings:
     exempt_tools: tuple[str, ...] = ()         # added to the built-in exempt set
     protect_patterns: tuple[str, ...] = ()     # regexes -> compress_context(pin_patterns=...)
     anchor_errors: bool = True                 # no usable query -> compress around the result's errors (engine anchor_errors)
+    prose_brief: bool = True                  # no usable query on prose/docs -> extractive brief (engine prose_brief); original stays expandable
     expand_tool: bool = True
     expand_grep_timeout: float = 2.0             # seconds a backtracking-capable tameru_expand grep may run (killed after)
     expand_grep_line_chars: int = 20_000         # chars of each line a tameru_expand grep scans
@@ -193,6 +194,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "exempt_tools": _parse_str_tuple,
     "protect_patterns": _parse_patterns,
     "anchor_errors": _parse_bool,
+    "prose_brief": _parse_bool,
     "expand_tool": _parse_bool,
     "expand_grep_timeout": _parse_timeout,
     "expand_grep_line_chars": _min_int(1),
