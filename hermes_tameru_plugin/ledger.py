@@ -62,7 +62,7 @@ if TYPE_CHECKING:
 
 HEADING = "## Artifact Trail (Tameru, exact)"
 MAX_CHARS = 1500              # the Files and Commands lines
-ERRORS_CHARS = 1400           # the Errors lines, on top of that
+ERRORS_CHARS = 1800           # the Errors lines, on top of that (room for ~9 lines of 200 chars: log errors plus kubectl/test-runner errors)
 ERROR_LINE_CHARS = 200
 
 _FILE_OPS = {"read_file": "read", "write_file": "write", "patch": "patch", "search_files": "search"}
