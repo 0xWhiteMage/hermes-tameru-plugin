@@ -290,6 +290,10 @@ _TOKEN_RE = re.compile(
     r"[\u3040-\u30ff]{2,}|[\uac00-\ud7a3]{2,}|"
     r"[\u0600-\u06ff]{2,}|[\u0e00-\u0e7f]{2,}"
 )
+
+# Long punctuation runs (progress dots, rulers) cost real tokens: ~1 per 4
+# chars. Only runs of 16+ so ordinary code/prose estimates do not move.
+_ASCII_SYMBOL_RUN_RE = re.compile(r"[!-/:-@\[-`{-~]{16,}")
 _CAMEL_RE = re.compile(r"\b[A-Z][a-z]+(?:[A-Z][a-z]+)+\b")
 # Slash is required between segments. `(?:/?[\w.-]+){2,}` is catastrophic
 # on long hyphenated ids (acmecorp-genesis-v14-focused-node22-raw).
@@ -401,9 +405,10 @@ def _estimate_tokens_cached(text: str) -> int:
 
 
 def _estimate_tokens(text: str) -> int:
+    runs = sum(len(m) // 4 for m in _ASCII_SYMBOL_RUN_RE.findall(text)) if len(text) >= 16 else 0
     if text.isascii() or text.translate(_FAST_ACCOUNTING_DELETE).isascii():
-        return max(1, len(_TOKEN_RE.findall(text)))
-    return max(1, len(token_units(text)))
+        return max(1, len(_TOKEN_RE.findall(text)) + runs)
+    return max(1, len(token_units(text)) + runs)
 
 
 def _norm_newlines(text: str) -> str:
@@ -1459,10 +1464,39 @@ def _preprocess_cached(
     return tuple(lines), kind
 
 
+_PROGRESS_GLYPH_RE = re.compile(r"^([.FEsSx*!PRWN]{40,})(\s+\d+\s*/\s*\d+\s*\(\s*\d+%\))?\s*$")
+
+
+def _compact_progress_line(line: str) -> str:
+    """A run of 40+ test-progress glyphs becomes one inert summary that keeps every glyph count and the
+    1-based position of each non-'.' glyph (first 20), plus any trailing "63 / 630 ( 10%)" counter:
+    "[progress x1001: .=1000 F=1 | F@901]". Other lines are returned unchanged."""
+    m = _PROGRESS_GLYPH_RE.match(line)
+    if m is None:
+        return line
+    run = m.group(1)
+    counts: dict[str, int] = {}
+    for ch in run:
+        counts[ch] = counts.get(ch, 0) + 1
+    marks = [f"{ch}@{i + 1}" for i, ch in enumerate(run) if ch != "."][:20]
+    summary = " ".join(f"{ch}={n}" for ch, n in sorted(counts.items()))
+    tail = f" | {' '.join(marks)}" if marks else ""
+    counter = (m.group(2) or "").strip()
+    return f"[progress x{len(run)}: {summary}{tail}]" + (f" {counter}" if counter else "")
+
+
+def _compact_progress_lines(lines: list[str]) -> list[str]:
+    """``_compact_progress_line`` over ``lines`` (the same list object when no line qualifies)."""
+    if any(len(ln) >= 40 and _PROGRESS_GLYPH_RE.match(ln) for ln in lines):
+        return [_compact_progress_line(ln) for ln in lines]
+    return lines
+
+
 def _preprocess_scan(
     text: str, query: str, content_hint: str | None = None
 ) -> tuple[list[str], str]:
     lines = _norm_newlines(text).split("\n")
+    lines = _compact_progress_lines(lines)
     kind = _HINT_ROUTES.get(content_hint) or route_content_type(lines)
     if kind == "log":
         return preprocess_logs(lines, query), kind
@@ -2089,12 +2123,19 @@ def score_blocks(
                 continue
             if re.search(r"[\d_./-]", t) or t[0].isupper():
                 distinctive += 1
-        topic = _topic_terms(query)
+        # A topic word present in nearly every block is not a topic (IDF floor).
+        topic = [
+            t for t in _topic_terms(query)
+            if n < 10 or term_df.get(t.lower(), 0) <= 0.8 * n
+        ]
         # English topic words (alena, cinematography) are not "weak" just
         # because they lack digits. Vague next-chat ("keep every detail")
         # still gets the uniqueness floor.
         weak_boost = 0.0 if distinctive > 0 or len(topic) >= 2 else 1.0
 
+    # IDF floor: a query term in nearly every block carries no signal; it
+    # neither scores nor counts as a hit (else every block looks relevant).
+    ubiquitous_terms = {t for t, df in term_df.items() if n >= 10 and df > 0.8 * n}
     scored = []
     for idx, b in enumerate(blocks):
         score = 0.0
@@ -2115,6 +2156,8 @@ def score_blocks(
             _TRUST_RISK_RE.search(_normalise_instruction_text(b["text"]))
         )
         for t, term_test in term_tests:
+            if t in ubiquitous_terms:
+                continue
             if term_test(lower):
                 term_hits += 1
                 df = term_df.get(t, 1)
@@ -4932,16 +4975,61 @@ def compress_context(
     # errors/diagnostics is compressed around them: the error region of each fingerprint's first exemplar
     # (head line plus adjacent frame lines, up to _ANCHOR_MAX_LINES regions) becomes the query. Receipts mark it
     # query_source="error-anchored"; the risk floor is medium, like a derived objective.
+    # A generic query with no informative topic word (absent, or on >80% of lines) also gets the error regions,
+    # appended after the caller's words when a side-effect-free probe shows that keeps every error fingerprint in less text.
     anchor_lines: list[str] = []
     if (
         anchor_errors
         and not derived_terms
         and not query_has_distinctive_selectors(query or "")
-        and not _topic_terms(query or "")
     ):
-        anchor_lines = _anchor_regions(caller_text, _ANCHOR_MAX_LINES)
-        if anchor_lines:
-            query = "\n".join(anchor_lines)
+        topic = _topic_terms(query or "")
+        if topic:
+            # A generic query whose topic words are absent from the text or on
+            # nearly every line carries no signal: anchor on the errors too,
+            # keeping the caller's words in front.
+            sample = [ln.casefold() for ln in caller_text.split("\n", 4000)[:4000] if ln.strip()]
+            tests = [_term_test(t.casefold()) for t in topic]
+            uninformative = bool(sample) and all(
+                (hits := sum(1 for ln in sample if test(ln))) == 0 or hits > 0.8 * len(sample)
+                for test in tests
+            )
+            if uninformative:
+                anchor_lines = _anchor_regions(caller_text, _ANCHOR_MAX_LINES)
+                if anchor_lines:
+                    anchored_query = (query or "") + "\n" + "\n".join(anchor_lines)
+                    # Probe both objectives side-effect free (no CCR archive, log or
+                    # decision cache); keep the anchored one only when it fails closed,
+                    # retains every error fingerprint and is smaller than the plain one.
+                    probe = dict(
+                        mode=mode, budget_ratio=budget_ratio, ccr=False, cache_prefix=False,
+                        citations=citations, ccr_dir=ccr_dir, decision_cache=None, strategy=strategy,
+                        ambiguity_fail_open=ambiguity_fail_open, reorder_best=reorder_best,
+                        semantic_tier=semantic_tier, log_dir=None, pin_patterns=pin_patterns,
+                        pin_recent=pin_recent, min_savings_ratio=min_savings_ratio,
+                        degraded_view=degraded_view, summary_endpoint=None, limits=limits,
+                        derive_query=False, anchor_errors=False, gap_marker=gap_marker,
+                        recursion_markers=recursion_markers, content_hint=content_hint,
+                        inline_short_gaps=inline_short_gaps,
+                    )
+                    want = set(error_fingerprints(caller_text))
+
+                    def _probe_ok(res: CompressResult) -> bool:
+                        return not res.fail_open and want <= set(error_fingerprints(res.compressed_text))
+
+                    plain_probe = compress_context(caller_text, query or "", **probe)
+                    anchored_probe = compress_context(caller_text, anchored_query, **probe)
+                    if _probe_ok(anchored_probe) and (
+                        not _probe_ok(plain_probe)
+                        or len(anchored_probe.compressed_text) < len(plain_probe.compressed_text)
+                    ):
+                        query = anchored_query
+                    else:
+                        anchor_lines = []
+        else:
+            anchor_lines = _anchor_regions(caller_text, _ANCHOR_MAX_LINES)
+            if anchor_lines:
+                query = "\n".join(anchor_lines)
     requested_mode = (mode or "adaptive").strip().lower()
     if requested_mode not in {"adaptive", "fixed", "compiler", "precision"}:
         raise ValueError(
@@ -5319,7 +5407,7 @@ def compress_context(
         # (Perf, v1.4.0: preprocess() output was computed and then discarded
         # on this path — ~0.4 s of log collapsing per 650 KB — so it is not
         # run at all; the result is identical.)
-        lines = text.split("\n")
+        lines = _compact_progress_lines(text.split("\n"))
         content_type = _HINT_ROUTES.get(route_hint) or route_content_type(lines)
     # numbered_code: the "N\t" / "N|" gutter stays in the output (_render emits
     # `lines`) but is not part of the code the scorer should read.
