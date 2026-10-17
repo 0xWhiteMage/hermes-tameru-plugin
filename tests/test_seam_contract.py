@@ -397,13 +397,19 @@ _VERBATIM_METHODS = ["_dedupe_tool_results", "_prune_boundary", "_tail_soft_ceil
 
 
 def _normalized_ast(func) -> str:
-    """AST of ``func`` without docstrings: comparing source text would trip over wording, not logic."""
+    """AST of ``func`` without docstrings or type annotations: compare logic, not wording or typing style."""
     tree = ast.parse(textwrap.dedent(inspect.getsource(func)))
     for node in ast.walk(tree):
         body = getattr(node, "body", None)
         if (isinstance(node, ast.FunctionDef) and body and isinstance(body[0], ast.Expr)
                 and isinstance(body[0].value, ast.Constant) and isinstance(body[0].value.value, str)):
             node.body = body[1:] or [ast.Pass()]
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            node.returns = None
+        elif isinstance(node, ast.arg):
+            node.annotation = None
+        elif isinstance(node, ast.AnnAssign):
+            node.annotation = ast.Constant(value=None)
     return ast.dump(tree)
 
 
