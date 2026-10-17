@@ -425,7 +425,7 @@ def _expand(
         if used + len(line) + overhead > limit:
             truncated = True
             if not content:   # one oversized line: its head, so the call still makes progress
-                content.append(line[:max(0, limit - overhead)])
+                content.append(line[:max(1, limit - overhead)])
                 returned.append(n)
             break
         content.append(line)
