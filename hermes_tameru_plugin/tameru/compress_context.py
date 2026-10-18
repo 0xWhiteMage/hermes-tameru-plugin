@@ -20,6 +20,7 @@ import tempfile
 import threading
 import time
 import unicodedata
+import dataclasses
 from dataclasses import asdict, dataclass, field, replace
 from pathlib import Path
 from typing import Any, Callable, Iterable, Optional
@@ -308,6 +309,24 @@ _QUOTED_RE = re.compile(r"[\"']([^\"']{2,64})[\"']")
 _CAPS_RE = re.compile(r"\b[A-Z]{2,24}\b")
 _URI_RE = re.compile(r"\b[a-z][a-z0-9+.-]{0,31}://\S+")
 _FAST_ACCOUNTING_PUNCT = frozenset("§…×–—“”‘’")
+
+
+_REUSE_PROBE_RESULT = True
+
+
+def _finalize_reused_probe(res, query_as_given, anchor_lines) -> "CompressResult":
+    receipt = dict(res.receipt) if res.receipt else res.receipt
+    if receipt is not None:
+        receipt["query_hash"] = hashlib.sha256(
+            (query_as_given or "").encode("utf-8", errors="surrogatepass")
+        ).hexdigest()[:12]
+        if anchor_lines:
+            receipt["query_source"] = "error-anchored"
+            receipt["anchor_lines"] = list(anchor_lines)
+            if res.compression_risk == "low":
+                receipt["risk"] = "medium"
+    new_risk = "medium" if (anchor_lines and res.compression_risk == "low") else res.compression_risk
+    return dataclasses.replace(res, receipt=receipt, compression_risk=new_risk)
 
 
 @dataclass
@@ -5140,7 +5159,7 @@ _WEAK_LINE_HINT_RE = re.compile(
 )
 _WEAK_WARN_LEVEL_RE = re.compile(r"\b(?:WARN|WARNING)\b")
 _WEAK_STRUCT_LEVEL_RE = re.compile(
-    r"(?i)\b(?:level|lvl|severity)\s*[=:]\s*[\"']?(?:warn|warning)\b"
+    r"(?i)\b(?:level|lvl|severity)\s*[\"']?\s*[=:]\s*[\"']?(?:warn|warning)\b"
 )
 _WEAK_FAILURE_WORD_RE = re.compile(
     r"\b(?:failed|failure|failing|fails|timeout|timed\s+out|refused|denied|"
@@ -5185,6 +5204,58 @@ def _is_weak_failure_line(line: str) -> bool:
     )
 
 
+_ISO_LEVEL_TOKEN_RE = re.compile(r"\b(?:TRACE|DEBUG|INFO|NOTICE|WARN|WARNING)\b")
+_ISO_WARN_TOKEN_RE = re.compile(r"\b(?:WARN|WARNING)\b")
+_ISO_STRUCT_LEVEL_RE = re.compile(r"(?i)(?:\blevel\s*=|\"level\"\s*:\s*)(?:trace|debug|info|notice|warn|warning)\b")
+_ISO_STRUCT_WARN_RE = re.compile(r"(?i)(?:\blevel\s*=|\"level\"\s*:\s*)warn(?:ing)?\b")
+
+
+def _isolated_warn_lines(lines: list[str], max_regions: int) -> list[str]:
+    """Last-resort anchors: isolated WARN lines in a mostly leveled log.
+
+    Returns at most ``max_regions`` WARN lines in original order when all strict guards pass:
+    at least 20 non-blank lines, at least 90% of non-blank lines carry a level token, at most
+    two WARN-level lines and at most 5% of non-blank lines, and each chosen WARN fingerprint
+    occurs only once among all non-blank lines.
+    """
+    if max_regions <= 0:
+        return []
+    if not any("WARN" in line or "warn" in line.lower() for line in lines):
+        return []
+    nonblank = [line for line in lines if line.strip()]
+    if len(nonblank) < 20:
+        return []
+
+    level_count = 0
+    warn_lines: list[str] = []
+    for line in nonblank:
+        if _ISO_LEVEL_TOKEN_RE.search(line) or _ISO_STRUCT_LEVEL_RE.search(line):
+            level_count += 1
+        if _ISO_WARN_TOKEN_RE.search(line) or _ISO_STRUCT_WARN_RE.search(line):
+            warn_lines.append(line)
+
+    if level_count * 100 < len(nonblank) * 90:
+        return []
+    if len(warn_lines) > 2 or len(warn_lines) * 100 > len(nonblank) * 5:
+        return []
+    if not warn_lines:
+        return []
+
+    fp_counts: dict[str, int] = {}
+    for line in nonblank:
+        fp = _error_fp(line.strip())
+        fp_counts[fp] = fp_counts.get(fp, 0) + 1
+
+    out: list[str] = []
+    for line in warn_lines:
+        if fp_counts.get(_error_fp(line.strip()), 0) != 1:
+            return []
+        out.append(line)
+        if len(out) >= max_regions:
+            break
+    return out
+
+
 def _anchor_regions(text: str, max_regions: int) -> list[str]:
     """Error regions for the error-anchored objective: for each of the first ``max_regions`` error
     fingerprint exemplars, the exemplar line plus the contiguous frame-like lines around it (up to
@@ -5208,6 +5279,9 @@ def _anchor_regions(text: str, max_regions: int) -> list[str]:
                     seen_fp.add(fp)
                     weak.add(line)
         exemplars = weak
+    if not exemplars:
+        # Last resort: isolated WARN anchors in a strictly leveled log.
+        exemplars = set(_isolated_warn_lines(lines, max_regions))
     regions: list[str] = []
     seen_rows: set[int] = set()
 
@@ -5407,6 +5481,7 @@ def compress_context(
     # A generic query with no informative topic word (absent, or on >80% of lines) also gets the error regions,
     # appended after the caller's words when a side-effect-free probe shows that keeps every error fingerprint in less text.
     anchor_lines: list[str] = []
+    chosen_probe = None
     if (
         anchor_errors
         and not derived_terms
@@ -5446,7 +5521,7 @@ def compress_context(
                         degraded_view=degraded_view, summary_endpoint=None, limits=limits,
                         derive_query=False, anchor_errors=False, gap_marker=gap_marker,
                         recursion_markers=recursion_markers, content_hint=content_hint,
-                        inline_short_gaps=inline_short_gaps,
+                        inline_short_gaps=inline_short_gaps, prose_brief=prose_brief,
                     )
                     want = set(error_fingerprints(caller_text))
 
@@ -5494,14 +5569,26 @@ def compress_context(
                             )
                         ):
                             query = anchored_query
+                            chosen_probe = anchored_probe
                         else:
                             anchor_lines = []
+                            chosen_probe = plain_probe
                     else:
                         anchor_lines = []
         else:
             anchor_lines = _anchor_regions(caller_text, _ANCHOR_MAX_LINES)
             if anchor_lines:
                 query = "\n".join(anchor_lines)
+    if (
+        _REUSE_PROBE_RESULT
+        and chosen_probe is not None
+        and not ccr
+        and not cache_prefix
+        and decision_cache is None
+        and log_dir is None
+        and summary_endpoint is None
+    ):
+        return _finalize_reused_probe(chosen_probe, query_as_given, anchor_lines)
     requested_mode = (mode or "adaptive").strip().lower()
     if requested_mode not in {"adaptive", "fixed", "compiler", "precision"}:
         raise ValueError(
