@@ -819,6 +819,7 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
     out_src: list[int] = []
     trace: list[str] = []
     trace_src: list[int] = []
+    trace_idx: list[int] = []
     query_match_indices: set[int] = set()
     query_selectors = distinctive_query_terms(query or "")
     # Perf (v1.5.0): a line is fingerprinted up to three times below (collapse,
@@ -833,7 +834,7 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
             return fp
 
     def flush_trace() -> None:
-        nonlocal trace, trace_src
+        nonlocal trace, trace_src, trace_idx
         if not trace:
             return
         if len(trace) <= _TRACE_KEEP_HEAD + _TRACE_KEEP_TAIL:
@@ -842,12 +843,40 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
         else:
             out.extend(trace[:_TRACE_KEEP_HEAD])
             out_src.extend(trace_src[:_TRACE_KEEP_HEAD])
-            out.append(f"  ... {len(trace) - _TRACE_KEEP_HEAD - _TRACE_KEEP_TAIL} frames omitted")
-            out_src.append(trace_src[_TRACE_KEEP_HEAD])
+            tail_start = len(trace) - _TRACE_KEEP_TAIL
+            middle = trace[_TRACE_KEEP_HEAD:tail_start]
+            middle_src = trace_src[_TRACE_KEEP_HEAD:tail_start]
+            middle_idx = trace_idx[_TRACE_KEEP_HEAD:tail_start]
+
+            matched = [idx in query_match_source_indices for idx in middle_idx]
+            if sum(matched) > _TRACE_KEEP_HEAD + _TRACE_KEEP_TAIL:
+                out.append(f"  ... {len(middle)} frames omitted")
+                out_src.append(middle_src[0])
+            else:
+                omitted_run = 0
+                omitted_start_src = 0
+                for frame, src, idx in zip(middle, middle_src, middle_idx):
+                    if idx in query_match_source_indices:
+                        if omitted_run:
+                            out.append(f"  ... {omitted_run} frames omitted")
+                            out_src.append(omitted_start_src)
+                            omitted_run = 0
+                        out.append(frame)
+                        out_src.append(src)
+                    else:
+                        if omitted_run == 0:
+                            omitted_start_src = src
+                        omitted_run += 1
+
+                if omitted_run:
+                    out.append(f"  ... {omitted_run} frames omitted")
+                    out_src.append(omitted_start_src)
+
             out.extend(trace[-_TRACE_KEEP_TAIL:])
             out_src.extend(trace_src[-_TRACE_KEEP_TAIL:])
         trace = []
         trace_src = []
+        trace_idx = []
 
     # First pass: drop progress bars but remember whether we saw any.
     kept_src = [i for i, ln in enumerate(lines) if not _is_progress_bar(ln)]
@@ -887,6 +916,7 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
         if is_trace_like:
             trace.append(line)
             trace_src.append(kept_src[i])
+            trace_idx.append(i)
             i += 1
             continue
         flush_trace()
@@ -4912,6 +4942,36 @@ _GO_STACK_LINE_RE = re.compile(
 _ANCHOR_GO_TAIL_LINES = 2  # the last frame (function line + its file:line) of a Go stack longer than the region
 
 
+# Log-record prefix: ISO-ish timestamp, level word, optional [thread], optional
+# logger token followed by " - " or ": ". The level word is captured (group 1)
+# so it can be kept when the rest of the prefix is stripped from an anchor line.
+# WARNING is listed before WARN so "WARNING" is not truncated to "WARN".
+_ANCHOR_LOG_PREFIX_RE = re.compile(
+    r"^\d{4}-\d\d-\d\d[T ]\d\d:\d\d:\d\d(?:[.,]\d+)?(?:Z|[+-]\d\d:?\d\d)?"
+    r"\s+(TRACE|DEBUG|INFO|WARNING|WARN|ERROR|FATAL|CRITICAL|SEVERE)\b"
+    r"(?:\s*\[[^\]]+\])?"
+    r"(?:\s+[A-Za-z0-9_.$]+\s*(?:-\s+|:\s+))?"
+)
+
+
+def _strip_anchor_prefix(line: str) -> str:
+    """Drop the log-record prefix from an anchor line, keeping the level word.
+
+    ``"2026-10-18 11:59:00.001 ERROR [t] o.e.billing.Api - request failed"``
+    becomes ``"ERROR request failed"`` so the anchored query no longer carries
+    the thread/logger/timestamp entities that appear on every INFO line.
+    Returns the line unchanged when it is not a log record, or when stripping
+    would leave no message (e.g. a bare ``"… ERROR"`` line).
+    """
+    m = _ANCHOR_LOG_PREFIX_RE.match(line)
+    if m is None:
+        return line
+    out = _ANCHOR_LOG_PREFIX_RE.sub(r"\1 ", line, count=1).strip()
+    if out == m.group(1):
+        return line
+    return out
+
+
 def _anchor_regions(text: str, max_regions: int) -> list[str]:
     """Error regions for the error-anchored objective: for each of the first ``max_regions`` error
     fingerprint exemplars, the exemplar line plus the contiguous frame-like lines around it (up to
@@ -4980,12 +5040,12 @@ def _anchor_regions(text: str, max_regions: int) -> list[str]:
                     rows = list(range(lo, hi + 1)) + tail
                     seen_rows.update(rows)
                     regions.append(
-                        "\n".join(lines[j].strip()[:_ANCHOR_LINE_CHARS] for j in rows if lines[j].strip())
+                        "\n".join(_strip_anchor_prefix(lines[j].strip())[:_ANCHOR_LINE_CHARS] for j in rows if lines[j].strip())
                     )
                     continue
         seen_rows.update(range(lo, hi + 1))
         regions.append(
-            "\n".join(ln.strip()[:_ANCHOR_LINE_CHARS] for ln in lines[lo : hi + 1] if ln.strip())
+            "\n".join(_strip_anchor_prefix(ln.strip())[:_ANCHOR_LINE_CHARS] for ln in lines[lo : hi + 1] if ln.strip())
         )
     return regions
 
@@ -5539,6 +5599,8 @@ def compress_context(
         lines, content_type = preprocess(text, query or "", content_hint=route_hint)
         if industrial.applied:
             content_type = industrial.profile.format
+        # Recall must be measured against the text the selector actually saw.
+        recall_base = "\n".join(lines) if content_type == "log" else text
     else:
         # Do not fingerprint-collapse logs or crush JSON on a generic query.
         # (Perf, v1.4.0: preprocess() output was computed and then discarded
@@ -5546,6 +5608,7 @@ def compress_context(
         # run at all; the result is identical.)
         lines = _compact_progress_lines(text.split("\n"))
         content_type = _HINT_ROUTES.get(route_hint) or route_content_type(lines)
+        recall_base = text
     # numbered_code: the "N\t" / "N|" gutter stays in the output (_render emits
     # `lines`) but is not part of the code the scorer should read.
     score_lines = lines
@@ -5790,7 +5853,7 @@ def compress_context(
             content_lines=score_lines,
         )
 
-    recall = _entity_recall(text, compressed, query or "")
+    recall = _entity_recall(recall_base, compressed, query or "")
     if recall < 0.66 and not fail_open:
         # One expansion pass: add any dropped block that still holds a query key.
         keys = _extract_entities(query or "") + _extract_terms(query or "")
@@ -5806,7 +5869,7 @@ def compress_context(
             gap_marker=gap_marker, total_chars=len(caller_text),
             content_lines=score_lines,
         )
-        recall = _entity_recall(text, compressed, query or "")
+        recall = _entity_recall(recall_base, compressed, query or "")
         trust_risks = {
             b["id"]
             for b in scored
