@@ -10,6 +10,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors structured log levels as error lines and weak failure anchors when there are no error lines.
 - Vendors test-runner reducers for Gradle, RSpec, PHPUnit, dotnet test, Maven Surefire and quiet pytest.
 - Vendors kubectl `describe` and `get events` reducers, with broader diagnostic recognition.
+- Vendors text tool-output collapse, the status-table reducer and dashboard summary anchors.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
@@ -18,6 +19,9 @@ All notable changes to this project are documented here. The format follows
 - **`tameru_expand` description.** Opens with "Tameru Expand (展開, tenkai: unfold)" and says in plain words that it
   brings back the exact text of a shortened tool output. Arguments and behaviour are unchanged.
 - **`plugin.yaml` description** reworded for people browsing plugins.
+
+### Fixed
+- Vendors the fix that kept ratio lines such as `20/40 degraded` from being dropped as progress bars.
 
 ## [1.5.0] - 2026-10-13
 
