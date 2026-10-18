@@ -508,3 +508,32 @@ def test_errors_have_their_own_budget_and_the_newest_win(trail):
 def test_errors_alone_make_a_ledger(trail):
     text = trail(("terminal", {"command": "tail app.log"}, run(LOG)))
     assert text.startswith(f"{HEADING}\nCommands:") and "\nErrors:\n" in text
+
+def test_errors_group_rows_differing_only_by_pod_suffix():
+    from hermes_tameru_plugin.ledger import _note_errors
+    import itertools
+    errors: dict = {}
+    clock = itertools.count()
+    text = ("checkout-api-7d9f8c6b5d-x2k4q   0/1   CrashLoopBackOff   9 (2m41s ago)   28m\n"
+            "checkout-api-7d9f8c6b5d-a4a9f   0/1   CrashLoopBackOff   6 (4m3s ago)    28m\n"
+            "2025-03-14T02:17:44Z ERROR orders.service payment declined order=ORD-1\n"
+            "2025-03-14T02:17:45Z ERROR orders.service inventory lock timeout sku=SKU-2\n")
+    _note_errors(errors, clock, text)
+    lines = [e.line for e in errors.values()]
+    assert sum("CrashLoopBackOff" in ln for ln in lines) == 1
+    assert sum(e.similar for e in errors.values()) == 1
+    assert any("payment declined" in ln for ln in lines) and any("inventory lock timeout" in ln for ln in lines)
+
+
+def test_errors_overflow_prefers_level_tagged_log_errors(monkeypatch):
+    import itertools
+    import hermes_tameru_plugin.ledger as L
+    errors: dict = {}
+    clock = itertools.count()
+    L._note_errors(errors, clock, "2025-03-14T02:14:08Z ERROR shop.orders HoldsLookupFailed: pool exhausted order=ORD-1")
+    rows = "\n".join(f"svc-{n}-abc{n}x   0/1   CrashLoopBackOff   {n}   10m" for n in ("alpha", "bravo", "charlie", "delta", "echo", "foxtrot"))
+    L._note_errors(errors, clock, rows)
+    monkeypatch.setattr(L, "ERRORS_CHARS", 160)
+    items = [(e.touched + (L._LEVEL_ERROR_PRIORITY if L._is_level_error_line(e.line) else 0), e.line) for e in errors.values()]
+    kept = L._fit(items, 150)
+    assert any("HoldsLookupFailed" in k for k in kept)

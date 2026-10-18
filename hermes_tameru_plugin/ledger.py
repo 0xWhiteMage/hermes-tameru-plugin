@@ -21,10 +21,10 @@ would not fit, the least recently touched entries are left out and a ``(+N more)
 An outcome is read from the original when the row is a Tameru render whose original the store
 still holds, else from the row itself.
 
-Errors are the first exemplar line of every distinct error fingerprint (``error_fingerprints``) in the
+Errors are the first exemplar line of every distinct error group (``error_fingerprints``, with rows that differ only by random id segments such as pod suffixes grouped as one line plus a "(+N similar)" count) in the
 original text of the summarized tool results, so a lossy summarizer cannot drop the failures a pruned
-log held; they live in their own budget (``ERRORS_CHARS``, on top of ``max_chars``) and the most
-recently seen win when they do not all fit.
+log held; they live in their own budget (``ERRORS_CHARS``, on top of ``max_chars``) and when they do not all fit level-tagged log errors win over other diagnostics, then the most
+recently seen.
 
 The text never contains ``User asked:`` (Hermes' summary validator reads it as a user claim), a
 path or command that holds a probable credential is shown as ``<redacted>``, and the whole section goes through
@@ -54,7 +54,7 @@ from .hermes_compat import (
 )
 from .payload import meta_line, parse_payload
 from .render import parse_header
-from .tameru.compress_context import contains_secret, error_fingerprints
+from .tameru.compress_context import _is_level_error_line, contains_secret, error_fingerprints
 from .tameru.transcript import text_of
 
 if TYPE_CHECKING:
@@ -64,6 +64,11 @@ HEADING = "## Artifact Trail (Tameru, exact)"
 MAX_CHARS = 1500              # the Files and Commands lines
 ERRORS_CHARS = 1800           # the Errors lines, on top of that (room for ~9 lines of 200 chars: log errors plus kubectl/test-runner errors)
 ERROR_LINE_CHARS = 200
+_LEVEL_ERROR_PRIORITY = 1 << 40  # ranks above any clock value
+# A fingerprint segment that is a random id (a k8s pod/replica suffix such as "x#k#q" after masking: 4-8 chars
+# of letters and masked digits with at least one digit, right after a "-") is grouped away, so rows that differ
+# only by such ids share one Errors line.
+_ID_SEGMENT_RE = re.compile(r"(?<=-)(?=[a-z#]*#)[a-z#]{4,8}\b")
 
 _FILE_OPS = {"read_file": "read", "write_file": "write", "patch": "patch", "search_files": "search"}
 _PATH_KEYS = ("path", "file_path", "file", "filename")   # not ``target``: a search mode
@@ -107,6 +112,8 @@ class _FileEntry:
 class _ErrorEntry:
     line: str
     touched: int = 0
+    similar: int = 0          # other fingerprints grouped onto this line
+    members: set[str] = field(default_factory=set)
 
 
 @dataclass
@@ -195,14 +202,20 @@ def _error_line(line: str) -> str:
 def _note_errors(
     errors: dict[str, _ErrorEntry], clock: Iterator[int], text: str,
 ) -> None:
-    """Remember the first exemplar of every error fingerprint of ``text`` (a repeat only refreshes its age)."""
+    """Remember the first exemplar of every error group of ``text`` (fingerprints that differ only by random id
+    segments share a group; a repeat only refreshes its age, a new member of a group counts as similar)."""
     for fp, line in error_fingerprints(text).items():
-        entry = errors.get(fp)
+        key = _ID_SEGMENT_RE.sub("<id>", fp)
+        entry = errors.get(key)
         if entry is None:
             shown = _error_line(line)
             if contains_secret(shown):
                 continue
-            entry = errors[fp] = _ErrorEntry(shown)
+            entry = errors[key] = _ErrorEntry(shown)
+            entry.members.add(fp)
+        elif fp not in entry.members:
+            entry.members.add(fp)
+            entry.similar += 1
         entry.touched = next(clock)
 
 
@@ -398,7 +411,15 @@ def build_ledger(
             room -= _size(kept)
             if kept:
                 out += [title, *kept]
-    error_items = [(entry.touched, _plain(f"  {entry.line}")) for entry in errors.values()]
+    # Overflow keeps level-tagged log errors (ERROR/FATAL/CRITICAL...) before status rows such as kubectl pods or
+    # test-runner lines, then the most recently touched.
+    error_items = [
+        (
+            entry.touched + (_LEVEL_ERROR_PRIORITY if _is_level_error_line(entry.line) else 0),
+            _plain(f"  {entry.line}" + (f" (+{entry.similar} similar)" if entry.similar else "")),
+        )
+        for entry in errors.values()
+    ]
     if error_items and ERRORS_CHARS > len("Errors:") + 1 + _MORE_RESERVE:
         kept = _fit(error_items, ERRORS_CHARS - len("Errors:") - 1)
         if kept:
