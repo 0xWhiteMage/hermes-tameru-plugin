@@ -5,6 +5,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- Vendors error-anchored compression for generic queries that match little or nearly everything and small erroring logs.
+- Vendors structured log levels as error lines and weak failure anchors when there are no error lines.
+- Vendors test-runner reducers for Gradle, RSpec, PHPUnit, dotnet test, Maven Surefire and quiet pytest.
+- Vendors kubectl `describe` and `get events` reducers, with broader diagnostic recognition.
+
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
   rewritten for users: what the plugin does, a real before/after example, the `tameru_expand` tool and what to know
