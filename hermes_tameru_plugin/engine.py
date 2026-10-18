@@ -644,7 +644,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 return self._commit(result, idx, content, tool, ref, pl, scope, rung, rendered)
         # The retained budget (and its reservation), not the savings rule, ruled the body out; or the original has
         # error templates, which Hermes' one-line summary would drop (the errors rung keeps them).
-        if free < capped or error_fingerprints(pl.inner):
+        if free < capped or error_fingerprints(pl.inner, status_rows=False):
             return self._commit_header_or_errors(result, idx, content, tool, ref, pl, scope, line)
         return self._keep_parent(result, idx, shadow[0], tool)
 
@@ -690,7 +690,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         settings = self._settings
         inner = parse_payload(content).inner
         size = max(settings.brief_chars, int(settings.brief_share * len(inner)))
-        if error_fingerprints(inner):
+        if error_fingerprints(inner, status_rows=False):
             size = size * 3 // 2
         return min(size, settings.max_extract_chars, int((1 - settings.min_savings) * len(content)))
 
@@ -702,7 +702,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
             return ""
         lines: list[str] = []
         used = 0
-        for line in error_fingerprints(inner).values():
+        for line in error_fingerprints(inner, status_rows=False).values():
             line = line if len(line) <= _ERROR_LINE_CHARS else line[: _ERROR_LINE_CHARS - 1] + "…"
             if used + len(line) + (1 if lines else 0) > cap:
                 if not lines:
@@ -789,7 +789,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         ceiling = _RISK_ORDER.get(self._settings.max_risk, 1)
         if _RISK_ORDER.get(out.risk or "", 2) > ceiling:
             return False
-        return fingerprints.keys() <= error_fingerprints(out.text).keys()
+        return fingerprints.keys() <= error_fingerprints(out.text, status_rows=False).keys()
 
     @staticmethod
     def _body_row(
@@ -810,7 +810,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         """The query-aware extract row, within ``limit`` chars; fixed-budget retries if too big."""
         if limit <= 0:
             return None
-        fingerprints = error_fingerprints(pl.inner)
+        fingerprints = error_fingerprints(pl.inner, status_rows=False)
         out = self._compress(pl.inner, query, hint, None)
         if not self._acceptable(out, fingerprints):
             return None
@@ -825,7 +825,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         # top query-evidence lines that the unforced extract kept (when there are any).
         evidence = [
             line for line in extract_evidence_lines(pl.inner, " ".join(query), limit=len(fingerprints) + 3)
-            if not error_fingerprints(line) and line in out.text
+            if not error_fingerprints(line, status_rows=False) and line in out.text
         ][:3]
         # A fixed budget lands near, not under, its target (whole lines, gap markers), so one
         # tighter retry follows an overshoot.
@@ -858,7 +858,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
         sizes = [max(1, min(first, limit))]
         while sizes[-1] < limit:   # grow in steps, stopping at the first size that keeps every template
             sizes.append(min(limit, max(sizes[-1] + 1, sizes[-1] * 3 // 2)))
-        fingerprints = error_fingerprints(pl.inner)
+        fingerprints = error_fingerprints(pl.inner, status_rows=False)
         for size in sizes:
             budget = size - reserve
             rendered = body = None
@@ -879,7 +879,7 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 rendered = None
             if rendered is None:
                 break
-            if fingerprints.keys() <= error_fingerprints(body).keys():
+            if fingerprints.keys() <= error_fingerprints(body, status_rows=False).keys():
                 return rendered
         return None
 

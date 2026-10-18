@@ -23,8 +23,8 @@ still holds, else from the row itself.
 
 Errors are the first exemplar line of every distinct error group (``error_fingerprints``, with rows that differ only by random id segments such as pod suffixes grouped as one line plus a "(+N similar)" count) in the
 original text of the summarized tool results, so a lossy summarizer cannot drop the failures a pruned
-log held; they live in their own budget (``ERRORS_CHARS``, on top of ``max_chars``) and when they do not all fit level-tagged log errors win over other diagnostics, then the most
-recently seen.
+log held; they live in their own budget (``ERRORS_CHARS``, on top of ``max_chars``) and when they do not all fit level-tagged log errors win over other diagnostics, then the most recently seen.
+kubectl pod status rows and Warning events are folded into one lowest-priority ``kubectl:`` line of status counts.
 
 The text never contains ``User asked:`` (Hermes' summary validator reads it as a user claim), a
 path or command that holds a probable credential is shown as ``<redacted>``, and the whole section goes through
@@ -54,6 +54,7 @@ from .hermes_compat import (
 )
 from .payload import meta_line, parse_payload
 from .render import parse_header
+from .tameru.agent_formats import is_kubectl_status_line
 from .tameru.compress_context import _is_level_error_line, contains_secret, error_fingerprints
 from .tameru.transcript import text_of
 
@@ -201,10 +202,27 @@ def _error_line(line: str) -> str:
 
 def _note_errors(
     errors: dict[str, _ErrorEntry], clock: Iterator[int], text: str,
+    kube: dict[str, set[str]] | None = None,
 ) -> None:
     """Remember the first exemplar of every error group of ``text`` (fingerprints that differ only by random id
     segments share a group; a repeat only refreshes its age, a new member of a group counts as similar)."""
     for fp, line in error_fingerprints(text).items():
+        if is_kubectl_status_line(line):
+            if kube is None:
+                continue
+            tokens = line.split()
+            if tokens and tokens[0] == "Warning":
+                if len(tokens) > 1:
+                    status = f"Warning {tokens[1]}"
+                else:
+                    status = "Warning"
+            else:
+                if len(tokens) > 2:
+                    status = tokens[2]
+                else:
+                    status = line
+            kube.setdefault(status, set()).add(fp)
+            continue
         key = _ID_SEGMENT_RE.sub("<id>", fp)
         entry = errors.get(key)
         if entry is None:
@@ -282,6 +300,7 @@ def _note_command(
 def _seed(
     previous: str, files: dict[str, _FileEntry], commands: dict[str, _CommandEntry],
     errors: dict[str, _ErrorEntry], clock: Iterator[int],
+    kube: dict[str, set[str]] | None = None,
 ) -> None:
     """Entries of the Artifact Trail section of an earlier summary (our own line grammar).
 
@@ -299,7 +318,7 @@ def _seed(
         _note_command(commands, clock, m["command"], m["result"], int(m["runs"] or 1))
     marker = text.find("\nErrors:\n")
     for m in _ERROR_LINE_RE.finditer(text[marker + 1:] if marker >= 0 else ""):
-        _note_errors(errors, clock, m["line"])
+        _note_errors(errors, clock, m["line"], kube=kube)
 
 
 # ---- rendering -------------------------------------------------------------------------------
@@ -356,8 +375,9 @@ def build_ledger(
     files: dict[str, _FileEntry] = {}
     commands: dict[str, _CommandEntry] = {}
     errors: dict[str, _ErrorEntry] = {}
+    kube: dict[str, set[str]] = {}
     clock = itertools.count()
-    _seed(previous, files, commands, errors, clock)
+    _seed(previous, files, commands, errors, clock, kube=kube)
     scan_room = _ERROR_SCAN_BUDGET
 
     def scan(text: str) -> None:
@@ -366,7 +386,7 @@ def build_ledger(
             return
         if text and len(text) <= scan_room:
             scan_room -= len(text)
-            _note_errors(errors, clock, text)
+            _note_errors(errors, clock, text, kube=kube)
 
     for text in extra_originals:
         scan(text)
@@ -420,6 +440,9 @@ def build_ledger(
         )
         for entry in errors.values()
     ]
+    if kube:
+        summary = ", ".join(f"{k} ×{len(v)}" if len(v) > 1 else k for k, v in kube.items())
+        error_items.append((0, _plain("  kubectl: " + summary)))
     if error_items and ERRORS_CHARS > len("Errors:") + 1 + _MORE_RESERVE:
         kept = _fit(error_items, ERRORS_CHARS - len("Errors:") - 1)
         if kept:

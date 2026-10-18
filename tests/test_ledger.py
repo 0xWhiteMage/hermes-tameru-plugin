@@ -514,15 +514,17 @@ def test_errors_group_rows_differing_only_by_pod_suffix():
     import itertools
     errors: dict = {}
     clock = itertools.count()
-    text = ("checkout-api-7d9f8c6b5d-x2k4q   0/1   CrashLoopBackOff   9 (2m41s ago)   28m\n"
-            "checkout-api-7d9f8c6b5d-a4a9f   0/1   CrashLoopBackOff   6 (4m3s ago)    28m\n"
+    kube: dict = {}
+    text = ("2025-03-14T02:17:40Z ERROR kubelet pod checkout-api-7d9f8c6b5d-x2k4q failed liveness probe\n"
+            "2025-03-14T02:17:41Z ERROR kubelet pod checkout-api-7d9f8c6b5d-a4a9f failed liveness probe\n"
             "2025-03-14T02:17:44Z ERROR orders.service payment declined order=ORD-1\n"
             "2025-03-14T02:17:45Z ERROR orders.service inventory lock timeout sku=SKU-2\n")
-    _note_errors(errors, clock, text)
+    _note_errors(errors, clock, text, kube=kube)
     lines = [e.line for e in errors.values()]
-    assert sum("CrashLoopBackOff" in ln for ln in lines) == 1
+    assert sum("failed liveness probe" in ln for ln in lines) == 1
     assert sum(e.similar for e in errors.values()) == 1
     assert any("payment declined" in ln for ln in lines) and any("inventory lock timeout" in ln for ln in lines)
+    assert kube == {}
 
 
 def test_errors_overflow_prefers_level_tagged_log_errors(monkeypatch):
@@ -537,3 +539,18 @@ def test_errors_overflow_prefers_level_tagged_log_errors(monkeypatch):
     items = [(e.touched + (L._LEVEL_ERROR_PRIORITY if L._is_level_error_line(e.line) else 0), e.line) for e in errors.values()]
     kept = L._fit(items, 150)
     assert any("HoldsLookupFailed" in k for k in kept)
+
+
+def test_kubectl_rows_fold_into_one_status_line():
+    text = ("api-7c9-x2k4q   0/1   CrashLoopBackOff   9 (2m ago)   20m\n"
+            "api-7c9-b8m2z   0/1   CrashLoopBackOff   6 (4m ago)   20m\n"
+            "api-7c9-q1w2e   0/1   OOMKilled          7 (51s ago)  20m\n"
+            "  Warning  BackOff  1m  kubelet  Back-off restarting failed container\n"
+            "ERROR db: connection refused\n")
+    ledger = build_ledger([], extra_originals=(text,))
+    assert "ERROR db: connection refused" in ledger
+    assert "kubectl: " in ledger
+    assert "CrashLoopBackOff ×2" in ledger
+    assert "OOMKilled" in ledger
+    assert "Warning BackOff" in ledger
+    assert "api-7c9-x2k4q" not in ledger
