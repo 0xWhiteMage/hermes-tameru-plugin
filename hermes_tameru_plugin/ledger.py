@@ -24,7 +24,7 @@ still holds, else from the row itself.
 Errors are the first exemplar line of every distinct error group (``error_fingerprints``, with rows that differ only by random id segments such as pod suffixes grouped as one line plus a "(+N similar)" count) in the
 original text of the summarized tool results, so a lossy summarizer cannot drop the failures a pruned
 log held; they live in their own budget (``ERRORS_CHARS``, on top of ``max_chars``) and when they do not all fit level-tagged log errors win over other diagnostics, then the most recently seen.
-kubectl pod status rows and Warning events are folded into one lowest-priority ``kubectl:`` line of status counts.
+kubectl pod status rows and Warning events are folded into one lowest-priority ``kubectl:`` line of status counts (with up to 2 pod names per status, capped at ``KUBECTL_LINE_CHARS``).
 
 The text never contains ``User asked:`` (Hermes' summary validator reads it as a user claim), a
 path or command that holds a probable credential is shown as ``<redacted>``, and the whole section goes through
@@ -64,6 +64,9 @@ if TYPE_CHECKING:
 HEADING = "## Artifact Trail (Tameru, exact)"
 MAX_CHARS = 1500              # the Files and Commands lines
 ERRORS_CHARS = 1800           # the Errors lines, on top of that (room for ~9 lines of 200 chars: log errors plus kubectl/test-runner errors)
+KUBECTL_LINE_CHARS = 240  # hard cap of the one-line kubectl status summary
+_KUBECTL_PODS_PER_STATUS = 2
+_KUBECTL_POD_CHARS = 32  # a longer pod name is cut with "…"
 ERROR_LINE_CHARS = 200
 _LEVEL_ERROR_PRIORITY = 1 << 40  # ranks above any clock value
 # A fingerprint segment that is a random id (a k8s pod/replica suffix such as "x#k#q" after masking: 4-8 chars
@@ -203,6 +206,7 @@ def _error_line(line: str) -> str:
 def _note_errors(
     errors: dict[str, _ErrorEntry], clock: Iterator[int], text: str,
     kube: dict[str, set[str]] | None = None,
+    kube_pods: dict[str, list[str]] | None = None,
 ) -> None:
     """Remember the first exemplar of every error group of ``text`` (fingerprints that differ only by random id
     segments share a group; a repeat only refreshes its age, a new member of a group counts as similar)."""
@@ -222,6 +226,11 @@ def _note_errors(
                 else:
                     status = line
             kube.setdefault(status, set()).add(fp)
+            if kube_pods is not None and tokens and tokens[0] != "Warning":
+                name = tokens[0]
+                names = kube_pods.setdefault(status, [])
+                if name not in names and len(names) < _KUBECTL_PODS_PER_STATUS:
+                    names.append(name)
             continue
         key = _ID_SEGMENT_RE.sub("<id>", fp)
         entry = errors.get(key)
@@ -301,6 +310,7 @@ def _seed(
     previous: str, files: dict[str, _FileEntry], commands: dict[str, _CommandEntry],
     errors: dict[str, _ErrorEntry], clock: Iterator[int],
     kube: dict[str, set[str]] | None = None,
+    kube_pods: dict[str, list[str]] | None = None,
 ) -> None:
     """Entries of the Artifact Trail section of an earlier summary (our own line grammar).
 
@@ -318,7 +328,7 @@ def _seed(
         _note_command(commands, clock, m["command"], m["result"], int(m["runs"] or 1))
     marker = text.find("\nErrors:\n")
     for m in _ERROR_LINE_RE.finditer(text[marker + 1:] if marker >= 0 else ""):
-        _note_errors(errors, clock, m["line"], kube=kube)
+        _note_errors(errors, clock, m["line"], kube=kube, kube_pods=kube_pods)
 
 
 # ---- rendering -------------------------------------------------------------------------------
@@ -358,6 +368,29 @@ def _fit(items: list[tuple[int, str]], budget: int) -> list[str]:
     return [*lines, more] if used + len(more) + 1 <= budget else lines
 
 
+def _kubectl_line(kube: dict[str, set[str]], kube_pods: dict[str, list[str]]) -> str:
+    """``  kubectl: <status> ×N (pod, pod, …), ...`` within KUBECTL_LINE_CHARS; pod names are dropped from the last statuses first, then the line is cut."""
+    def short(name: str) -> str:
+        return name if len(name) <= _KUBECTL_POD_CHARS else name[: _KUBECTL_POD_CHARS - 1] + "…"
+
+    def part(status: str, members: set[str], with_pods: bool) -> str:
+        text = f"{status} ×{len(members)}" if len(members) > 1 else status
+        names = [short(n) for n in kube_pods.get(status, [])] if with_pods else []
+        if names:
+            more = ", …" if len(members) > len(names) else ""
+            text += " (" + ", ".join(names) + more + ")"
+        return text
+
+    statuses = list(kube.items())
+    with_pods = [True] * len(statuses)
+    while True:
+        line = "  kubectl: " + ", ".join(part(s, m, w) for (s, m), w in zip(statuses, with_pods))
+        if len(line) <= KUBECTL_LINE_CHARS or not any(with_pods):
+            break
+        with_pods[max(i for i, w in enumerate(with_pods) if w)] = False
+    return line if len(line) <= KUBECTL_LINE_CHARS else line[: KUBECTL_LINE_CHARS - 1] + "…"
+
+
 def build_ledger(
     turns: list[dict], store: OriginalStore | None = None, *, max_chars: int = MAX_CHARS,
     previous: str = "", skip_tools: frozenset[str] = frozenset(), extra_originals: Iterable[str] = (),
@@ -376,8 +409,9 @@ def build_ledger(
     commands: dict[str, _CommandEntry] = {}
     errors: dict[str, _ErrorEntry] = {}
     kube: dict[str, set[str]] = {}
+    kube_pods: dict[str, list[str]] = {}
     clock = itertools.count()
-    _seed(previous, files, commands, errors, clock, kube=kube)
+    _seed(previous, files, commands, errors, clock, kube=kube, kube_pods=kube_pods)
     scan_room = _ERROR_SCAN_BUDGET
 
     def scan(text: str) -> None:
@@ -386,7 +420,7 @@ def build_ledger(
             return
         if text and len(text) <= scan_room:
             scan_room -= len(text)
-            _note_errors(errors, clock, text, kube=kube)
+            _note_errors(errors, clock, text, kube=kube, kube_pods=kube_pods)
 
     for text in extra_originals:
         scan(text)
@@ -441,8 +475,7 @@ def build_ledger(
         for entry in errors.values()
     ]
     if kube:
-        summary = ", ".join(f"{k} ×{len(v)}" if len(v) > 1 else k for k, v in kube.items())
-        error_items.append((0, _plain("  kubectl: " + summary)))
+        error_items.append((0, _plain(_kubectl_line(kube, kube_pods))))
     if error_items and ERRORS_CHARS > len("Errors:") + 1 + _MORE_RESERVE:
         kept = _fit(error_items, ERRORS_CHARS - len("Errors:") - 1)
         if kept:

@@ -553,4 +553,15 @@ def test_kubectl_rows_fold_into_one_status_line():
     assert "CrashLoopBackOff ×2" in ledger
     assert "OOMKilled" in ledger
     assert "Warning BackOff" in ledger
-    assert "api-7c9-x2k4q" not in ledger
+    assert "CrashLoopBackOff ×2 (api-7c9-x2k4q, api-7c9-b8m2z)" in ledger
+    assert "OOMKilled (api-7c9-q1w2e)" in ledger
+
+
+def test_kubectl_line_is_capped():
+    from hermes_tameru_plugin.ledger import KUBECTL_LINE_CHARS, _kubectl_line
+    kube = {f"Status{i}": {f"fp{i}a", f"fp{i}b", f"fp{i}c"} for i in range(8)}
+    pods = {f"Status{i}": [f"very-long-deployment-name-{i}-7d9f8c6b5d-x2k4q", f"pod-{i}-b"] for i in range(8)}
+    line = _kubectl_line(kube, pods)
+    assert len(line) <= KUBECTL_LINE_CHARS and line.startswith("  kubectl: Status0 ×3")
+    short = _kubectl_line({"CrashLoopBackOff": {"a", "b", "c"}}, {"CrashLoopBackOff": ["api-1", "api-2"]})
+    assert short == "  kubectl: CrashLoopBackOff ×3 (api-1, api-2, …)"
