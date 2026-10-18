@@ -153,9 +153,11 @@ def redact_compaction_text(text: str) -> str:
 
 # What ``_lean_recovery_stub`` renders: ``[<tool> output demoted at compaction — N chars preserved
 # in session history.[ Recover with session_search(query=..., session_id='<id>')]]``.
+# optionally followed by Hermes' ``[SKILL_PRUNED: ...]`` reload marker (current Hermes main).
 LEAN_STUB_RE = re.compile(
     r"^\[[^\n]*? output demoted at compaction — \d[\d,]* chars preserved in session history\."
-    r"(?: Recover with session_search\(query=\.\.\., session_id='[^\n]*?'\))?\]$"
+    r"(?: Recover with session_search\(query=\.\.\., session_id='[^\n]*?'\))?\]"
+    r"(?: \[SKILL_PRUNED:[^\n\]]*\])?$"
 )
 
 _PRUNE_MIN_CHARS = 200

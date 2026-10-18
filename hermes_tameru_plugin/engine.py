@@ -975,6 +975,8 @@ class TameruContextEngine(_base()):  # type: ignore[misc]
                 stub = after.get("content") if after is not before else None
                 if not (isinstance(stub, str) and LEAN_STUB_RE.match(stub)):
                     continue
+                if SKILL_PRUNED_MARKER_PREFIX in stub:
+                    continue  # keep Hermes' reload marker verbatim
                 content = before.get("content")
                 if not isinstance(content, str):
                     continue
