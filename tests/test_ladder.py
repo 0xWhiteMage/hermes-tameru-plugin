@@ -161,6 +161,17 @@ def test_persisted_output_becomes_a_header_that_keeps_the_spill_path():
     assert engine._store.get(parse_header(row)["ref"]) == persisted
 
 
+def test_persisted_output_main_wording_is_recognised():
+    from hermes_tameru_plugin.hermes_compat import is_persisted_block
+
+    persisted = hp.persisted_output("p" * 1500, 90_000, "/tmp/spill.txt", wording="main")
+    assert is_persisted_block(persisted)
+    engine, msgs, idx = _one("q", "terminal", {"command": "make"}, persisted)
+    _, out = demote(engine, msgs, idx)
+    row = out[idx]["content"]
+    assert "spilled to /tmp/spill.txt" in row
+
+
 def test_a_persisted_block_without_a_path_takes_hermes_line():
     persisted = hp.persisted_output("p" * 1500, 90_000, "/tmp/spill.txt").replace("Full output saved to:", "Saved:")
     engine, msgs, idx = _one("q", "terminal", {"command": "make"}, persisted)

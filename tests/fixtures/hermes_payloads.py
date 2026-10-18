@@ -83,14 +83,29 @@ def search_files_result(matches: Sequence[tuple[str, int, str]]) -> str:
     return json.dumps(body, ensure_ascii=False)
 
 
-def persisted_output(preview: str, original_size: int, file_path: str, *, has_more: bool = True) -> str:
+def persisted_output(
+    preview: str,
+    original_size: int,
+    file_path: str,
+    *,
+    has_more: bool = True,
+    wording: str = "1298c8e",
+) -> str:
     """The ``<persisted-output>`` block Hermes substitutes for an oversized result.
 
     Mirrors ``tools.tool_result_storage._build_persisted_message`` text-for-text (the real-Hermes
-    replay test asserts the two agree).
+    replay test asserts the two agree). ``wording`` selects the recovery sentence: ``"1298c8e"``
+    (old Hermes) or ``"main"`` (current Hermes main).
     """
     size_kb = original_size / 1024
     size_str = f"{size_kb / 1024:.1f} MB" if size_kb >= 1024 else f"{size_kb:.1f} KB"
+    tail = (
+        "remote API; the archive is kept while this session's transcript references "
+        "it. If it is missing, inspect the current state before retrying — the call "
+        "that produced it may already have taken effect.\n\n"
+        if wording == "main"
+        else "remote API; the full result is already on disk.\n\n"
+    )
     return (
         "<persisted-output>\n"
         f"This tool result was too large ({original_size:,} characters, {size_str}).\n"
@@ -98,8 +113,8 @@ def persisted_output(preview: str, original_size: int, file_path: str, *, has_mo
         "Use the read_file tool with offset and limit to access specific sections of this output.\n"
         "Recovery: page through the saved file with read_file (offset/limit) or "
         "process it with execute_code — do NOT re-request the same data from the "
-        "remote API; the full result is already on disk.\n\n"
-        f"Preview (first {len(preview)} chars):\n"
+        + tail
+        + f"Preview (first {len(preview)} chars):\n"
         + preview
         + ("\n..." if has_more else "")
         + "\n</persisted-output>"

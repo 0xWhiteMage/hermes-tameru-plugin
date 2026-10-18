@@ -346,8 +346,11 @@ def test_persisted_output_fixture_matches_hermes_builder():
     from tools.tool_result_storage import _build_persisted_message
 
     preview = hp.journal_preview(__import__("random").Random(3))
-    ours = hp.persisted_output(preview, 187_402, "/home/agent/.hermes/cache/spillover/call_1.txt")
-    assert ours == _build_persisted_message(preview, True, 187_402, "/home/agent/.hermes/cache/spillover/call_1.txt")
+    theirs = _build_persisted_message(preview, True, 187_402, "/home/agent/.hermes/cache/spillover/call_1.txt")
+    assert theirs in (
+        hp.persisted_output(preview, 187_402, "/home/agent/.hermes/cache/spillover/call_1.txt"),
+        hp.persisted_output(preview, 187_402, "/home/agent/.hermes/cache/spillover/call_1.txt", wording="main"),
+    )
 
 
 def test_hermes_loop_contract_prune_noop_returns_the_input_object():

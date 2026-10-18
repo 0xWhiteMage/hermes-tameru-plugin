@@ -55,6 +55,25 @@ def real_mods():
     )
 
 
+def _real_attr(real_mods, name):
+    """``name`` from Hermes' context_compressor, else from agent.context_compressor_tail (current main moved the lean-tail helpers there)."""
+    if hasattr(real_mods.cc, name):
+        return getattr(real_mods.cc, name)
+    try:
+        tail = importlib.import_module("agent.context_compressor_tail")
+    except ImportError:
+        return getattr(real_mods.cc, name)
+    return getattr(tail, name)
+
+
+def _real_has_demoted_stub() -> bool:
+    """True on Hermes versions whose ``_is_summary_stub`` also accepts lean demotion stubs (current main)."""
+    try:
+        return hasattr(importlib.import_module("agent.context_compressor_tail"), "is_demoted_stub")
+    except ImportError:
+        return False
+
+
 def _reaches(func, target: str) -> bool:
     """True when ``target`` is a global/attribute name used by ``func`` or any nested code object."""
     stack, seen = [func.__code__], set()
@@ -268,7 +287,8 @@ def test_stub_reproduces_contract(check, stub_mods):
     "[grep output demoted at compaction — 9,000 chars preserved in session history.]",
 ])
 def test_parity_is_summary_stub(content, real_mods, stub_mods):
-    assert stub_mods.cc._is_summary_stub(content) == real_mods.cc._is_summary_stub(content)
+    stub_fn = stub_mods.cc._is_summary_stub_main if _real_has_demoted_stub() else stub_mods.cc._is_summary_stub
+    assert stub_fn(content) == real_mods.cc._is_summary_stub(content)
 
 
 def _row(content, role="tool", call_id="c1"):
@@ -376,8 +396,11 @@ def test_parity_module_constants(real_mods, stub_mods):
     for name, value in vars(stub_mods.cc).items():
         if name.startswith("__") or name in abbreviated or not isinstance(value, (str, int, float, tuple, frozenset)):
             continue
-        assert hasattr(real_mods.cc, name), f"{name} does not exist in Hermes' context_compressor"
-        assert getattr(real_mods.cc, name) == value, name
+        try:
+            real_value = _real_attr(real_mods, name)
+        except AttributeError:
+            pytest.fail(f"{name} does not exist in Hermes' context_compressor (or context_compressor_tail)")
+        assert real_value == value, name
         checked += 1
     assert checked >= 20, checked
     assert real_mods.cc.SUMMARY_PREFIX.startswith(stub_mods.cc.SUMMARY_PREFIX)
@@ -406,6 +429,7 @@ def _normalized_ast(func) -> str:
             node.body = body[1:] or [ast.Pass()]
         if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
             node.returns = None
+            node.name = "_"
         elif isinstance(node, ast.arg):
             node.annotation = None
         elif isinstance(node, ast.AnnAssign):
@@ -417,10 +441,15 @@ def _normalized_ast(func) -> str:
 @pytest.mark.parametrize("name", _VERBATIM_FUNCTIONS + _VERBATIM_METHODS)
 def test_parity_helpers_are_verbatim_copies(name, real_mods, stub_mods):
     """The helpers THIRD_PARTY_NOTICES calls verbatim copies are still the same code (docstrings aside)."""
-    def get(mod):
-        return getattr(mod.ContextCompressor, name) if name in _VERBATIM_METHODS else getattr(mod, name)
+    if name in _VERBATIM_METHODS:
+        stub_obj = getattr(stub_mods.cc.ContextCompressor, name)
+        real_obj = getattr(real_mods.cc.ContextCompressor, name)
+    else:
+        stub_name = "_is_summary_stub_main" if name == "_is_summary_stub" and _real_has_demoted_stub() else name
+        stub_obj = getattr(stub_mods.cc, stub_name)
+        real_obj = _real_attr(real_mods, name)
 
-    assert _normalized_ast(get(stub_mods.cc)) == _normalized_ast(get(real_mods.cc)), (
+    assert _normalized_ast(stub_obj) == _normalized_ast(real_obj), (
         f"{name} drifted from Hermes: re-copy it into tests/hermes_stub (and keep the notice) or drop the claim"
     )
 

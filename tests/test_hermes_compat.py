@@ -388,9 +388,18 @@ def test_is_compaction_summary_fallback_is_a_superset_of_hermes(compat, cc):
     ("read_file", 1_500, ""),
 ])
 def test_lean_stub_re_matches_hermes_stubs(compat, cc, tool, size, session):
-    stub = cc._lean_recovery_stub(tool, size, session)
+    stub_fn = getattr(cc, "_lean_recovery_stub", None) or importlib.import_module("agent.context_compressor_tail")._lean_recovery_stub
+    stub = stub_fn(tool, size, session)
     assert compat.LEAN_STUB_RE.match(stub), stub
     assert compat.LEAN_STUB_RE.fullmatch(stub)
+    assert compat.LEAN_STUB_RE.fullmatch(stub + " [SKILL_PRUNED: content lost in compression; reload with skill_view(name='deploy')]")
+
+
+def test_lean_stub_re_rejects_other_suffixes(compat):
+    base = "[grep output demoted at compaction — 9,000 chars preserved in session history.]"
+    assert compat.LEAN_STUB_RE.fullmatch(base)
+    assert not compat.LEAN_STUB_RE.fullmatch(base + " trailing words")
+    assert not compat.LEAN_STUB_RE.fullmatch(base + " [SKILL_PRUNED: x]\nmore")
 
 
 @pytest.mark.parametrize("content", [

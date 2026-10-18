@@ -77,6 +77,7 @@ _LEAN_ANCHOR_HEADING = "## Anchor Index (mechanically extracted, exact)"
 _IMAGE_PART_TYPES = frozenset({"image_url", "input_image", "image"})
 STEER_DISPLAY_KIND = "steer"  # agent.prompt_builder.STEER_DISPLAY_KIND
 PROACTIVE_PRUNE_REARM_MODEL_CONFIG_KEY = "_proactive_prune_rearm_tokens"
+import re
 
 
 def _is_summary_stub(content: str) -> bool:
@@ -93,6 +94,16 @@ def _lean_recovery_stub(tool_name: str, content_len: int, session_id: str) -> st
     )
 
 
+_DEMOTED_STUB_RE = re.compile(r"\[[^\s\]]* output demoted at compaction — [\d,]+ chars preserved in session history\.")
+
+
+def is_demoted_stub(content: str) -> bool:
+    return len(content) < 1_000 and _DEMOTED_STUB_RE.match(content) is not None
+
+
+def _is_summary_stub_main(content: str) -> bool:
+    """``_is_summary_stub`` as on current Hermes main (also true for lean demotion stubs)."""
+    return content.startswith("[") and " chars)" in content and len(content) < 400 or is_demoted_stub(content)
 def _tc_get(obj: Any, key: str, default: Any = "") -> Any:
     """Field of a dict- or object-shaped tool call (or its ``function`` sub-object)."""
     return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
