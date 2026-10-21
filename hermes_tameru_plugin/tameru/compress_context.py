@@ -295,6 +295,17 @@ _TOKEN_RE = re.compile(
     r"[\u0600-\u06ff]{2,}|[\u0e00-\u0e7f]{2,}"
 )
 
+# Query-term tokens: like _TOKEN_RE, but a Latin word also takes letters with
+# diacritics (Latin-1 Supplement letters, Latin Extended-A/B, Latin Extended
+# Additional for Vietnamese) and combining marks, so "réplica" stays one term.
+_TERM_TOKEN_RE = re.compile(
+    r"[A-Za-z_\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF]"
+    r"[A-Za-z_\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF0-9\u0300-\u036F]*"
+    r"|\d+(?:\.\d+)?|"
+    r"[\u4e00-\u9fff]|"
+    r"[\u3040-\u30ff]{2,}|[\uac00-\ud7a3]{2,}|"
+    r"[\u0600-\u06ff]{2,}|[\u0e00-\u0e7f]{2,}"
+)
 # Long punctuation runs (progress dots, rulers) cost real tokens: ~1 per 4
 # chars. Only runs of 16+ so ordinary code/prose estimates do not move.
 _ASCII_SYMBOL_RUN_RE = re.compile(r"[!-/:-@\[-`{-~]{16,}")
@@ -1816,6 +1827,35 @@ def _compact_progress_lines(lines: list[str]) -> list[str]:
     return lines
 
 
+_REPEAT_LINE_MIN_CHARS = 60
+_REPEAT_UNIT_MIN_CHARS = 20
+_REPEAT_MIN_COUNT = 3
+
+
+def _fold_repeated_sentences(lines: list[str]) -> list[str]:
+    """Fold a line made of one unit repeated back to back into "[\u00d7N] unit".
+
+    Language-independent: uses the line's own repeated whitespace period, not a
+    sentence splitter. Lossless apart from exact whitespace between copies.
+    """
+    folded: list[str] = []
+    for line in lines:
+        t = " ".join(line.split())
+        if len(t) >= _REPEAT_LINE_MIN_CHARS:
+            u = t + " "
+            p = (u + u).find(u, 1)
+            if (
+                _REPEAT_UNIT_MIN_CHARS <= p < len(u)
+                and len(u) % p == 0
+                and len(u) // p >= _REPEAT_MIN_COUNT
+            ):
+                indent = line[: len(line) - len(line.lstrip())]
+                folded.append(f"{indent}[\u00d7{len(u) // p}] {u[:p].strip()}")
+                continue
+        folded.append(line)
+    return folded
+
+
 def _preprocess_scan(
     text: str, query: str, content_hint: str | None = None
 ) -> tuple[list[str], str]:
@@ -1839,6 +1879,7 @@ def _preprocess_scan(
         processed = preprocess_flat_records(text, query)
         if processed != text:
             return processed.split("\n"), kind
+        lines = _fold_repeated_sentences(lines)
         query_text = query or ""
         distinctive_terms = [
             term
@@ -1914,7 +1955,7 @@ def _extract_terms_cached(query: str) -> tuple[str, ...]:
 def _extract_terms_scan(query: str) -> list[str]:
     terms: list[str] = []
     seen: set[str] = set()
-    for raw in _TOKEN_RE.findall(query or ""):
+    for raw in _TERM_TOKEN_RE.findall(query or ""):
         term = raw.lower().strip("؟?!.،,;:…\"'()[]")
         if not term:
             continue
@@ -6764,6 +6805,8 @@ def compress_context(
             summarized = preprocess_json(text, query or "")
             if summarized != text:
                 lines = _compact_progress_lines(summarized.split("\n"))
+        elif content_type == "text":
+            lines = _fold_repeated_sentences(lines)
         recall_base = text
     # numbered_code: the "N\t" / "N|" gutter stays in the output (_render emits
     # `lines`) but is not part of the code the scorer should read.
