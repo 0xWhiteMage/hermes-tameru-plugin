@@ -996,6 +996,7 @@ _JEST_SUMMARY_RE = re.compile(
     r"^(?:Test Suites|Tests|Snapshots|Time|Ran all test suites|Test Files)\b"
 )
 _JEST_TICK_RE = re.compile(r"^\s*[✓✔√]\s")
+_JEST_SUITE_LINE_RE = re.compile(r"^\s?(PASS|FAIL) {1,2}\S+\.(?:test|spec)\.[cm]?[jt]sx?\b")
 _GO_PKG_RE = re.compile(r"^(?:ok|FAIL|\?)\s+\S+(?:\s|$)")
 _CARGO_OK_RE = re.compile(r"^test \S.* \.\.\. ok$")
 _CARGO_RUNNING_RE = re.compile(r"^running \d+ tests?$")
@@ -1038,7 +1039,7 @@ _RUNNER_HINT_RE = re.compile(
     r"test result: |Test Suites:|--- (?:PASS|FAIL):|=== RUN |^(?:ok|FAIL)\s|==="
     r"|\d (?:passed|failed|errors?|skipped|xfailed|xpassed|deselected|warnings?)\b"
     r"|> Task :|Tests run: |\d examples?, |PHPUnit |, Assertions: |Failed:|^Events:"
-    r"|LAST SEEN\s+TYPE\s+REASON|NAME\s+READY\s+STATUS\s+RESTARTS",
+    r"|LAST SEEN\s+TYPE\s+REASON|NAME\s+READY\s+STATUS\s+RESTARTS|^\s?(?:PASS|FAIL) {1,2}\S+\.(?:test|spec)\.",
     re.MULTILINE,
 )
 
@@ -1757,10 +1758,152 @@ def _classify_git_status(lines: list[str]) -> tuple[list[bool], list[int], list[
     return keep, [0] * len(lines), [0] * len(lines)
 
 
+_PKG_NOISE_RE = re.compile(
+    r"^(?:npm WARN (?:deprecated|old lockfile|EBADENGINE) (\S+?)(?:@[^\s:]*)?:?(?:\s|$)"
+    r"|warning (\S+?)@[^\s:]+: "
+    r"|  - (?:Locking|Installing|Downloading|Upgrading|Updating|Removing) (\S+) \()"
+)
+_PKG_ANCHOR_RE = re.compile(
+    r"^(?:npm (?:ERR!|error|WARN) |yarn (?:install|add) v\d|\[\d/\d\] |Loading composer repositories|Updating dependencies|Installing dependencies)"
+)
+_PKG_ERROR_HINT_RE = re.compile(r"ERR!|npm error|^error |Problem \d|requires |conflict|could not|Could not|not found|Couldn't", re.IGNORECASE)
+
+
+def _detect_package_install(text: str) -> bool:
+    noise = 0
+    anchor = False
+    for line in text.splitlines():
+        if _PKG_NOISE_RE.match(line):
+            noise += 1
+        if not anchor and _PKG_ANCHOR_RE.match(line):
+            anchor = True
+        if noise >= 5 and anchor:
+            return True
+    return False
+
+
+def _classify_package_install(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    error_text = "\n".join(line for line in lines if _PKG_ERROR_HINT_RE.search(line))
+    keep: list[bool] = []
+    for line in lines:
+        match = _PKG_NOISE_RE.match(line)
+        if match:
+            name = next((group for group in match.groups() if group is not None), "")
+            if name and re.search(
+                rf"(?<![A-Za-z0-9._/-]){re.escape(name)}(?![A-Za-z0-9._-])",
+                error_text,
+            ):
+                keep.append(True)
+            else:
+                keep.append(False)
+        else:
+            keep.append(True)
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_PS_AUX_HEADER_RE = re.compile(r"^USER\s+PID\s+%CPU\s+%MEM\s+VSZ\s+RSS\s+TTY\s+STAT\s+START\s+TIME\s+COMMAND\s*$")
+_PS_CPU_HIGH = 20.0
+_PS_MEM_HIGH = 10.0
+
+
+def _detect_ps_aux(text: str) -> bool:
+    non_blank = [line for line in text.splitlines() if line.strip()]
+    if len(non_blank) < 11:
+        return False
+    return bool(_PS_AUX_HEADER_RE.match(non_blank[0]))
+
+
+def _classify_ps_aux(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [False] * len(lines)
+    parsed: list[tuple[int, float, float, str]] = []
+
+    for index, line in enumerate(lines):
+        if not line.strip():
+            keep[index] = True
+            continue
+        if _PS_AUX_HEADER_RE.match(line):
+            keep[index] = True
+            continue
+        parts = line.split(None, 10)
+        if len(parts) < 11:
+            keep[index] = True
+            continue
+        try:
+            cpu = float(parts[2])
+            mem = float(parts[3])
+        except ValueError:
+            keep[index] = True
+            continue
+        parsed.append((index, cpu, mem, parts[7]))
+
+    if parsed:
+        highest_cpu = max(parsed, key=lambda item: item[1])
+        highest_mem = max(parsed, key=lambda item: item[2])
+        highest_cpu_index = highest_cpu[0]
+        highest_mem_index = highest_mem[0]
+    else:
+        highest_cpu_index = -1
+        highest_mem_index = -1
+
+    for index, cpu, mem, stat in parsed:
+        if (
+            cpu >= _PS_CPU_HIGH
+            or mem >= _PS_MEM_HIGH
+            or stat.startswith(("Z", "D"))
+            or index == highest_cpu_index
+            or index == highest_mem_index
+        ):
+            keep[index] = True
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_DOCKER_PS_HEADER_RE = re.compile(r"^CONTAINER ID\s+IMAGE\s+COMMAND\s+CREATED\s+STATUS\s+PORTS\s+NAMES\s*$")
+_DOCKER_PS_UP_RE = re.compile(r"\s{2,}Up (?:\d+|About|Less than)[^\n]*?(?=\s{2,}|$)")
+
+
+def _detect_docker_ps(text: str) -> bool:
+    non_blank = [line for line in text.splitlines() if line.strip()]
+    if not non_blank or not _DOCKER_PS_HEADER_RE.match(non_blank[0]):
+        return False
+    return len(non_blank) >= 9
+
+
+def _classify_docker_ps(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [False] * len(lines)
+    header_index = None
+    for i, line in enumerate(lines):
+        if line.strip():
+            header_index = i
+            break
+    if header_index is None:
+        return keep, [0] * len(lines), [0] * len(lines)
+
+    keep[header_index] = True
+
+    for i, line in enumerate(lines):
+        if i == header_index:
+            continue
+        if not line.strip():
+            keep[i] = True
+            continue
+
+        m = _DOCKER_PS_UP_RE.search(line)
+        if m is not None and not any(
+            marker in m.group(0)
+            for marker in ("(unhealthy)", "(health: starting)", "(Paused)")
+        ):
+            continue
+        keep[i] = True
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
 def detect_test_runner(text: str) -> str | None:
     """``"cargo"``, ``"go"``, ``"jest"``, ``"pytest"``, ``"gradle"``, ``"rspec"``,
     ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"``, ``"env_dump"``,
-    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"`` or ``"kubectl"`` for recognised output.
+    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"``, ``"package_install"``, ``"ps_aux"``, ``"docker_ps"`` or ``"kubectl"`` for recognised output.
 
     Vitest-style ``Tests  N passed`` output is left to the legacy path.
     One pass over the lines, each capped at ``_LINE_CAP`` characters (a long
@@ -1785,6 +1928,12 @@ def detect_test_runner(text: str) -> str | None:
             return "rust_build"
         if _detect_git_status(text):
             return "git_status"
+        if _detect_package_install(text):
+            return "package_install"
+        if _detect_ps_aux(text):
+            return "ps_aux"
+        if _detect_docker_ps(text):
+            return "docker_ps"
         if _detect_git_log(text):
             return "git_log"
         if _detect_docker_build(text):
@@ -1795,11 +1944,22 @@ def detect_test_runner(text: str) -> str | None:
     first = None
     surefire_run = surefire_running = False
     k8s_events = False
+    jest_badge = 0
+    jest_badge_fail = False
+    jest_block = False
     for ln in text.split("\n"):
         if len(ln) > _LINE_CAP:
             continue
         if first is None and ln.strip():
             first = ln
+        if ln[:6].lstrip().startswith(("PASS", "FAIL")):
+            m = _JEST_SUITE_LINE_RE.match(ln)
+            if m:
+                jest_badge += 1
+                if m.group(1) == "FAIL":
+                    jest_badge_fail = True
+        if not jest_block and "●" in ln and _JEST_BLOCK_RE.match(ln):
+            jest_block = True
         if not gradle_task and ln.startswith("> Task :") and _GRADLE_TASK_RE.match(ln):
             gradle_task = True
         if not gradle_end and (ln[:1] in ("B", "F") or ln[:1].isdigit()) and _GRADLE_END_RE.match(ln):
@@ -1838,6 +1998,8 @@ def detect_test_runner(text: str) -> str | None:
     if running and cargo_result:
         return "cargo"
     if jest_suites and jest_tests:
+        return "jest"
+    if jest_badge >= 3 and jest_badge_fail and jest_block:
         return "jest"
     if go:
         return "go"
@@ -1899,6 +2061,12 @@ def detect_test_runner(text: str) -> str | None:
         return "rust_build"
     if _detect_git_status(text):
         return "git_status"
+    if _detect_package_install(text):
+        return "package_install"
+    if _detect_ps_aux(text):
+        return "ps_aux"
+    if _detect_docker_ps(text):
+        return "docker_ps"
     if _detect_git_log(text):
         return "git_log"
     if _detect_docker_build(text):
@@ -2157,9 +2325,9 @@ def _classify_jest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
         if _JEST_BLOCK_RE.match(ln):
             in_block = True
             keep[i] = True
-        elif ln.startswith(("PASS ", "FAIL ")):
+        elif ln.lstrip(" ")[:5] in ("PASS ", "FAIL ") and len(ln) - len(ln.lstrip(" ")) <= 1:
             in_block = False
-            if ln.startswith("FAIL "):
+            if ln.lstrip(" ").startswith("FAIL "):
                 keep[i] = True
             else:
                 suites[i] = 1
@@ -2168,6 +2336,8 @@ def _classify_jest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
             keep[i] = True
         elif re.match(r"^\s*● Console\b", ln):
             in_block = False
+        elif re.match(r"^\s*› ", ln):
+            keep[i] = True
         elif in_block:
             keep[i] = True
         elif _JEST_TICK_RE.match(ln):
@@ -2179,8 +2349,14 @@ def _classify_jest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     return keep, tests, suites
 
 
+_GO_PKG_OK_RE = re.compile(r"^ok\s+(\S+)\s+(?:[\d.]+s|\(cached\))")
+_GO_PKG_NOTEST_RE = re.compile(r"^\?\s+\S+\s+\[no test files\]")
+_GO_PKG_FOLD_MIN = 5
+
+
 def _classify_go(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     n = len(lines)
+    fold_pkgs = sum(1 for ln in lines if _GO_PKG_OK_RE.match(ln)) >= _GO_PKG_FOLD_MIN
     keep = [True] * n
     tests = [0] * n
     suites = [0] * n
@@ -2211,6 +2387,18 @@ def _classify_go(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
                 tests[i] = 1
         elif indented:
             pending.append(i)
+        elif fold_pkgs and _GO_PKG_OK_RE.match(ln):
+            m = _GO_PKG_OK_RE.match(ln)
+            keep[i] = False
+            suites[i] = 1
+            pending = []
+            dropping = False
+            if i > 0 and keep[i - 1] and lines[i - 1] == f"# {m.group(1)}":
+                keep[i - 1] = False
+        elif fold_pkgs and _GO_PKG_NOTEST_RE.match(ln):
+            keep[i] = False
+            pending = []
+            dropping = False
         else:
             pending = []
             dropping = False
@@ -2904,6 +3092,9 @@ _RUNNERS = {
     "pip_install": _classify_pip_install,
     "rust_build": _classify_rust_build,
     "git_status": _classify_git_status,
+    "package_install": _classify_package_install,
+    "ps_aux": _classify_ps_aux,
+    "docker_ps": _classify_docker_ps,
 }
 
 
@@ -3013,7 +3204,7 @@ def preprocess_test_output(
                   else ("pod rows" if runner == "kubectl_pods"
                         else ("build lines" if runner == "docker_build"
                               else ("table rows" if runner == "status_table"
-                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else None)))))))))))))))
+                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else ("package lines" if runner == "package_install" else ("process rows" if runner == "ps_aux" else ("running container rows" if runner == "docker_ps" else None))))))))))))))))))
         ),
     )
     if runner == "pytest":
