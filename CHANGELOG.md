@@ -19,6 +19,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors Redis log routing, the env/config dump reducer (secret-looking lines never kept alone), kubectl separator and describe-job fixes, MSBuild/tsc lint locations, collapsed-summary needle selection and weak-query diff file folding.
 - Vendors the Terraform plan, bundler asset, Ansible and pip install reducers, short-syslog rare-line anchors and the restored collapse-run split.
 - Vendors klog and web access-log routing with 4xx/5xx kept, cargo build and git status reducers, query-saturated template collapse, the gradle task label, and the df snap-loop fix.
+- Vendors the npm/yarn/composer, ps aux and docker ps reducers, jest output without a summary, and go package folding.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
