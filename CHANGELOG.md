@@ -11,6 +11,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors test-runner reducers for Gradle, RSpec, PHPUnit, dotnet test, Maven Surefire and quiet pytest.
 - Vendors kubectl `describe` and `get events` reducers, with broader diagnostic recognition.
 - Vendors text tool-output collapse, the status-table reducer and dashboard summary anchors.
+- Vendors JSON array summaries, no-query anchors for quiet logs, the docker build reducer and short-line folding.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
@@ -22,6 +23,7 @@ All notable changes to this project are documented here. The format follows
 
 ### Fixed
 - Vendors the fix that kept ratio lines such as `20/40 degraded` from being dropped as progress bars.
+- Vendors the fix that keeps docker `Step N/M` lines.
 
 ## [1.5.0] - 2026-10-13
 
