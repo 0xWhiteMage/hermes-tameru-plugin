@@ -443,7 +443,7 @@ _CL_TRACE_RE = re.compile(
     r"^(Traceback|Caused by:|Error:|Exception:|[A-Za-z]+Error\b|at\s+\S+\(|\s*File\s+\".+\", line \d+)"
 )
 _CL_LOG_RE = re.compile(
-    r"^\[?(20\d\d-\d\d-\d\d|\d\d:\d\d:\d\d|INFO|WARN|WARNING|ERROR|DEBUG|TRACE|ERR|FAIL|FATAL|OK)\]?"
+    r"^\[?(20\d\d-\d\d-\d\d|20\d\d/\d\d/\d\d[ T]\d\d:\d\d:\d\d|\d\d:\d\d:\d\d|INFO|WARN|WARNING|ERROR|DEBUG|TRACE|ERR|FAIL|FATAL|OK)\]?"
 )
 _CL_LOGFMT_RE = re.compile(
     r"^(?:ts|time|timestamp|t)=[^\s]+(?:\s+level=[A-Za-z0-9_.]+|\s+.*\slevel=[A-Za-z0-9_.]+)"
@@ -5428,6 +5428,11 @@ _ANCHOR_ACCESS_LOG_RE = re.compile(
 )
 
 
+_PHP_LOG_PREFIX_RE = re.compile(r"^\[\d{1,2}-[A-Z][a-z]{2}-\d{4} \d\d:\d\d:\d\d(?: [A-Za-z_/+-]+)?\]\s+(?:PHP\s+)?")
+_PHP_BARE_PREFIX_RE = re.compile(r"^PHP\s+(?=(?:Fatal error|Parse error|Warning|Notice|Deprecated|Catchable fatal error):)")
+_PHP_STACK_FRAME_RE = re.compile(r"^#\d+ ")
+
+
 def _strip_anchor_prefix(line: str) -> str:
     """Drop the log-record prefix from an anchor line, keeping the level word.
 
@@ -5447,6 +5452,16 @@ def _strip_anchor_prefix(line: str) -> str:
         syslog_remainder = line[syslog_m.end():]
         if syslog_remainder.strip():
             line = syslog_remainder
+    php_m = _PHP_LOG_PREFIX_RE.match(line)
+    if php_m is not None:
+        php_remainder = line[php_m.end():]
+        if php_remainder.strip():
+            line = php_remainder
+    php_bare_m = _PHP_BARE_PREFIX_RE.match(line)
+    if php_bare_m is not None:
+        php_bare_remainder = line[php_bare_m.end():]
+        if php_bare_remainder.strip():
+            line = php_bare_remainder
     stripped = _strip_structured_anchor(line)
     if stripped is not None:
         line = stripped
@@ -5493,6 +5508,9 @@ def _is_weak_failure_line(line: str) -> bool:
     ``code=killed|dumped``, or an HTTP access-log 5xx status), and is not excluded by a
     recovery/zero-count phrase."""
     line = line[:_RX_LINE_CAP]
+    if "PHP Warning:" in line:
+        line = _without_zero_counts(line)
+        return not _WEAK_EXCLUDE_RE.search(line)
     if not _WEAK_LINE_HINT_RE.search(line):
         return False
     line = _without_zero_counts(line)
@@ -5836,8 +5854,16 @@ def _anchor_regions(text: str, max_regions: int) -> list[str]:
     regions: list[str] = []
     seen_rows: set[int] = set()
 
+
+
     def frame_like(s: str) -> bool:
         if s.strip() and _GO_STACK_LINE_RE.match(s):
+            return True
+        if s.strip() == "Stack trace:":
+            return True
+        if _PHP_STACK_FRAME_RE.match(s):
+            return True
+        if s.lstrip().startswith("thrown in "):
             return True
         return bool(s.strip()) and (
             s[:1] in " \t"
@@ -5845,11 +5871,17 @@ def _anchor_regions(text: str, max_regions: int) -> list[str]:
             or _is_error_line(s)
         )
 
-    def repetitive(j: int, step: int) -> bool:
+    def repetitive(j: int, step: int, anchor_fp=None) -> bool:
         # lines[j] repeats the template of the next line further out (same masked
         # shape, e.g. a run of " PASS  x.test.ts (12 ms)" rows): context noise.
+        # A candidate that repeats the anchor's fingerprint is a repeat of the
+        # anchor, not frame context, so it also stops region growth.
+        if anchor_fp is not None and _error_fp(lines[j].strip()) == anchor_fp:
+            return True
         k = j + step
-        if not (0 <= k < len(lines)) or _is_error_line(lines[j]):
+        if not (0 <= k < len(lines)):
+            return False
+        if _is_error_line(lines[j]) and not _is_error_line(lines[k]):
             return False
         return _error_fp(lines[j].strip()) == _error_fp(lines[k].strip())
 
@@ -5892,7 +5924,8 @@ def _anchor_regions(text: str, max_regions: int) -> list[str]:
                 regions.append(region[:_ANCHOR_LINE_CHARS])
             continue
         lo = i
-        while lo > 0 and i - lo < _ANCHOR_REGION_BEFORE and frame_like(lines[lo - 1]) and not repetitive(lo - 1, -1):
+        anchor_fp = _error_fp(lines[i].strip())
+        while lo > 0 and i - lo < _ANCHOR_REGION_BEFORE and frame_like(lines[lo - 1]) and not repetitive(lo - 1, -1, anchor_fp):
             lo -= 1
         hi = i
         while hi + 1 < len(lines) and hi - i < _ANCHOR_REGION_AFTER:
@@ -5901,7 +5934,7 @@ def _anchor_regions(text: str, max_regions: int) -> list[str]:
             # detail after a blank, as jest/pytest/cargo print it)
             if not lines[nxt].strip() and nxt + 1 < len(lines) and lines[nxt + 1].strip():
                 nxt += 1
-            if not (frame_like(lines[nxt]) and not repetitive(nxt, 1)):
+            if not (frame_like(lines[nxt]) and not repetitive(nxt, 1, anchor_fp)):
                 break
             hi = nxt
         if line.startswith("panic: "):
@@ -6089,8 +6122,35 @@ def compress_context(
                 and len(caller_text) <= _ANCHOR_RETRY_MAX_CHARS
                 and bool(error_fingerprints(caller_text))
             )
-            if uninformative or small_erroring_log:
+            rare_topic_lines = []
+            if (
+                not uninformative
+                and not small_erroring_log
+                and len(sample) >= 20
+                and len(caller_text) <= _ANCHOR_RETRY_MAX_CHARS
+                and route_content_type(caller_text.split("\n", 50)[:50]) == "log"
+            ):
+                originals = [ln for ln in caller_text.split("\n", 4000)[:4000] if ln.strip()]
+                rare_hits = []
+                seen_rare_lines = set()
+                rare_hit_limit = max(2, len(sample) // 50)
+                for test in tests:
+                    hit_idx = [k for k, ln in enumerate(sample) if test(ln)]
+                    if 1 <= len(hit_idx) <= rare_hit_limit:
+                        for k in hit_idx:
+                            line = originals[k]
+                            if line not in seen_rare_lines:
+                                seen_rare_lines.add(line)
+                                rare_hits.append(line)
+                if rare_hits and len(rare_hits) <= _ANCHOR_MAX_LINES:
+                    rare_topic_lines = rare_hits
+            if uninformative or small_erroring_log or rare_topic_lines:
                 anchor_lines = _anchor_regions(caller_text, _ANCHOR_MAX_LINES)
+                if not anchor_lines and rare_topic_lines:
+                    anchor_lines = [
+                        _strip_anchor_prefix(line.strip())[:_ANCHOR_LINE_CHARS]
+                        for line in rare_topic_lines
+                    ]
                 if anchor_lines:
                     anchored_query = (query or "") + "\n" + "\n".join(anchor_lines)
                     # Probe both objectives side-effect free (no CCR archive, log or
