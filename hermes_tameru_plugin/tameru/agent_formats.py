@@ -1655,10 +1655,112 @@ def _classify_pip_install(lines: list[str]) -> tuple[list[bool], list[int], list
     return keep, [0] * len(lines), [0] * len(lines)
 
 
+_RUST_WARNING_RE = re.compile(r"^warning(?:\[[\w-]+\])?: ")
+_RUST_LOCATION_RE = re.compile(r"^\s*--> \S+:\d+:\d+")
+_RUST_SUMMARY_RE = re.compile(r"^(?:warning: `[^`]+` \(.+\) generated \d+ warnings?|warning: build failed|error: could not compile|error: aborting due to)")
+_RUST_ERROR_RE = re.compile(r"^error(?:\[E\d{4}\])?: ")
+
+
+def _detect_rust_build(text: str) -> bool:
+    warning_count = 0
+    location_count = 0
+    has_error_or_summary = False
+    for line in text.splitlines():
+        if _RUST_WARNING_RE.match(line) and not _RUST_SUMMARY_RE.match(line):
+            warning_count += 1
+        if _RUST_LOCATION_RE.match(line):
+            location_count += 1
+        if _RUST_ERROR_RE.match(line) or _RUST_SUMMARY_RE.match(line):
+            has_error_or_summary = True
+    return warning_count >= 3 and location_count >= 3 and has_error_or_summary
+
+
+def _classify_rust_build(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    i = 0
+    while i < len(lines):
+        line = lines[i]
+        if _RUST_WARNING_RE.match(line) and not _RUST_SUMMARY_RE.match(line):
+            keep[i] = False
+            i += 1
+            while i < len(lines):
+                current = lines[i]
+                if not current.strip():
+                    keep[i] = False
+                    i += 1
+                    break
+                if (
+                    _RUST_SUMMARY_RE.match(current)
+                    or _RUST_WARNING_RE.match(current)
+                    or _RUST_ERROR_RE.match(current)
+                ):
+                    break
+                keep[i] = False
+                i += 1
+        else:
+            i += 1
+    return keep, [0] * len(lines), [0] * len(lines)
+
+_GIT_STATUS_SECTION_RE = re.compile(r"^(?:Changes to be committed|Changes not staged for commit|Untracked files|Unmerged paths):$")
+_GIT_STATUS_HINT_RE = re.compile(r'^\s+\(use "git ')
+_GIT_STATUS_CONFLICT_RE = re.compile(r"^\t(?:both (?:modified|added|deleted)|deleted by (?:us|them)|added by (?:us|them)):")
+_GIT_STATUS_KEEP_PER_SECTION = 3
+
+
+def _detect_git_status(text: str) -> bool:
+    lines = text.splitlines()
+    non_blank = [line for line in lines if line.strip()]
+    if not any(
+        line.startswith(("On branch ", "HEAD detached "))
+        for line in non_blank[:3]
+    ):
+        return False
+    if not any(_GIT_STATUS_SECTION_RE.match(line) for line in lines):
+        return False
+    if sum(1 for line in lines if line.startswith("\t")) < 10:
+        return False
+    return True
+
+
+def _classify_git_status(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep: list[bool] = []
+    in_section = False
+    unmerged_section = False
+    entry_count = 0
+
+    for line in lines:
+        if _GIT_STATUS_SECTION_RE.match(line):
+            in_section = True
+            unmerged_section = line == "Unmerged paths:"
+            entry_count = 0
+            keep.append(True)
+            continue
+
+        if _GIT_STATUS_HINT_RE.match(line):
+            keep.append(False)
+            continue
+
+        if in_section and line.startswith("\t"):
+            entry_count += 1
+            if (
+                unmerged_section
+                or _GIT_STATUS_CONFLICT_RE.match(line)
+                or entry_count <= _GIT_STATUS_KEEP_PER_SECTION
+            ):
+                keep.append(True)
+            else:
+                keep.append(False)
+            continue
+
+        keep.append(True)
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
 def detect_test_runner(text: str) -> str | None:
     """``"cargo"``, ``"go"``, ``"jest"``, ``"pytest"``, ``"gradle"``, ``"rspec"``,
     ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"``, ``"env_dump"``,
-    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"`` or ``"kubectl"`` for recognised output.
+    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"`` or ``"kubectl"`` for recognised output.
 
     Vitest-style ``Tests  N passed`` output is left to the legacy path.
     One pass over the lines, each capped at ``_LINE_CAP`` characters (a long
@@ -1679,6 +1781,10 @@ def detect_test_runner(text: str) -> str | None:
             return "ansible"
         if _detect_pip_install(text):
             return "pip_install"
+        if _detect_rust_build(text):
+            return "rust_build"
+        if _detect_git_status(text):
+            return "git_status"
         if _detect_git_log(text):
             return "git_log"
         if _detect_docker_build(text):
@@ -1789,6 +1895,10 @@ def detect_test_runner(text: str) -> str | None:
         return "ansible"
     if _detect_pip_install(text):
         return "pip_install"
+    if _detect_rust_build(text):
+        return "rust_build"
+    if _detect_git_status(text):
+        return "git_status"
     if _detect_git_log(text):
         return "git_log"
     if _detect_docker_build(text):
@@ -2174,7 +2284,6 @@ def _classify_gradle(lines):
         m = _GRADLE_TASK_RE.match(ln)
         if m:
             keep[i] = False
-            suites[i] = 1
             continue
         m = _GRADLE_TEST_RE.match(ln)
         if m:
@@ -2620,6 +2729,7 @@ def _classify_status_table(lines):
         parsed.append((i, ln.split()))
     if not parsed:
         return keep, [0] * n, [0] * n
+    loop_rows = {i for i, tokens in parsed if tokens[0].startswith("/dev/loop")}
     outliers = set()
     for col in range(len(parsed[0][1])):
         values = [tokens[col] for _, tokens in parsed]
@@ -2641,7 +2751,9 @@ def _classify_status_table(lines):
                     if item is None:
                         continue
                     v, unit = item
-                    if (med > 0 and v >= 5 * med) or (unit == "%" and v >= 90):
+                    # Snap squashfs loop devices are always 100% full; exclude them
+                    # from the high-usage outlier rule so real disks remain visible.
+                    if (med > 0 and v >= 5 * med) or (unit == "%" and v >= 90 and i not in loop_rows):
                         outliers.add(i)
     if not outliers or len(outliers) > 0.2 * len(rows):
         return [True] * n, [0] * n, [0] * n
@@ -2790,6 +2902,8 @@ _RUNNERS = {
     "bundle_assets": _classify_bundle_assets,
     "ansible": _classify_ansible,
     "pip_install": _classify_pip_install,
+    "rust_build": _classify_rust_build,
+    "git_status": _classify_git_status,
 }
 
 
@@ -2899,7 +3013,7 @@ def preprocess_test_output(
                   else ("pod rows" if runner == "kubectl_pods"
                         else ("build lines" if runner == "docker_build"
                               else ("table rows" if runner == "status_table"
-                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else None))))))))))))
+                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else None)))))))))))))))
         ),
     )
     if runner == "pytest":
