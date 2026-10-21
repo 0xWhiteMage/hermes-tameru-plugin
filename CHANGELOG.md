@@ -16,6 +16,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors syslog/journal/dmesg routing and anchors, the git log reducer, JSON Lines summaries, CJK-safe prose repeats and Markdown table outliers.
 - Vendors repeat-aware anchor regions, PHP error-log anchors, pytest banner shortening, kubectl Replicas and Conditions fixes, rare query-word anchors, multi-document YAML matches and slash-dated log routing.
 - Vendors the lint and MySQL slow log reducers, multi-document YAML outlier summaries, nginx/Apache/MySQL/HAProxy error-log anchors and Node frame anchors.
+- Vendors Redis log routing, the env/config dump reducer (secret-looking lines never kept alone), kubectl separator and describe-job fixes, MSBuild/tsc lint locations, collapsed-summary needle selection and weak-query diff file folding.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
@@ -28,6 +29,7 @@ All notable changes to this project are documented here. The format follows
 ### Fixed
 - Vendors the fix that kept ratio lines such as `20/40 degraded` from being dropped as progress bars.
 - Vendors the fix that keeps docker `Step N/M` lines.
+- Vendors the fixes for numeric query terms matching clock times and for output that could be longer than the input.
 
 ## [1.5.0] - 2026-10-13
 
