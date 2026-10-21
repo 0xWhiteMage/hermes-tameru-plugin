@@ -472,6 +472,13 @@ def _is_trace_line(line: str) -> bool:
     return bool(t) and _CL_TRACE_RE.match(t) is not None
 
 
+_SYSLOG_PREFIX_RE = re.compile(
+    r"^(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec) [ \d]\d \d\d:\d\d:\d\d \S+ [\w.@/()-]+(?:\[\d+\])?: "
+    r"|^20\d\d-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d+)?(?:Z|[+-]\d\d:?\d\d) \S+ [\w.@/()-]+(?:\[\d+\])?: "
+    r"|^\[\s*\d+\.\d{3,}\] "
+)
+
+
 def classify_line(line: str) -> str:
     t = line.strip()
     if not t:
@@ -483,6 +490,8 @@ def classify_line(line: str) -> str:
     if _CL_TRACE_RE.match(t):
         return "trace"
     if _CL_LOG_RE.match(t):
+        return "log"
+    if _SYSLOG_PREFIX_RE.match(t):
         return "log"
     if _CL_LOGFMT_RE.match(t) and _cl_logfmt_pairs(t) >= 3:
         return "log"
@@ -1260,12 +1269,60 @@ def _summarize_json_arrays(value: Any, query: str) -> tuple[Any, bool]:
 
     return process(value, 0), changed
 
+def _summarize_ndjson(stripped: str, query: str) -> str | None:
+    lines = [line for line in stripped.splitlines() if line.strip()]
+    if len(lines) < 20:
+        return None
+
+    parsed = []
+    for line in lines:
+        try:
+            obj = json.loads(line)
+        except (ValueError, RecursionError):
+            return None
+        if not isinstance(obj, dict):
+            return None
+        parsed.append(obj)
+
+    try:
+        result, changed = _summarize_json_arrays(parsed, query)
+    except RecursionError:
+        return None
+
+    if not changed or not isinstance(result, list):
+        return None
+
+    used = set()
+    rendered = []
+    for item in result:
+        if isinstance(item, str):
+            rendered.append(item)
+        else:
+            for j, candidate in enumerate(parsed):
+                if j in used:
+                    continue
+                if candidate == item:
+                    used.add(j)
+                    rendered.append(lines[j])
+                    break
+            else:
+                return None
+
+    rendered_text = "\n".join(rendered)
+    if len(rendered_text) < len(stripped) * 0.92:
+        return rendered_text
+    return None
+
+
 def preprocess_json(text: str, query: str) -> str:
     stripped = text.strip()
     if not query_has_distinctive_selectors(query):
         try:
             parsed = json.loads(stripped)
         except (ValueError, RecursionError):
+            ndjson = _summarize_ndjson(stripped, query)
+            if ndjson is not None:
+                return ndjson
             return text
         try:
             result, changed = _summarize_json_arrays(parsed, query)
@@ -3421,8 +3478,9 @@ _PROSE_MIN_BLOCKS = 8
 
 
 def _prose_key(text: str) -> str:
-    """Repeat key of a paragraph: lowercased, digits -> '#', whitespace collapsed, first 2000 chars."""
-    return " ".join(re.sub(r"\d", "#", text[:2000].lower()).split())
+    """Repeat key: NFKC-normalised, digit runs -> '#', lowercased, whitespace collapsed, first 2000 chars."""
+    normalized = unicodedata.normalize("NFKC", text)
+    return " ".join(re.sub(r"\d+", "#", normalized[:2000].lower()).split())
 
 
 def select_prose_brief(
@@ -3439,6 +3497,9 @@ def select_prose_brief(
         return _ret(all_ids, True, "high", "prose-brief-small")
     kept: set[int] = set()
     seen: set[str] = set()
+    last_block = blocks[-1]
+    if not last_block.get("trust_risk") or last_block.get("pinned"):
+        seen.add(_prose_key(last_block["text"]))
     for pos, b in enumerate(blocks):
         if b.get("trust_risk") and not b.get("pinned"):
             continue
@@ -5375,12 +5436,18 @@ def _strip_anchor_prefix(line: str) -> str:
     becomes ``"ERROR request failed"`` so the anchored query no longer carries
     the thread/logger/timestamp entities that appear on every INFO line.
     JVM frame line numbers are rewritten to the file name so anchors do not carry bare numbers.
+    Syslog, ISO-8601, and kernel timestamp prefixes are removed when a message remains.
     Returns the line unchanged when it is not a log record, or when stripping
     would leave no message (e.g. a bare ``"… ERROR"`` line).
     """
     m = _ANCHOR_ACCESS_LOG_RE.match(line)
     if m is not None:
         return f"{m.group('method')} {m.group('path')} {m.group('status')}"
+    syslog_m = _SYSLOG_PREFIX_RE.match(line)
+    if syslog_m is not None:
+        syslog_remainder = line[syslog_m.end():]
+        if syslog_remainder.strip():
+            line = syslog_remainder
     stripped = _strip_structured_anchor(line)
     if stripped is not None:
         line = stripped
@@ -5664,7 +5731,8 @@ def _rare_template_lines(lines: list[str], max_regions: int) -> list[str]:
     Guards:
     - max_regions > 0
     - at least 30 non-blank lines
-    - at least 90% of non-blank lines carry a level token
+    - at least 90% of non-blank lines carry a level token, or at least 90% match _SYSLOG_PREFIX_RE
+    - dominant templates: count >= 5 for leveled path, >= 3 for syslog-shaped path
     """
     if max_regions <= 0:
         return []
@@ -5679,7 +5747,16 @@ def _rare_template_lines(lines: list[str], max_regions: int) -> list[str]:
         if _ISO_LEVEL_TOKEN_RE.search(line) or _ISO_STRUCT_LEVEL_RE.search(line)
     )
     if leveled * 10 < len(nonblank) * 9:
-        return []
+        syslog_shaped = sum(
+            1
+            for line in nonblank
+            if _SYSLOG_PREFIX_RE.match(line.strip())
+        )
+        if syslog_shaped * 10 < len(nonblank) * 9:
+            return []
+        min_count = 3
+    else:
+        min_count = 5
 
     counts: dict[str, int] = {}
     first_lines: dict[str, str] = {}
@@ -5689,7 +5766,7 @@ def _rare_template_lines(lines: list[str], max_regions: int) -> list[str]:
         if fp not in first_lines:
             first_lines[fp] = line.strip().lower()
 
-    dominant = [fp for fp, count in counts.items() if count >= 5]
+    dominant = [fp for fp, count in counts.items() if count >= min_count]
     if not 1 <= len(dominant) <= 3:
         return []
 
