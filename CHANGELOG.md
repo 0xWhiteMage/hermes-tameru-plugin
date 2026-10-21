@@ -13,6 +13,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors text tool-output collapse, the status-table reducer and dashboard summary anchors.
 - Vendors JSON array summaries, no-query anchors for quiet logs, the docker build reducer and short-line folding.
 - Vendors CSV/TSV outlier rows, logfmt log routing, new-key anchors for structured logs and apt `E:` error detection.
+- Vendors syslog/journal/dmesg routing and anchors, the git log reducer, JSON Lines summaries, CJK-safe prose repeats and Markdown table outliers.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
