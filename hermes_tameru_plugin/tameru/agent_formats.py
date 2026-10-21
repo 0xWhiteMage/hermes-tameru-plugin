@@ -1334,9 +1334,331 @@ def _classify_lint(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     return keep, tests, suites
 
 
+_TF_HEADER_RE = re.compile(
+    r"^\s*# (\S+) (will be (?:created|updated in-place|destroyed|read during apply)|must be replaced|has moved to \S+)"
+)
+
+
+def _detect_terraform_plan(text: str) -> bool:
+    if "# " not in text or (" will be " not in text and " must be replaced" not in text):
+        return False
+
+    header_count = 0
+    has_plan_marker = False
+    for line in text.splitlines():
+        if _TF_HEADER_RE.match(line):
+            header_count += 1
+        if not has_plan_marker:
+            stripped = line.strip()
+            if (
+                re.match(r"^Plan: \d+ to add, \d+ to change, \d+ to destroy", stripped)
+                or stripped == "Terraform will perform the following actions:"
+                or stripped == "OpenTofu will perform the following actions:"
+            ):
+                has_plan_marker = True
+
+    return header_count >= 6 and has_plan_marker
+
+
+def _classify_terraform_plan(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+
+    def resource_type(address: str) -> str:
+        addr = re.sub(r"^(?:module\.[^.]+)+\.", "", address)
+        addr = re.sub(r"\[.*\]", "", addr)
+        return addr.split(".", 1)[0] if "." in addr else addr
+
+    blocks: list[tuple[int, int, str, str]] = []
+    start: int | None = None
+    action = ""
+    rtype = ""
+
+    def close_block(end: int) -> None:
+        nonlocal start, action, rtype
+        if start is not None:
+            blocks.append((start, end, action, rtype))
+            start = None
+            action = ""
+            rtype = ""
+
+    for i, line in enumerate(lines):
+        m = _TF_HEADER_RE.match(line)
+        if m:
+            close_block(i)
+            start = i
+            action = m.group(2)
+            rtype = resource_type(m.group(1))
+            continue
+
+        if start is not None and line.lstrip().startswith(
+            ("Plan:", "Changes to Outputs:", "Warning:", "Error:", "─")
+        ):
+            close_block(i)
+
+    close_block(n)
+
+    groups: dict[tuple[str, str], list[int]] = {}
+    for idx, (_, _, block_action, block_type) in enumerate(blocks):
+        groups.setdefault((block_action, block_type), []).append(idx)
+
+    keep_block = [False] * len(blocks)
+    for (block_action, _), idxs in groups.items():
+        if block_action in ("will be destroyed", "must be replaced") or len(idxs) <= 3:
+            for idx in idxs:
+                keep_block[idx] = True
+        else:
+            keep_block[idxs[0]] = True
+
+    for idx, (block_start, block_end, _, _) in enumerate(blocks):
+        if keep_block[idx]:
+            for i in range(block_start, block_end):
+                keep[i] = True
+        else:
+            for i in range(block_start, block_end):
+                keep[i] = False
+            special = [
+                i
+                for i in range(block_start, block_end)
+                if "forces replacement" in lines[i] or "Error" in lines[i]
+            ]
+            if special:
+                keep[block_start] = True
+                for i in special:
+                    keep[i] = True
+
+    return keep, [0] * n, [0] * n
+
+
+_VITE_ASSET_RE = re.compile(
+    r"^\s*(?P<name>\S+)\s+"
+    r"(?P<size>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"\s*(?P<unit>B|kB|MB)\b"
+    r"(?:\s*[│|].*)?$"
+)
+_WEBPACK_ASSET_RE = re.compile(
+    r"^\s*asset\s+(?P<name>\S+)\s+"
+    r"(?P<size>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"\s*(?P<unit>bytes|KiB|MiB)\b"
+    r".*$"
+)
+_ESBUILD_ASSET_RE = re.compile(
+    r"^\s*(?P<name>\S+)\s+"
+    r"(?P<size>\d{1,3}(?:,\d{3})*(?:\.\d+)?|\d+(?:\.\d+)?)"
+    r"\s*(?P<unit>b|kb|mb|gb)\b"
+    r".*$"
+)
+_BUNDLE_ASSET_REGEXES = (_VITE_ASSET_RE, _WEBPACK_ASSET_RE, _ESBUILD_ASSET_RE)
+
+
+def _bundle_asset_size(line: str) -> float | None:
+    for regex in _BUNDLE_ASSET_REGEXES:
+        match = regex.match(line)
+        if match is None:
+            continue
+        try:
+            value = float(match.group("size").replace(",", ""))
+        except ValueError:
+            return None
+        unit = match.group("unit")
+        if unit in ("B", "bytes", "b"):
+            return value / 1024.0
+        if unit in ("kB", "KiB", "kb"):
+            return value
+        if unit in ("MB", "MiB", "mb"):
+            return value * 1024.0
+        if unit == "gb":
+            return value * 1024.0 * 1024.0
+    return None
+
+
+def _detect_bundle_assets(text: str) -> bool:
+    if not any(token in text for token in (" kB", "KiB", "MiB", "kb", "mb")):
+        return False
+    non_blank = 0
+    asset_lines = 0
+    for line in text.splitlines():
+        if not line.strip():
+            continue
+        non_blank += 1
+        if _bundle_asset_size(line) is not None:
+            asset_lines += 1
+    return non_blank > 0 and asset_lines >= 8 and asset_lines * 2 >= non_blank
+
+
+def _classify_bundle_assets(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [False] * len(lines)
+    asset_positions: list[int] = []
+    asset_sizes: list[float] = []
+    for index, line in enumerate(lines):
+        size = _bundle_asset_size(line)
+        if size is None:
+            keep[index] = True
+        else:
+            asset_positions.append(index)
+            asset_sizes.append(size)
+    if asset_positions:
+        keep_positions = set(asset_positions[:2])
+        largest_positions = sorted(
+            range(len(asset_positions)),
+            key=lambda position: (-asset_sizes[position], asset_positions[position]),
+        )[:3]
+        keep_positions.update(asset_positions[position] for position in largest_positions)
+        flagged_positions = [
+            position
+            for position, index in enumerate(asset_positions)
+            if "[big]" in lines[index] or "⚠" in lines[index]
+        ]
+        if len(flagged_positions) > 5:
+            flagged_positions = sorted(
+                flagged_positions,
+                key=lambda position: (-asset_sizes[position], asset_positions[position]),
+            )[:5]
+        keep_positions.update(asset_positions[position] for position in flagged_positions)
+        for index in asset_positions:
+            if index in keep_positions:
+                keep[index] = True
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_ANSIBLE_HEADER_RE = re.compile(r"^(PLAY|TASK|RUNNING HANDLER|PLAY RECAP)\b.*\*{3,}\s*$")
+_ANSIBLE_HOST_RE = re.compile(r"^(ok|changed|skipping|included):\s+\[[^\]]+\]")
+_ANSIBLE_RECAP_ROW_RE = re.compile(r"^\S+\s+:\s+ok=\d+\s+changed=\d+\s+unreachable=(\d+)\s+failed=(\d+)(?:\s+skipped=\d+)?(?:\s+rescued=(\d+))?")
+
+
+def _detect_ansible(text: str) -> bool:
+    if "PLAY [" not in text and "TASK [" not in text:
+        return False
+    header_count = 0
+    result_count = 0
+    recap_count = 0
+    for line in text.splitlines():
+        if _ANSIBLE_HEADER_RE.match(line):
+            header_count += 1
+        elif _ANSIBLE_HOST_RE.match(line) or _ANSIBLE_RECAP_ROW_RE.match(line):
+            result_count += 1
+            if _ANSIBLE_RECAP_ROW_RE.match(line):
+                recap_count += 1
+    return header_count >= 2 and result_count >= 8 and recap_count >= 5
+
+
+def _classify_ansible(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    tests = [0] * len(lines)
+    suites = [0] * len(lines)
+    seen_statuses: set[str] = set()
+    in_recap = False
+    seen_recap = False
+
+    for i, line in enumerate(lines):
+        if _ANSIBLE_HEADER_RE.match(line):
+            if line.startswith("PLAY RECAP"):
+                in_recap = True
+                seen_recap = False
+            else:
+                seen_statuses.clear()
+            keep[i] = True
+            continue
+
+        host_match = _ANSIBLE_HOST_RE.match(line)
+        if host_match and not in_recap:
+            status = host_match.group(1)
+            if status in seen_statuses:
+                keep[i] = False
+            else:
+                seen_statuses.add(status)
+                keep[i] = True
+            continue
+
+        recap_match = _ANSIBLE_RECAP_ROW_RE.match(line)
+        if recap_match and in_recap:
+            unreachable = int(recap_match.group(1))
+            failed = int(recap_match.group(2))
+            rescued = int(recap_match.group(3)) if recap_match.group(3) is not None else 0
+            if not seen_recap or unreachable > 0 or failed > 0 or rescued > 0:
+                keep[i] = True
+            else:
+                keep[i] = False
+            seen_recap = True
+            continue
+
+        keep[i] = True
+
+    return keep, tests, suites
+
+
+_PIP_BAR_RE = re.compile(r"^\s*[\u2501\u2578\u257a\u2588-\u258f\-]{10,}\s+[\d.]+/[\d.]+\s*[kKMG]?i?B\b")
+_PIP_NOISE_RE = re.compile(r"^\s*(?:Downloading |Using cached |Requirement already satisfied: |Obtaining dependency information |  Preparing metadata|Collecting )")
+
+
+def _pip_requirement_name(requirement: str) -> str:
+    match = re.match(r"[A-Za-z0-9._-]+", requirement)
+    return match.group(0).lower() if match else ""
+
+
+def _detect_pip_install(text: str) -> bool:
+    if not ("Collecting " in text or "Requirement already satisfied" in text or "Downloading " in text):
+        return False
+
+    bar_matched = 0
+    anchored = False
+    for line in text.splitlines():
+        if _PIP_BAR_RE.match(line):
+            bar_matched += 1
+        if (
+            line.startswith("Collecting ")
+            or line.startswith("Requirement already satisfied: ")
+            or line.startswith("Installing collected packages")
+            or line.startswith("Successfully installed")
+        ):
+            anchored = True
+
+    return bar_matched >= 3 and anchored
+
+
+def _classify_pip_install(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [False] * len(lines)
+
+    noise_indices = [i for i, line in enumerate(lines) if _PIP_NOISE_RE.match(line)]
+    keep_noise = set(noise_indices[:2])
+    if noise_indices:
+        keep_noise.add(noise_indices[-1])
+
+    error_text = "\n".join(
+        line
+        for line in lines
+        if line.lstrip().startswith("ERROR") or "conflict" in line.lower()
+    )
+
+    for i, line in enumerate(lines):
+        if _PIP_BAR_RE.match(line):
+            continue
+
+        if _PIP_NOISE_RE.match(line):
+            if i in keep_noise:
+                keep[i] = True
+                continue
+
+            stripped = line.lstrip()
+            if stripped.startswith("Collecting "):
+                name = _pip_requirement_name(stripped[len("Collecting "):])
+                if name and re.search(
+                    rf"(?<![A-Za-z0-9._-]){re.escape(name)}(?![A-Za-z0-9._-])",
+                    error_text,
+                    re.IGNORECASE,
+                ):
+                    keep[i] = True
+            continue
+
+        keep[i] = True
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
 def detect_test_runner(text: str) -> str | None:
     """``"cargo"``, ``"go"``, ``"jest"``, ``"pytest"``, ``"gradle"``, ``"rspec"``,
-    ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"``, ``"env_dump"`` or ``"kubectl"`` for recognised output.
+    ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"``, ``"env_dump"``,
+    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"`` or ``"kubectl"`` for recognised output.
 
     Vitest-style ``Tests  N passed`` output is left to the legacy path.
     One pass over the lines, each capped at ``_LINE_CAP`` characters (a long
@@ -1349,6 +1671,14 @@ def detect_test_runner(text: str) -> str | None:
             return "slowlog"
         if _detect_env_dump(text):
             return "env_dump"
+        if _detect_terraform_plan(text):
+            return "terraform_plan"
+        if _detect_bundle_assets(text):
+            return "bundle_assets"
+        if _detect_ansible(text):
+            return "ansible"
+        if _detect_pip_install(text):
+            return "pip_install"
         if _detect_git_log(text):
             return "git_log"
         if _detect_docker_build(text):
@@ -1451,6 +1781,14 @@ def detect_test_runner(text: str) -> str | None:
         return "slowlog"
     if _detect_env_dump(text):
         return "env_dump"
+    if _detect_terraform_plan(text):
+        return "terraform_plan"
+    if _detect_bundle_assets(text):
+        return "bundle_assets"
+    if _detect_ansible(text):
+        return "ansible"
+    if _detect_pip_install(text):
+        return "pip_install"
     if _detect_git_log(text):
         return "git_log"
     if _detect_docker_build(text):
@@ -2448,6 +2786,10 @@ _RUNNERS = {
     "lint": _classify_lint,
     "slowlog": _classify_slowlog,
     "env_dump": _classify_env_dump,
+    "terraform_plan": _classify_terraform_plan,
+    "bundle_assets": _classify_bundle_assets,
+    "ansible": _classify_ansible,
+    "pip_install": _classify_pip_install,
 }
 
 
@@ -2557,7 +2899,7 @@ def preprocess_test_output(
                   else ("pod rows" if runner == "kubectl_pods"
                         else ("build lines" if runner == "docker_build"
                               else ("table rows" if runner == "status_table"
-                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else None))))))))
+                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else None))))))))))))
         ),
     )
     if runner == "pytest":
