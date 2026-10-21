@@ -15,6 +15,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors CSV/TSV outlier rows, logfmt log routing, new-key anchors for structured logs and apt `E:` error detection.
 - Vendors syslog/journal/dmesg routing and anchors, the git log reducer, JSON Lines summaries, CJK-safe prose repeats and Markdown table outliers.
 - Vendors repeat-aware anchor regions, PHP error-log anchors, pytest banner shortening, kubectl Replicas and Conditions fixes, rare query-word anchors, multi-document YAML matches and slash-dated log routing.
+- Vendors the lint and MySQL slow log reducers, multi-document YAML outlier summaries, nginx/Apache/MySQL/HAProxy error-log anchors and Node frame anchors.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
