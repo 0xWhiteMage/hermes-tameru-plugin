@@ -479,6 +479,9 @@ _SYSLOG_PREFIX_RE = re.compile(
 )
 
 
+_REDIS_LINE_RE = re.compile(r"^\d+:[XCSM] \d{1,2} [A-Z][a-z]{2}(?: \d{4})? \d\d:\d\d:\d\d\.\d{3} ([.*#-]) ")
+
+
 def classify_line(line: str) -> str:
     t = line.strip()
     if not t:
@@ -492,6 +495,8 @@ def classify_line(line: str) -> str:
     if _CL_LOG_RE.match(t):
         return "log"
     if _SYSLOG_PREFIX_RE.match(t):
+        return "log"
+    if _REDIS_LINE_RE.match(t):
         return "log"
     if _CL_LOGFMT_RE.match(t) and _cl_logfmt_pairs(t) >= 3:
         return "log"
@@ -2066,6 +2071,12 @@ def _segment_blocks_chunked(lines: list[str]) -> list[dict[str, Any]]:
         if (
             start is None
             or kind in {"heading", "fence", "definition"}
+            or (
+                line.strip()
+                and not _is_error_line(line)
+                and not line.lstrip().startswith(("[\u00d7", "[last] "))
+                and i > 0 and lines[i - 1].lstrip().startswith("[last] ")
+            )
             or kind == "list"
             or (prev_type == "blank" and kind != "blank")
             or (kind != prev_type and kind in {"log", "chat", "import", "list", "table", "json"})
@@ -2211,7 +2222,10 @@ def _term_test(term: str) -> Callable[[str], bool]:
         def base(lower: str) -> bool:
             return term in lower
     else:
-        search = re.compile(rf"\b{re.escape(term)}\b").search
+        if term.isdigit():
+            search = re.compile(rf"(?<!\d:)\b{re.escape(term)}\b(?!:\d)").search
+        else:
+            search = re.compile(rf"\b{re.escape(term)}\b").search
 
         def base(lower: str) -> bool:
             return search(lower) is not None
@@ -3300,6 +3314,13 @@ def _counterfactual_overlap_ambiguity(
     return False
 
 
+def _is_collapse_only_block(block) -> bool:
+    lines = [ln for ln in block.get("text", "").splitlines() if ln.strip()]
+    if not lines:
+        return False
+    return all(ln.lstrip().startswith(("[\u00d7", "[last] ")) for ln in lines)
+
+
 def select_adaptive(
     blocks: list[dict[str, Any]],
     *,
@@ -3339,7 +3360,14 @@ def select_adaptive(
         use = safe_use
         kept = set(use) | err_keep
         if not blocks[0].get("trust_risk") or blocks[0].get("pinned"):
-            kept.add(blocks[0]["id"])
+            skip_lead = (
+                _is_collapse_only_block(blocks[0])
+                and not blocks[0].get("entity_hits")
+                and not blocks[0].get("term_hits")
+                and not blocks[0].get("pinned")
+            )
+            if not skip_lead:
+                kept.add(blocks[0]["id"])
         if (
             not _is_sink_noise(blocks[-1]["text"])
             and not blocks[-1].get("trust_risk")
@@ -3359,7 +3387,14 @@ def select_adaptive(
         if len(kept) > max(len(use) * 2, 16) and len(kept) / len(blocks) > 0.6:
             kept = set(use) | err_keep
             if not blocks[0].get("trust_risk") or blocks[0].get("pinned"):
-                kept.add(blocks[0]["id"])
+                skip_lead = (
+                    _is_collapse_only_block(blocks[0])
+                    and not blocks[0].get("entity_hits")
+                    and not blocks[0].get("term_hits")
+                    and not blocks[0].get("pinned")
+                )
+                if not skip_lead:
+                    kept.add(blocks[0]["id"])
         kept = _stitch_neighbors(blocks, kept)
         if _counterfactual_overlap_ambiguity(
             blocks, kept, query=query, link_terms=link_terms_map, semantic_tier=semantic_tier
@@ -5487,6 +5522,11 @@ def _strip_anchor_prefix(line: str) -> str:
         mysql_err_remainder = line[mysql_err_m.end():]
         if mysql_err_remainder.strip():
             line = mysql_err_m.group(1).upper() + " " + mysql_err_remainder
+    redis_m = _REDIS_LINE_RE.match(line)
+    if redis_m:
+        remainder = line[redis_m.end():].strip()
+        if remainder:
+            line = ("WARNING " if redis_m.group(1) == "#" else "") + remainder
     m = _HAPROXY_HTTP_RE.match(line)
     if m:
         return f"{m.group(1)} {m.group(2)} {m.group(3)}"
@@ -5575,7 +5615,15 @@ def _isolated_warn_lines(lines: list[str], max_regions: int) -> list[str]:
     """
     if max_regions <= 0:
         return []
-    if not any("WARN" in line or "warn" in line.lower() for line in lines):
+
+    def _redis_warn(line: str) -> bool:
+        m = _REDIS_LINE_RE.match(line)
+        return bool(m and m.group(1) == "#")
+
+    if not any(
+        "WARN" in line or "warn" in line.lower() or _redis_warn(line)
+        for line in lines
+    ):
         return []
     nonblank = [line for line in lines if line.strip()]
     if len(nonblank) < 20:
@@ -5584,9 +5632,9 @@ def _isolated_warn_lines(lines: list[str], max_regions: int) -> list[str]:
     level_count = 0
     warn_lines: list[str] = []
     for line in nonblank:
-        if _ISO_LEVEL_TOKEN_RE.search(line) or _ISO_STRUCT_LEVEL_RE.search(line):
+        if _ISO_LEVEL_TOKEN_RE.search(line) or _ISO_STRUCT_LEVEL_RE.search(line) or _REDIS_LINE_RE.match(line):
             level_count += 1
-        if _ISO_WARN_TOKEN_RE.search(line) or _ISO_STRUCT_WARN_RE.search(line):
+        if _ISO_WARN_TOKEN_RE.search(line) or _ISO_STRUCT_WARN_RE.search(line) or _redis_warn(line):
             warn_lines.append(line)
 
     if level_count * 100 < len(nonblank) * 90:
@@ -6994,7 +7042,14 @@ def compress_context(
     # and the compression overhead may not be worth it. We model this
     # with a simple heuristic: if the savings are < 10%, the overhead of
     # citations + CCR marker likely exceeds the cache-read savings.
-    if not fail_open and kept_tokens > original_tokens and not trust_filtered:
+    if (
+        not fail_open
+        and (
+            kept_tokens > original_tokens
+            or (kept_tokens >= original_tokens and len(compressed) > len(original_text))
+        )
+        and not trust_filtered
+    ):
         compressed = original_text
         kept = {b["id"] for b in scored}
         fail_open = True

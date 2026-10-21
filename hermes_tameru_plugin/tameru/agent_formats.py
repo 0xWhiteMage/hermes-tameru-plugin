@@ -591,8 +591,11 @@ def adapt_unified_diff(
     terms (or none that hit) the first and last hunk of each file are kept; a
     weak query made of plain words also keeps every hunk that contains one of
     them (light stemming, so ``changed`` finds ``change`` and ``handling``
-    finds ``handle``) in addition to those anchors. When nothing is dropped
-    the text is returned unchanged.
+    finds ``handle``) in addition to those anchors; when those anchors would
+    keep every hunk (for example many single-hunk files) and some hunk hits,
+    only the hitting hunks are kept and each run of files without a match is
+    reduced to its ``diff --git`` line plus one marker. When nothing is
+    dropped the text is returned unchanged.
     """
     if not detect_unified_diff(text):
         return None
@@ -628,6 +631,7 @@ def adapt_unified_diff(
                         flags[k] = True
             any_hit = any_hit or any(flags)
         keep.append(flags)
+    hit_flags = [list(fl) for fl in keep]
     for flags in keep:
         # Nothing mentions the query (or it is filler/empty), or the query is
         # weak: orient the reader with the first and last hunk of each file.
@@ -635,11 +639,63 @@ def adapt_unified_diff(
             flags[0] = True
             flags[-1] = True
     kept_hunks = sum(sum(flags) for flags in keep)
+    if kept_hunks == total_hunks and weak and any_hit:
+        keep = hit_flags
+        kept_hunks = sum(sum(flags) for flags in keep)
+        compact_untouched = True
+    else:
+        compact_untouched = False
     if kept_hunks == total_hunks:
         return AdapterResult("diff", text, total_hunks, kept_hunks, "no hunks omitted", hit=any_hit)
 
     out: list[str] = list(preamble)
+    untouched_run: list = []
+
+    def _identifying_header_line(f) -> str:
+        for line in f.header:
+            if line.startswith("diff --git"):
+                return line
+        for line in f.header:
+            if line.startswith("+++ "):
+                return line
+        return f.header[0] if f.header else ""
+
+    def flush_untouched() -> None:
+        if not untouched_run:
+            return
+        omitted_lines: list[str] = []
+        for uf in untouched_run:
+            ident = _identifying_header_line(uf)
+            if ident:
+                out.append(ident)
+            header_lines = list(uf.header)
+            if ident:
+                try:
+                    header_lines.remove(ident)
+                except ValueError:
+                    pass
+            omitted_lines.extend(header_lines)
+            for hunk in uf.hunks:
+                omitted_lines.extend(hunk)
+            for trailers in uf.trailers:
+                if trailers:
+                    omitted_lines.extend(trailers)
+        omitted_chars = len("\n".join(omitted_lines)) if omitted_lines else 0
+        out.append(
+            _marker(
+                gap_marker,
+                omitted_chars,
+                len(text),
+                f"[… {_plural(len(untouched_run), 'file')} without a match: bodies omitted …]",
+            )
+        )
+        untouched_run.clear()
+
     for f, flags in zip(files, keep):
+        if compact_untouched and not any(flags):
+            untouched_run.append(f)
+            continue
+        flush_untouched()
         added = removed = 0
         for hunk in f.hunks:
             for ln in hunk[1:]:
@@ -676,6 +732,7 @@ def adapt_unified_diff(
                 flush()
                 out.extend(f.trailers[k])
         flush()
+    flush_untouched()
     return AdapterResult(
         "diff",
         "\n".join(out),
@@ -961,7 +1018,8 @@ _K8S_EVENTS_HDR_RE = re.compile(r"^\s*Type\s+Reason\s+Age\s+From\s+Message\s*$")
 _K8S_KEEP_TOP = frozenset({
     "Name", "Namespace", "Node", "Status", "Reason", "Message", "Controlled By", "Roles", "Type",
     "Priority Class Name", "IP", "Start Time", "Taints", "Unschedulable", "Non-terminated Pods",
-    "Replicas", "Pods Status",
+    "Replicas", "Pods Status", "Pods Statuses", "Completions", "Parallelism", "Backoff Limit",
+    "Completed At",
 })
 _K8S_KEEP_CONTAINER = frozenset({
     "Image", "State", "Reason", "Exit Code", "Signal", "Message", "Last State", "Ready", "Restart Count",
@@ -989,8 +1047,8 @@ _K8S_GET_PODS_HDR_RE = re.compile(r"^(?:NAMESPACE\s+)?NAME\s+READY\s+STATUS\s+RE
 _K8S_GET_PODS_ROW_RE = re.compile(r"^\S+\s+(?:\S+\s+)?\d+/\d+\s+\S+\s+\d+")
 
 
-_LINT_LINE_RE = re.compile(r"^(?:\./)?[\w.@/\\-]+\.\w{1,6}:\d+:(?:\d+:)?\s+(\S.*)$")
-_LINT_CODE_RE = re.compile(r"^(?:(?:error|warning|note|info):\s+)?([A-Z]{1,4}\d{2,5})\b")
+_LINT_LINE_RE = re.compile(r"^(?:\./)?[\w.@/\\-]+\.\w{1,6}(?::\d+:(?:\d+:)?|\(\d+(?:,\d+){0,3}\):)\s+(\S.*)$")
+_LINT_CODE_RE = re.compile(r"^(?:(?:error|warning|note|info):?\s+)?([A-Z]{1,4}\d{2,5})\b")
 _LINT_MYPY_CODE_RE = re.compile(r"\[([a-z][a-z0-9-]*)\]\s*$")
 _LINT_SEVERITY_RE = re.compile(r"^(error|warning|note|info):\s+")
 _LINT_NORM_RE = re.compile(r"\d+|'[^']*'|\"[^\"]*\"")
@@ -1133,6 +1191,87 @@ def _classify_slowlog(lines):
     return keep, tests, suites
 
 
+_ENV_LINE_RE = re.compile(r"^(?:export |declare -x )?([A-Za-z_][A-Za-z0-9_.]*)=(.*)$")
+_ENV_SECRET_KEY_RE = re.compile(r"(?i)password|passwd|secret|token|api_?key|access_?key|private_?key|credential|auth")
+_ENV_DIGITS_RE = re.compile(r"\d+")
+_ENV_LOGFMT_TAIL_RE = re.compile(r"\s[A-Za-z_][\w.]*=")
+
+
+def _env_is_sensitive(key: str, value: str) -> bool:
+    return bool(_ENV_SECRET_KEY_RE.search(key) or (len(value) >= 20 and " " not in value))
+
+
+def _env_match(line: str):
+    if len(line) > _LINE_CAP:
+        return None
+    m = _ENV_LINE_RE.match(line)
+    if m is None:
+        return None
+    if _ENV_LOGFMT_TAIL_RE.search(m.group(2)):
+        return None
+    return m
+
+
+def _detect_env_dump(text: str) -> bool:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) < 20:
+        return False
+
+    env_pairs = []
+    for line in lines:
+        m = _env_match(line)
+        if m is not None:
+            env_pairs.append((m.group(1), m.group(2)))
+
+    if len(env_pairs) * 10 < len(lines) * 9:
+        return False
+
+    group_counts: dict[tuple[str, str], int] = {}
+    for key, value in env_pairs:
+        group = (_ENV_DIGITS_RE.sub("#", key), value)
+        group_counts[group] = group_counts.get(group, 0) + 1
+
+    return any(count >= 5 for count in group_counts.values())
+
+
+def _classify_env_dump(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    env_counts: dict[tuple[str, str], int] = {}
+    for line in lines:
+        if not line.strip():
+            continue
+        m = _env_match(line)
+        if m is None:
+            continue
+        key = m.group(1)
+        value = m.group(2)
+        group = (_ENV_DIGITS_RE.sub("#", key), value)
+        env_counts[group] = env_counts.get(group, 0) + 1
+
+    keep = [False] * len(lines)
+    seen_groups: set[tuple[str, str]] = set()
+    for i, line in enumerate(lines):
+        if not line.strip():
+            continue
+        m = _env_match(line)
+        if m is None:
+            keep[i] = True
+            continue
+
+        key = m.group(1)
+        value = m.group(2)
+        group = (_ENV_DIGITS_RE.sub("#", key), value)
+        is_first = group not in seen_groups
+        if is_first:
+            seen_groups.add(group)
+
+        if _env_is_sensitive(key, value):
+            keep[i] = False
+        elif env_counts.get(group, 0) < 5 or is_first:
+            keep[i] = True
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
 def _detect_lint(text: str) -> bool:
     nonblank = []
     for line in text.splitlines():
@@ -1188,7 +1327,7 @@ def _classify_lint(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
 
 def detect_test_runner(text: str) -> str | None:
     """``"cargo"``, ``"go"``, ``"jest"``, ``"pytest"``, ``"gradle"``, ``"rspec"``,
-    ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"`` or ``"kubectl"`` for recognised output.
+    ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"``, ``"env_dump"`` or ``"kubectl"`` for recognised output.
 
     Vitest-style ``Tests  N passed`` output is left to the legacy path.
     One pass over the lines, each capped at ``_LINE_CAP`` characters (a long
@@ -1199,6 +1338,8 @@ def detect_test_runner(text: str) -> str | None:
             return "lint"
         if _detect_slowlog(text):
             return "slowlog"
+        if _detect_env_dump(text):
+            return "env_dump"
         if _detect_git_log(text):
             return "git_log"
         if _detect_docker_build(text):
@@ -1299,6 +1440,8 @@ def detect_test_runner(text: str) -> str | None:
         return "lint"
     if _detect_slowlog(text):
         return "slowlog"
+    if _detect_env_dump(text):
+        return "env_dump"
     if _detect_git_log(text):
         return "git_log"
     if _detect_docker_build(text):
@@ -2295,6 +2438,7 @@ _RUNNERS = {
     "docker_build": _classify_docker_build,
     "lint": _classify_lint,
     "slowlog": _classify_slowlog,
+    "env_dump": _classify_env_dump,
 }
 
 
@@ -2363,6 +2507,19 @@ def preprocess_test_output(
         keep, tests, suites, captured = result
     else:
         keep, tests, suites = result
+    if runner in ("kubectl", "kubectl_events", "kubectl_pods"):
+        drop = {
+            i
+            for i, (k, line) in enumerate(zip(keep, lines))
+            if not k and line.strip() and _is_k8s_separator(line.strip())
+        }
+        if drop:
+            lines = [line for i, line in enumerate(lines) if i not in drop]
+            keep = [k for i, k in enumerate(keep) if i not in drop]
+            tests = [t for i, t in enumerate(tests) if i not in drop]
+            suites = [s for i, s in enumerate(suites) if i not in drop]
+            if captured is not None:
+                captured = [c for i, c in enumerate(captured) if i not in drop]
     if runner == "kubectl" and query:
         query = _strip_object_name_terms(query, lines)
     matcher = _matcher_for(query)
@@ -2391,7 +2548,7 @@ def preprocess_test_output(
                   else ("pod rows" if runner == "kubectl_pods"
                         else ("build lines" if runner == "docker_build"
                               else ("table rows" if runner == "status_table"
-                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else None)))))))
+                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else None))))))))
         ),
     )
     if runner == "pytest":
