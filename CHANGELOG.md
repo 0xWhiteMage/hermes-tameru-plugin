@@ -18,6 +18,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors the lint and MySQL slow log reducers, multi-document YAML outlier summaries, nginx/Apache/MySQL/HAProxy error-log anchors and Node frame anchors.
 - Vendors Redis log routing, the env/config dump reducer (secret-looking lines never kept alone), kubectl separator and describe-job fixes, MSBuild/tsc lint locations, collapsed-summary needle selection and weak-query diff file folding.
 - Vendors the Terraform plan, bundler asset, Ansible and pip install reducers, short-syslog rare-line anchors and the restored collapse-run split.
+- Vendors klog and web access-log routing with 4xx/5xx kept, cargo build and git status reducers, query-saturated template collapse, the gradle task label, and the df snap-loop fix.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
