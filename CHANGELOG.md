@@ -21,6 +21,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors klog and web access-log routing with 4xx/5xx kept, cargo build and git status reducers, query-saturated template collapse, the gradle task label, and the df snap-loop fix.
 - Vendors the npm/yarn/composer, ps aux and docker ps reducers, jest output without a summary, and go package folding.
 - Vendors repeated-sentence folding for prose in any script, accented query words kept whole, and the pip freeze and npm audit reducers.
+- Vendors the sentence-level prose brief for any script, multilingual query stop words and generic asks, negation-aware and fold-aware query matching, and the Playwright, top and CMake reducers.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
@@ -34,6 +35,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors the fix that kept ratio lines such as `20/40 degraded` from being dropped as progress bars.
 - Vendors the fix that keeps docker `Step N/M` lines.
 - Vendors the fixes for numeric query terms matching clock times and for output that could be longer than the input.
+- Vendors the fixes for Prometheus metrics read as Markdown and Indonesian ordinals in prose briefs.
 
 ## [1.5.0] - 2026-10-13
 
