@@ -23,10 +23,12 @@ from __future__ import annotations
 
 import csv
 import re
+import statistics
 from dataclasses import asdict, dataclass
 from typing import Callable
 
 from .contract_gates import query_has_distinctive_selectors
+from .regex_cache import cached_compile
 from .unicode_profile import matching_shadow
 
 GapMarker = Callable[[int, int], str]
@@ -80,7 +82,7 @@ class _Matcher:
         for selector in selectors:
             if selector[:1].isascii() and selector[-1:].isascii():
                 self._rx.append(
-                    re.compile(rf"(?<![\w]){re.escape(selector)}(?![\w])", re.IGNORECASE)
+                    cached_compile(rf"(?<![\w]){re.escape(selector)}(?![\w])", re.IGNORECASE)
                 )
             else:
                 self._plain.append(selector)
@@ -1798,10 +1800,9 @@ def _classify_package_install(lines: list[str]) -> tuple[list[bool], list[int], 
         match = _PKG_NOISE_RE.match(line)
         if match:
             name = next((group for group in match.groups() if group is not None), "")
-            if name and re.search(
-                rf"(?<![A-Za-z0-9._/-]){re.escape(name)}(?![A-Za-z0-9._-])",
-                error_text,
-            ):
+            if name and cached_compile(
+                rf"(?<![A-Za-z0-9._/-]){re.escape(name)}(?![A-Za-z0-9._-])"
+            ).search(error_text):
                 keep.append(True)
             else:
                 keep.append(False)
@@ -1868,7 +1869,7 @@ def _classify_ps_aux(lines: list[str]) -> tuple[list[bool], list[int], list[int]
     return keep, [0] * len(lines), [0] * len(lines)
 
 
-_DOCKER_PS_HEADER_RE = re.compile(r"^CONTAINER ID\s+IMAGE\s+COMMAND\s+CREATED\s+STATUS\s+PORTS\s+NAMES\s*$")
+_DOCKER_PS_HEADER_RE = re.compile(r"^(?:CONTAINER ID\s+IMAGE\s+COMMAND\s+CREATED\s+STATUS\s+PORTS\s+NAMES|NAME\s+IMAGE\s+COMMAND\s+SERVICE\s+CREATED\s+STATUS\s+PORTS)\s*$")
 _DOCKER_PS_UP_RE = re.compile(r"\s{2,}Up (?:\d+|About|Less than)[^\n]*?(?=\s{2,}|$)")
 
 
@@ -2374,7 +2375,7 @@ def _classify_ping(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     return keep, [0] * len(lines), [0] * len(lines)
 
 
-_PROGRESS_LINE_RE = re.compile(r"^\s*(?:\[[=#>\-.*\s]*\d{1,3}(?:\.\d+)?%[=#>\-.*\s]*\]|(?:Verification|Progress:?|Scanning|Processing)?\s*\d{1,3}(?:\.\d+)?%\s*(?:complete|completed|done)?\.?)\s*$", re.IGNORECASE)
+_PROGRESS_LINE_RE = re.compile(r"^\s*(?:\[[=#>\-.*\s]*\d{1,3}(?:\.\d+)?%[=#>\-.*\s]*\]|(?:Verification|Progress:?|Scanning|Processing)?\s*\d{1,3}(?:\.\d+)?%\s*(?:complete|completed|done)?\.?|(?:Downloading|Installing|Preparing|Extracting|Verifying|Uploading)\b[^%\n]{0,80}?:\s*\d{1,3}(?:\.\d+)?%)\s*$", re.IGNORECASE)
 
 
 def _detect_progress(text: str) -> bool:
@@ -2734,12 +2735,244 @@ def _classify_nmap(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     return keep, [0] * n, [0] * n
 
 
+_PSQL_RULE_RE = re.compile(r"^-+(?:\+-+)+\s*$")
+
+
+def _pg_settings_layout(lines: list[str]) -> tuple[int, int] | None:
+    for index in range(min(5, len(lines) - 1)):
+        line = lines[index]
+        if "|" not in line:
+            continue
+        cells = [cell.strip().lower() for cell in line.split("|")]
+        source_positions = [position for position, cell in enumerate(cells) if cell == "source"]
+        if len(source_positions) != 1:
+            continue
+        if _PSQL_RULE_RE.match(lines[index + 1]):
+            return index, source_positions[0]
+    return None
+
+
+def _detect_pg_settings(text: str) -> bool:
+    if "source" not in text or "| default" not in text:
+        return False
+    lines = text.splitlines()
+    layout = _pg_settings_layout(lines)
+    if layout is None:
+        return False
+    header_index, source_column = layout
+    header = lines[header_index]
+    data_rows = [
+        line
+        for line in lines[header_index + 2 :]
+        if "|" in line and line.count("|") == header.count("|")
+    ]
+    if len(data_rows) < 20:
+        return False
+    default_rows = 0
+    for line in data_rows:
+        cells = line.split("|")
+        if len(cells) > source_column and cells[source_column].strip() == "default":
+            default_rows += 1
+    return default_rows * 5 >= len(data_rows) * 3
+
+
+def _classify_pg_settings(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    layout = _pg_settings_layout(lines)
+    if layout is None:
+        return keep, [0] * len(lines), [0] * len(lines)
+    header_index, source_column = layout
+    header = lines[header_index]
+    dropped = 0
+    for index in range(header_index + 2, len(lines)):
+        line = lines[index]
+        if "|" not in line or line.count("|") != header.count("|"):
+            continue
+        cells = line.split("|")
+        if len(cells) > source_column and cells[source_column].strip() == "default":
+            keep[index] = False
+            dropped += 1
+    if dropped < 10:
+        return [True] * len(lines), [0] * len(lines), [0] * len(lines)
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_MACOS_LOG_RE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+[+-]\d{4}\s+0x[0-9a-f]+\s+(Default|Info|Debug|Error|Fault|Activity)\s")
+_MACOS_LOG_COMPACT_RE = re.compile(r"^\d{4}-\d\d-\d\d \d\d:\d\d:\d\d\.\d+\s+(Df|I|Db|E|Fa|A)\s+\S+\[\d+:[0-9a-f]+\]")
+
+
+def _macos_log_level(line: str) -> str | None:
+    match = _MACOS_LOG_RE.match(line)
+    if match is not None:
+        return match.group(1)
+    match = _MACOS_LOG_COMPACT_RE.match(line)
+    if match is not None:
+        return match.group(1)
+    return None
+
+
+def _detect_macos_log(text: str) -> bool:
+    if "0x" not in text and "[" not in text:
+        return False
+
+    lines = text.splitlines()
+    level_lines = 0
+    year_lines = 0
+    year_level_lines = 0
+    has_error = False
+
+    for line in lines:
+        level = _macos_log_level(line)
+        if level is not None:
+            level_lines += 1
+            if level in ("Error", "Fault", "E", "Fa"):
+                has_error = True
+
+        if len(line) > 4 and line[:4].isdigit() and line[4] == "-":
+            year_lines += 1
+            if level is not None:
+                year_level_lines += 1
+
+    if level_lines < 10 or not has_error:
+        return False
+    if year_lines and year_level_lines * 5 < year_lines * 4:
+        return False
+    return True
+
+
+def _classify_macos_log(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [False] * n
+    levels = [_macos_log_level(line) for line in lines]
+    error_levels = ("Error", "Fault", "E", "Fa")
+
+    routine_indices = [
+        i for i, level in enumerate(levels)
+        if level is not None and level not in error_levels
+    ]
+    if routine_indices:
+        keep[routine_indices[0]] = True
+        keep[routine_indices[-1]] = True
+
+    for i, level in enumerate(levels):
+        if level is None:
+            keep[i] = True
+        elif level in error_levels:
+            keep[i] = True
+            if i > 0 and levels[i - 1] is not None and levels[i - 1] not in error_levels:
+                keep[i - 1] = True
+            if i + 1 < n and levels[i + 1] is not None and levels[i + 1] not in error_levels:
+                keep[i + 1] = True
+
+    if sum(not kept for kept in keep) < 5:
+        keep = [True] * n
+
+    return keep, [0] * n, [0] * n
+
+
+_VMSTAT_HEADER_RE = re.compile(r"^\s*r\s+b\s+swpd\s+free\s+")
+_VMSTAT_ROW_RE = re.compile(r"^\s*\d+(?:\s+\d+){15,17}\s*$")
+
+
+def _detect_vmstat(text: str) -> bool:
+    if "swpd" not in text or "procs" not in text:
+        return False
+    lines = text.splitlines()
+    has_header = any(_VMSTAT_HEADER_RE.match(line) for line in lines)
+    row_count = sum(1 for line in lines if _VMSTAT_ROW_RE.match(line))
+    return has_header and row_count >= 10
+
+
+def _classify_vmstat(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    row_indices = [i for i, line in enumerate(lines) if _VMSTAT_ROW_RE.match(line)]
+    if len(row_indices) < 10:
+        return [True] * n, [0] * n, [0] * n
+
+    keep = [False] * n
+    row_set = set(row_indices)
+    for i in range(n):
+        if i not in row_set:
+            keep[i] = True
+
+    parsed_rows = [[int(part) for part in lines[i].split()] for i in row_indices]
+    min_columns = min(len(row) for row in parsed_rows)
+    medians = [
+        statistics.median([row[c] for row in parsed_rows])
+        for c in range(min_columns)
+    ]
+
+    outlier_flags = []
+    for row in parsed_rows:
+        is_outlier = False
+        for c, value in enumerate(row):
+            if c >= min_columns:
+                break
+            median = medians[c]
+            if (value >= 5 * max(median, 1) and value - median >= 5) or (
+                median >= 50 and value * 5 <= median
+            ):
+                is_outlier = True
+                break
+        outlier_flags.append(is_outlier)
+
+    if not any(outlier_flags):
+        return [True] * n, [0] * n, [0] * n
+
+    keep[row_indices[0]] = True
+    keep[row_indices[-1]] = True
+    for index, is_outlier in zip(row_indices, outlier_flags):
+        if is_outlier:
+            keep[index] = True
+
+    return keep, [0] * n, [0] * n
+
+
+_APT_UPGRADABLE_RE = re.compile(r"^(\S+)/(\S+) \S+ \S+ \[upgradable from: [^\]]+\]\s*$")
+
+
+def _detect_apt_upgradable(text: str) -> bool:
+    if "[upgradable from: " not in text:
+        return False
+    return sum(1 for line in text.splitlines() if _APT_UPGRADABLE_RE.match(line)) >= 10
+
+
+def _classify_apt_upgradable(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [False] * n
+    index = 0
+    while index < n:
+        match = _APT_UPGRADABLE_RE.match(lines[index])
+        if match is None:
+            keep[index] = True
+            index += 1
+            continue
+        if "-security" in match.group(2):
+            keep[index] = True
+            index += 1
+            continue
+        start = index
+        while index < n:
+            run_match = _APT_UPGRADABLE_RE.match(lines[index])
+            if run_match is not None and "-security" not in run_match.group(2):
+                index += 1
+            else:
+                break
+        if index - start < 6:
+            for run_index in range(start, index):
+                keep[run_index] = True
+        else:
+            keep[start] = True
+            keep[index - 1] = True
+    return keep, [0] * n, [0] * n
+
+
 
 
 def detect_test_runner(text: str) -> str | None:
     """``"cargo"``, ``"go"``, ``"jest"``, ``"pytest"``, ``"gradle"``, ``"rspec"``,
     ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"``, ``"env_dump"``,
-    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"``, ``"package_install"``, ``"ps_aux"``, ``"docker_ps"``, ``"requirements"``, ``"npm_audit"``, ``"playwright"``, ``"top"``, ``"cmake"``, ``"npm_tree"``, ``"curl_verbose"``, ``"rollout_wait"``, ``"systemd_blame"``, ``"zero_rows"``, ``"ping"``, ``"progress"``, ``"traceroute"``, ``"openssl_sclient"``, ``"ps_table"``, ``"ps_error"``, ``"msi_log"``, ``"netstat"``, ``"ipconfig"``, ``"indexed_list"``, ``"nmap"`` or ``"kubectl"`` for recognised output.
+    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"``, ``"package_install"``, ``"ps_aux"``, ``"docker_ps"``, ``"requirements"``, ``"npm_audit"``, ``"playwright"``, ``"top"``, ``"cmake"``, ``"npm_tree"``, ``"curl_verbose"``, ``"rollout_wait"``, ``"systemd_blame"``, ``"zero_rows"``, ``"ping"``, ``"progress"``, ``"traceroute"``, ``"openssl_sclient"``, ``"ps_table"``, ``"ps_error"``, ``"msi_log"``, ``"netstat"``, ``"ipconfig"``, ``"indexed_list"``, ``"nmap"``, ``"pg_settings"``, ``"macos_log"``, ``"vmstat"``, ``"apt_upgradable"`` or ``"kubectl"`` for recognised output.
 
     Vitest-style ``Tests  N passed`` output is left to the legacy path.
     One pass over the lines, each capped at ``_LINE_CAP`` characters (a long
@@ -2812,6 +3045,14 @@ def detect_test_runner(text: str) -> str | None:
             return "indexed_list"
         if _detect_nmap(text):
             return "nmap"
+        if _detect_pg_settings(text):
+            return "pg_settings"
+        if _detect_macos_log(text):
+            return "macos_log"
+        if _detect_vmstat(text):
+            return "vmstat"
+        if _detect_apt_upgradable(text):
+            return "apt_upgradable"
         if _detect_git_log(text):
             return "git_log"
         if _detect_docker_build(text):
@@ -2987,6 +3228,14 @@ def detect_test_runner(text: str) -> str | None:
         return "indexed_list"
     if _detect_nmap(text):
         return "nmap"
+    if _detect_pg_settings(text):
+        return "pg_settings"
+    if _detect_macos_log(text):
+        return "macos_log"
+    if _detect_vmstat(text):
+        return "vmstat"
+    if _detect_apt_upgradable(text):
+        return "apt_upgradable"
     if _detect_git_log(text):
         return "git_log"
     if _detect_docker_build(text):
@@ -4036,6 +4285,10 @@ _RUNNERS = {
     "ipconfig": _classify_ipconfig,
     "indexed_list": _classify_indexed_list,
     "nmap": _classify_nmap,
+    "pg_settings": _classify_pg_settings,
+    "macos_log": _classify_macos_log,
+    "vmstat": _classify_vmstat,
+    "apt_upgradable": _classify_apt_upgradable,
 }
 
 
@@ -4154,7 +4407,7 @@ def preprocess_test_output(
                   else ("pod rows" if runner == "kubectl_pods"
                         else ("build lines" if runner == "docker_build"
                               else ("table rows" if runner == "status_table"
-                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else ("package lines" if runner == "package_install" else ("process rows" if runner == "ps_aux" else ("running container rows" if runner == "docker_ps" else ("requirement lines" if runner == "requirements" else ("low-severity advisory lines" if runner == "npm_audit" else ("passed test lines" if runner == "playwright" else ("process rows" if runner == "top" else ("configure check lines" if runner == "cmake" else ("dependency tree lines" if runner == "npm_tree" else ("TLS and header trace lines" if runner == "curl_verbose" else ("rollout progress lines" if runner == "rollout_wait" else ("faster unit lines" if runner == "systemd_blame" else ("all-zero rows" if runner == "zero_rows" else ("ping reply lines" if runner == "ping" else ("progress lines" if runner == "progress" else ("timed-out hops" if runner == "traceroute" else ("certificate body and key lines" if runner == "openssl_sclient" else ("repeated table rows" if runner == "ps_table" else ("repeated progress lines" if runner == "ps_error" else ("successful installer actions" if runner == "msi_log" else ("connection rows" if runner == "netstat" else ("disconnected adapter lines" if runner == "ipconfig" else ("numbered list items" if runner == "indexed_list" else ("non-open port lines" if runner == "nmap" else None)))))))))))))))))))))))))))))))))))))))
+                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else ("package lines" if runner == "package_install" else ("process rows" if runner == "ps_aux" else ("running container rows" if runner == "docker_ps" else ("requirement lines" if runner == "requirements" else ("low-severity advisory lines" if runner == "npm_audit" else ("passed test lines" if runner == "playwright" else ("process rows" if runner == "top" else ("configure check lines" if runner == "cmake" else ("dependency tree lines" if runner == "npm_tree" else ("TLS and header trace lines" if runner == "curl_verbose" else ("rollout progress lines" if runner == "rollout_wait" else ("faster unit lines" if runner == "systemd_blame" else ("all-zero rows" if runner == "zero_rows" else ("ping reply lines" if runner == "ping" else ("progress lines" if runner == "progress" else ("timed-out hops" if runner == "traceroute" else ("certificate body and key lines" if runner == "openssl_sclient" else ("repeated table rows" if runner == "ps_table" else ("repeated progress lines" if runner == "ps_error" else ("successful installer actions" if runner == "msi_log" else ("connection rows" if runner == "netstat" else ("disconnected adapter lines" if runner == "ipconfig" else ("numbered list items" if runner == "indexed_list" else ("non-open port lines" if runner == "nmap" else ("default-valued settings" if runner == "pg_settings" else ("routine log lines" if runner == "macos_log" else ("ordinary sample rows" if runner == "vmstat" else ("non-security package updates" if runner == "apt_upgradable" else None)))))))))))))))))))))))))))))))))))))))))))
         ),
     )
     if runner == "pytest":
