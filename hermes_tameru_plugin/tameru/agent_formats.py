@@ -2374,10 +2374,372 @@ def _classify_ping(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     return keep, [0] * len(lines), [0] * len(lines)
 
 
+_PROGRESS_LINE_RE = re.compile(r"^\s*(?:\[[=#>\-.*\s]*\d{1,3}(?:\.\d+)?%[=#>\-.*\s]*\]|(?:Verification|Progress:?|Scanning|Processing)?\s*\d{1,3}(?:\.\d+)?%\s*(?:complete|completed|done)?\.?)\s*$", re.IGNORECASE)
+
+
+def _detect_progress(text: str) -> bool:
+    if "%" not in text:
+        return False
+    return sum(1 for line in text.splitlines() if _PROGRESS_LINE_RE.match(line)) >= 8
+
+
+def _classify_progress(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    i = 0
+    n = len(lines)
+    while i < n:
+        if _PROGRESS_LINE_RE.match(lines[i]):
+            start = i
+            while i < n and (_PROGRESS_LINE_RE.match(lines[i]) or lines[i].strip() == ""):
+                i += 1
+
+            last = i - 1
+            while last >= start and lines[last].strip() == "":
+                last -= 1
+
+            for j in range(start, i):
+                if _PROGRESS_LINE_RE.match(lines[j]) and j != last:
+                    keep[j] = False
+        else:
+            i += 1
+
+    return keep, [0] * n, [0] * n
+
+
+_TRACEROUTE_HEADER_RE = re.compile(r"^\s*(?:traceroute6? to |Tracing route to )")
+_TRACEROUTE_TIMEOUT_RE = re.compile(r"^\s*\d+\s+(?:\*\s+){2}\*(?:\s+Request timed out\.)?\s*$")
+
+
+def _detect_traceroute(text: str) -> bool:
+    if "*" not in text:
+        return False
+
+    header_seen = False
+    timeout_count = 0
+    for line in text.splitlines():
+        if not header_seen and _TRACEROUTE_HEADER_RE.match(line):
+            header_seen = True
+        if _TRACEROUTE_TIMEOUT_RE.match(line):
+            timeout_count += 1
+        if header_seen and timeout_count >= 3:
+            return True
+    return False
+
+
+def _classify_traceroute(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    i = 0
+    while i < n:
+        if _TRACEROUTE_TIMEOUT_RE.match(lines[i]):
+            start = i
+            while i < n and _TRACEROUTE_TIMEOUT_RE.match(lines[i]):
+                i += 1
+            end = i - 1
+            if end - start + 1 >= 3:
+                for j in range(start + 1, end):
+                    keep[j] = False
+        else:
+            i += 1
+
+    return keep, [0] * n, [0] * n
+
+
+_SCLIENT_PKEY_RE = re.compile(r"^\s+a:PKEY: ")
+
+
+def _detect_openssl_sclient(text: str) -> bool:
+    if "CONNECTED(" not in text:
+        return False
+
+    has_connected = False
+    has_result = False
+    for line in text.splitlines():
+        if line.startswith("CONNECTED("):
+            has_connected = True
+        if "Verify return code:" in line or "Certificate chain" in line:
+            has_result = True
+        if has_connected and has_result:
+            return True
+
+    return False
+
+
+def _classify_openssl_sclient(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    stripped_lines = [line.strip() for line in lines]
+
+    has_end_after = [False] * n
+    seen_end = False
+    for i in range(n - 1, -1, -1):
+        has_end_after[i] = seen_end
+        if stripped_lines[i] == "-----END CERTIFICATE-----":
+            seen_end = True
+
+    in_certificate = False
+    for i, line in enumerate(lines):
+        stripped = stripped_lines[i]
+        if stripped == "-----BEGIN CERTIFICATE-----":
+            in_certificate = has_end_after[i]
+            continue
+        if stripped == "-----END CERTIFICATE-----":
+            in_certificate = False
+            continue
+
+        if in_certificate:
+            keep[i] = False
+        elif _SCLIENT_PKEY_RE.match(line):
+            keep[i] = False
+
+    return keep, [0] * n, [0] * n
+
+
+_PS_DASH_RE = re.compile(r"^\s*-{2,}(?:\s+-{2,})+\s*$")
+
+
+def _ps_row_signature(line: str) -> str:
+    return re.sub(r"\d+", "0", " ".join(line.split()))
+
+
+def _ps_dash_index(lines: list[str]) -> int | None:
+    for i, line in enumerate(lines):
+        if i == 0:
+            continue
+        if _PS_DASH_RE.match(line):
+            previous = lines[i - 1]
+            if previous.strip() and not _PS_DASH_RE.match(previous):
+                return i
+    return None
+
+
+def _detect_ps_table(text: str) -> bool:
+    if "--" not in text:
+        return False
+    lines = text.splitlines()
+    d = _ps_dash_index(lines)
+    if d is None:
+        return False
+    return sum(1 for line in lines[d + 1:] if line.strip()) >= 10
+
+
+def _classify_ps_table(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    d = _ps_dash_index(lines)
+    if d is None:
+        return keep, [0] * n, [0] * n
+
+    groups: dict[str, list[int]] = {}
+    for i in range(d + 1, n):
+        if lines[i].strip():
+            groups.setdefault(_ps_row_signature(lines[i]), []).append(i)
+
+    for indices in groups.values():
+        if len(indices) >= 5:
+            for i in indices[1:-1]:
+                keep[i] = False
+
+    return keep, [0] * n, [0] * n
+
+
+_PS_ERROR_RECORD_RE = re.compile(r"^\s+\+ (?:CategoryInfo|FullyQualifiedErrorId)\s+: ")
+
+
+def _detect_ps_error(text: str) -> bool:
+    if "+ " not in text:
+        return False
+    lines = text.splitlines()
+    if len(lines) < 12:
+        return False
+    return any(_PS_ERROR_RECORD_RE.match(line) for line in lines)
+
+
+def _classify_ps_error(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    i = 0
+    while i < n:
+        if not lines[i].strip():
+            i += 1
+            continue
+        sig = _ps_row_signature(lines[i])
+        j = i + 1
+        while j < n and lines[j].strip() and _ps_row_signature(lines[j]) == sig:
+            j += 1
+        if j - i >= 5:
+            for k in range(i + 1, j - 1):
+                keep[k] = False
+        i = j
+    return keep, [0] * n, [0] * n
+
+
+_MSI_ROUTINE_RE = re.compile(r"^(?:MSI \([sc]\) \([0-9A-F]{2}:[0-9A-F]{2}\) \[[\d:]+\]: Doing action: \S+\s*$|Action start \d{1,2}:\d{2}:\d{2}: \S+\.\s*$|Action ended \d{1,2}:\d{2}:\d{2}: \S+\. Return value [01]\.\s*$)")
+
+
+def _detect_msi_log(text: str) -> bool:
+    if "Action " not in text:
+        return False
+
+    has_marker = False
+    routine_count = 0
+    for line in text.splitlines():
+        if "=== Verbose logging started" in line or "MSI (s)" in line or "MSI (c)" in line:
+            has_marker = True
+        if _MSI_ROUTINE_RE.match(line):
+            routine_count += 1
+
+    return has_marker and routine_count >= 10
+
+
+def _classify_msi_log(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    for i, line in enumerate(lines):
+        if _MSI_ROUTINE_RE.match(line):
+            keep[i] = False
+    return keep, [0] * n, [0] * n
+
+
+_NETSTAT_HEADER_RE = re.compile(r"^\s*Proto\s+(?:Recv-Q\s+Send-Q\s+)?Local Address\s+Foreign Address\b")
+_NETSTAT_ROW_RE = re.compile(r"^\s*(tcp6?|udp6?|TCP|UDP)\s+\S")
+_NETSTAT_STATE_RE = re.compile(r"\b(ESTABLISHED|LISTENING|LISTEN|TIME_WAIT|CLOSE_WAIT|SYN_SENT|SYN_RECV|SYN_RECEIVED|FIN_WAIT_?[12]|LAST_ACK|CLOSING|CLOSED)\b")
+
+
+def _detect_netstat(text: str) -> bool:
+    if "Local Address" not in text:
+        return False
+    header_seen = False
+    row_count = 0
+    for line in text.splitlines():
+        if not header_seen and _NETSTAT_HEADER_RE.match(line):
+            header_seen = True
+        if _NETSTAT_ROW_RE.match(line):
+            row_count += 1
+    return header_seen and row_count >= 10
+
+
+def _classify_netstat(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    groups: dict[tuple[str, str], list[int]] = {}
+    for i, line in enumerate(lines):
+        match = _NETSTAT_ROW_RE.match(line)
+        if match is None:
+            continue
+        proto = match.group(1).lower()
+        state_match = _NETSTAT_STATE_RE.search(line)
+        state = state_match.group(1) if state_match else ""
+        groups.setdefault((proto, state), []).append(i)
+    for indices in groups.values():
+        if len(indices) >= 5:
+            for index in indices[1:-1]:
+                keep[index] = False
+    return keep, [0] * n, [0] * n
+
+
+_IPCONFIG_ADAPTER_RE = re.compile(r"^\S.*\badapter\b.*:\s*$")
+_IPCONFIG_DISCONNECTED_RE = re.compile(r"^\s+Media State[ .]*: Media disconnected\s*$")
+
+
+def _detect_ipconfig(text: str) -> bool:
+    if "Windows IP Configuration" not in text:
+        return False
+    return sum(1 for line in text.splitlines() if _IPCONFIG_ADAPTER_RE.match(line)) >= 4
+
+
+def _classify_ipconfig(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    headers = [i for i, line in enumerate(lines) if _IPCONFIG_ADAPTER_RE.match(line)]
+    disconnected_sections = []
+    for position, start in enumerate(headers):
+        end = headers[position + 1] if position + 1 < len(headers) else n
+        if any(_IPCONFIG_DISCONNECTED_RE.match(line) for line in lines[start:end]):
+            disconnected_sections.append((start, end))
+    if len(disconnected_sections) < 3:
+        return keep, [0] * n, [0] * n
+    for start, end in disconnected_sections[1:]:
+        for index in range(start + 1, end):
+            keep[index] = False
+    return keep, [0] * n, [0] * n
+
+
+_INDEXED_ITEM_RE = re.compile(r"^\s+\[\d{1,4}\]: \S")
+
+
+def _detect_indexed_list(text: str) -> bool:
+    if "]: " not in text:
+        return False
+    run = 0
+    for line in text.splitlines():
+        if _INDEXED_ITEM_RE.match(line):
+            run += 1
+            if run >= 8:
+                return True
+        else:
+            run = 0
+    return False
+
+
+def _classify_indexed_list(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    i = 0
+    while i < n:
+        if _INDEXED_ITEM_RE.match(lines[i]):
+            start = i
+            while i < n and _INDEXED_ITEM_RE.match(lines[i]):
+                i += 1
+            end = i
+            if end - start >= 8:
+                for index in range(start + 2, end - 1):
+                    keep[index] = False
+        else:
+            i += 1
+    return keep, [0] * n, [0] * n
+
+
+_NMAP_PORT_RE = re.compile(r"^\d{1,5}/(?:tcp|udp|sctp)\s+(\S+)\s")
+
+
+def _detect_nmap(text: str) -> bool:
+    if "Nmap scan report for" not in text:
+        return False
+    return sum(1 for line in text.splitlines() if _NMAP_PORT_RE.match(line)) >= 8
+
+
+def _classify_nmap(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    n = len(lines)
+    keep = [True] * n
+    i = 0
+    while i < n:
+        match = _NMAP_PORT_RE.match(lines[i])
+        if match is None:
+            i += 1
+            continue
+        state = match.group(1)
+        start = i
+        while i + 1 < n:
+            next_match = _NMAP_PORT_RE.match(lines[i + 1])
+            if next_match is not None and next_match.group(1) == state:
+                i += 1
+            else:
+                break
+        end = i
+        if state != "open" and end - start + 1 >= 6:
+            for index in range(start + 1, end):
+                keep[index] = False
+        i += 1
+    return keep, [0] * n, [0] * n
+
+
+
+
 def detect_test_runner(text: str) -> str | None:
     """``"cargo"``, ``"go"``, ``"jest"``, ``"pytest"``, ``"gradle"``, ``"rspec"``,
     ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"``, ``"env_dump"``,
-    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"``, ``"package_install"``, ``"ps_aux"``, ``"docker_ps"``, ``"requirements"``, ``"npm_audit"``, ``"playwright"``, ``"top"``, ``"cmake"``, ``"npm_tree"``, ``"curl_verbose"``, ``"rollout_wait"``, ``"systemd_blame"``, ``"zero_rows"``, ``"ping"`` or ``"kubectl"`` for recognised output.
+    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"``, ``"package_install"``, ``"ps_aux"``, ``"docker_ps"``, ``"requirements"``, ``"npm_audit"``, ``"playwright"``, ``"top"``, ``"cmake"``, ``"npm_tree"``, ``"curl_verbose"``, ``"rollout_wait"``, ``"systemd_blame"``, ``"zero_rows"``, ``"ping"``, ``"progress"``, ``"traceroute"``, ``"openssl_sclient"``, ``"ps_table"``, ``"ps_error"``, ``"msi_log"``, ``"netstat"``, ``"ipconfig"``, ``"indexed_list"``, ``"nmap"`` or ``"kubectl"`` for recognised output.
 
     Vitest-style ``Tests  N passed`` output is left to the legacy path.
     One pass over the lines, each capped at ``_LINE_CAP`` characters (a long
@@ -2430,6 +2792,26 @@ def detect_test_runner(text: str) -> str | None:
             return "zero_rows"
         if _detect_ping(text):
             return "ping"
+        if _detect_progress(text):
+            return "progress"
+        if _detect_traceroute(text):
+            return "traceroute"
+        if _detect_openssl_sclient(text):
+            return "openssl_sclient"
+        if _detect_ps_table(text):
+            return "ps_table"
+        if _detect_ps_error(text):
+            return "ps_error"
+        if _detect_msi_log(text):
+            return "msi_log"
+        if _detect_netstat(text):
+            return "netstat"
+        if _detect_ipconfig(text):
+            return "ipconfig"
+        if _detect_indexed_list(text):
+            return "indexed_list"
+        if _detect_nmap(text):
+            return "nmap"
         if _detect_git_log(text):
             return "git_log"
         if _detect_docker_build(text):
@@ -2585,6 +2967,26 @@ def detect_test_runner(text: str) -> str | None:
         return "zero_rows"
     if _detect_ping(text):
         return "ping"
+    if _detect_progress(text):
+        return "progress"
+    if _detect_traceroute(text):
+        return "traceroute"
+    if _detect_openssl_sclient(text):
+        return "openssl_sclient"
+    if _detect_ps_table(text):
+        return "ps_table"
+    if _detect_ps_error(text):
+        return "ps_error"
+    if _detect_msi_log(text):
+        return "msi_log"
+    if _detect_netstat(text):
+        return "netstat"
+    if _detect_ipconfig(text):
+        return "ipconfig"
+    if _detect_indexed_list(text):
+        return "indexed_list"
+    if _detect_nmap(text):
+        return "nmap"
     if _detect_git_log(text):
         return "git_log"
     if _detect_docker_build(text):
@@ -3624,6 +4026,16 @@ _RUNNERS = {
     "systemd_blame": _classify_systemd_blame,
     "zero_rows": _classify_zero_rows,
     "ping": _classify_ping,
+    "progress": _classify_progress,
+    "traceroute": _classify_traceroute,
+    "openssl_sclient": _classify_openssl_sclient,
+    "ps_table": _classify_ps_table,
+    "ps_error": _classify_ps_error,
+    "msi_log": _classify_msi_log,
+    "netstat": _classify_netstat,
+    "ipconfig": _classify_ipconfig,
+    "indexed_list": _classify_indexed_list,
+    "nmap": _classify_nmap,
 }
 
 
@@ -3742,7 +4154,7 @@ def preprocess_test_output(
                   else ("pod rows" if runner == "kubectl_pods"
                         else ("build lines" if runner == "docker_build"
                               else ("table rows" if runner == "status_table"
-                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else ("package lines" if runner == "package_install" else ("process rows" if runner == "ps_aux" else ("running container rows" if runner == "docker_ps" else ("requirement lines" if runner == "requirements" else ("low-severity advisory lines" if runner == "npm_audit" else ("passed test lines" if runner == "playwright" else ("process rows" if runner == "top" else ("configure check lines" if runner == "cmake" else ("dependency tree lines" if runner == "npm_tree" else ("TLS and header trace lines" if runner == "curl_verbose" else ("rollout progress lines" if runner == "rollout_wait" else ("faster unit lines" if runner == "systemd_blame" else ("all-zero rows" if runner == "zero_rows" else ("ping reply lines" if runner == "ping" else None)))))))))))))))))))))))))))))
+                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else ("package lines" if runner == "package_install" else ("process rows" if runner == "ps_aux" else ("running container rows" if runner == "docker_ps" else ("requirement lines" if runner == "requirements" else ("low-severity advisory lines" if runner == "npm_audit" else ("passed test lines" if runner == "playwright" else ("process rows" if runner == "top" else ("configure check lines" if runner == "cmake" else ("dependency tree lines" if runner == "npm_tree" else ("TLS and header trace lines" if runner == "curl_verbose" else ("rollout progress lines" if runner == "rollout_wait" else ("faster unit lines" if runner == "systemd_blame" else ("all-zero rows" if runner == "zero_rows" else ("ping reply lines" if runner == "ping" else ("progress lines" if runner == "progress" else ("timed-out hops" if runner == "traceroute" else ("certificate body and key lines" if runner == "openssl_sclient" else ("repeated table rows" if runner == "ps_table" else ("repeated progress lines" if runner == "ps_error" else ("successful installer actions" if runner == "msi_log" else ("connection rows" if runner == "netstat" else ("disconnected adapter lines" if runner == "ipconfig" else ("numbered list items" if runner == "indexed_list" else ("non-open port lines" if runner == "nmap" else None)))))))))))))))))))))))))))))))))))))))
         ),
     )
     if runner == "pytest":
