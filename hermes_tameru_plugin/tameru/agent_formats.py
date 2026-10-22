@@ -1487,24 +1487,33 @@ def _detect_bundle_assets(text: str) -> bool:
     return non_blank > 0 and asset_lines >= 8 and asset_lines * 2 >= non_blank
 
 
+_BUNDLE_BUILD_ERROR_RE = re.compile(r"^(?:ERROR in |\s*✘ \[ERROR\]|error during build|Module not found: )|\bcompiled with \d+ errors?\b|\bBuild failed with \d+ errors?\b")
+
+
 def _classify_bundle_assets(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     keep = [False] * len(lines)
     asset_positions: list[int] = []
     asset_sizes: list[float] = []
+    build_error = False
     for index, line in enumerate(lines):
         size = _bundle_asset_size(line)
         if size is None:
             keep[index] = True
+            if _BUNDLE_BUILD_ERROR_RE.search(line):
+                build_error = True
         else:
             asset_positions.append(index)
             asset_sizes.append(size)
     if asset_positions:
-        keep_positions = set(asset_positions[:2])
-        largest_positions = sorted(
-            range(len(asset_positions)),
-            key=lambda position: (-asset_sizes[position], asset_positions[position]),
-        )[:3]
-        keep_positions.update(asset_positions[position] for position in largest_positions)
+        if build_error:
+            keep_positions = set()
+        else:
+            keep_positions = set(asset_positions[:2])
+            largest_positions = sorted(
+                range(len(asset_positions)),
+                key=lambda position: (-asset_sizes[position], asset_positions[position]),
+            )[:3]
+            keep_positions.update(asset_positions[position] for position in largest_positions)
         flagged_positions = [
             position
             for position, index in enumerate(asset_positions)
@@ -2076,10 +2085,279 @@ def _classify_cmake(lines: list[str]) -> tuple[list[bool], list[int], list[int]]
     return keep, [0] * len(lines), [0] * len(lines)
 
 
+_NPM_TREE_LINE_RE = re.compile(r"^[│|\s]*(?:[├└]─[─┬]|[+\`]-[-+]) ")
+_NPM_TREE_ROOT_RE = re.compile(r"^\S+@\S+(?: \S.*)?$")
+_NPM_TREE_PROBLEM_RE = re.compile(r"UNMET (?:OPTIONAL |PEER )?DEPENDENCY|\binvalid\b|\bextraneous\b|\bmissing\b|npm (?:ERR!|error)")
+
+
+def _detect_npm_tree(text: str) -> bool:
+    lines = text.splitlines()
+    root_index = None
+    for i, line in enumerate(lines):
+        if line.strip():
+            root_index = i
+            break
+    if root_index is None:
+        return False
+
+    root = lines[root_index]
+    if not _NPM_TREE_ROOT_RE.match(root) or _NPM_TREE_LINE_RE.match(root):
+        return False
+
+    after = lines[root_index + 1 :]
+    non_empty_after = [line for line in after if line.strip()]
+    tree_after = [line for line in after if _NPM_TREE_LINE_RE.match(line)]
+
+    if len(tree_after) < 8:
+        return False
+    if not non_empty_after:
+        return False
+    return len(tree_after) * 5 >= len(non_empty_after) * 3
+
+
+def _classify_npm_tree(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    def _prefix(line: str) -> str:
+        for i, ch in enumerate(line):
+            if ch in "├└+`":
+                return line[:i]
+        return line
+
+    keep = [not _NPM_TREE_LINE_RE.match(line) for line in lines]
+    first_tree = None
+    problem_indices = []
+
+    for i, line in enumerate(lines):
+        if _NPM_TREE_LINE_RE.match(line):
+            if first_tree is None:
+                first_tree = i
+            if _NPM_TREE_PROBLEM_RE.search(line):
+                problem_indices.append(i)
+
+    if first_tree is not None:
+        keep[first_tree] = True
+
+    for problem in problem_indices:
+        keep[problem] = True
+        current = problem
+        current_prefix_len = len(_prefix(lines[current]))
+
+        while current_prefix_len > 0:
+            parent = None
+            for j in range(current - 1, -1, -1):
+                if _NPM_TREE_LINE_RE.match(lines[j]):
+                    parent_prefix_len = len(_prefix(lines[j]))
+                    if parent_prefix_len < current_prefix_len:
+                        parent = j
+                        break
+
+            if parent is None:
+                break
+
+            keep[parent] = True
+            current = parent
+            current_prefix_len = len(_prefix(lines[current]))
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_CURL_REQUEST_RE = re.compile(r"^> [A-Z]+ \S+ HTTP/[\d.]+\s*$")
+_CURL_STATUS_RE = re.compile(r"^< HTTP/[\d.]+ \d{3}\b")
+_CURL_TRACE_RE = re.compile(r"^(?:[*<>{}](?: |$)|[*<>]$)")
+_CURL_TLS_NOISE_RE = re.compile(r"^\* (?:TLSv1(?:\.\d)?|SSLv3) \((?:IN|OUT)\), (?:TLS (?:handshake|change cipher|header|Unknown)|Unknown)\b|^[{}] \[\d+ bytes data\]")
+_CURL_KEY_HEADER_RE = re.compile(r"^< (?:content-type|content-length|location|retry-after|www-authenticate|[\w-]*(?:error|reason|status|ratelimit|retry|auth)[\w-]*):", re.IGNORECASE)
+
+
+def _detect_curl_verbose(text: str) -> bool:
+    lines = text.splitlines()
+    request_lines = 0
+    status_lines = 0
+    trace_lines = 0
+    for line in lines:
+        if _CURL_REQUEST_RE.match(line):
+            request_lines += 1
+        if _CURL_STATUS_RE.match(line):
+            status_lines += 1
+        if _CURL_TRACE_RE.match(line):
+            trace_lines += 1
+    return request_lines >= 1 and status_lines >= 1 and trace_lines >= 8
+
+
+def _classify_curl_verbose(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    for index, line in enumerate(lines):
+        if _CURL_TLS_NOISE_RE.match(line):
+            keep[index] = False
+
+    response_headers = [
+        index
+        for index, line in enumerate(lines)
+        if line.startswith("< ") and not _CURL_STATUS_RE.match(line)
+    ]
+    if len(response_headers) > 6:
+        for index in response_headers:
+            if not _CURL_KEY_HEADER_RE.match(lines[index]):
+                keep[index] = False
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_ROLLOUT_WAIT_RE = re.compile(r'^Waiting for (?:deployment|daemon set|statefulset|rollout|replication controller) "[^"]+" (?:rollout|spec update|partitioned roll out|update)? ?to (?:finish|be observed)\b')
+
+
+def _detect_rollout_wait(text: str) -> bool:
+    return sum(1 for line in text.splitlines() if _ROLLOUT_WAIT_RE.match(line)) >= 6
+
+
+def _classify_rollout_wait(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    matching = [index for index, line in enumerate(lines) if _ROLLOUT_WAIT_RE.match(line)]
+    if len(matching) >= 6:
+        keep_indices = {matching[0], *matching[-2:]}
+        for index in matching:
+            if index not in keep_indices:
+                keep[index] = False
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_SYSTEMD_BLAME_RE = re.compile(r"^\s*((?:\d+(?:\.\d+)?(?:h|min|s|ms|us|µs)\s?)+)\s+\S+\.(?:service|mount|socket|target|device|timer|slice|swap|path|scope|automount)\s*$")
+
+
+def _systemd_duration_seconds(spec: str) -> float:
+    units = {
+        "h": 3600.0,
+        "min": 60.0,
+        "s": 1.0,
+        "ms": 1e-3,
+        "us": 1e-6,
+        "µs": 1e-6,
+    }
+    total = 0.0
+    for number, unit in re.findall(r"(\d+(?:\.\d+)?)(h|min|ms|us|µs|s)", spec):
+        total += float(number) * units[unit]
+    return total
+
+
+def _detect_systemd_blame(text: str) -> bool:
+    non_empty_lines = [line for line in text.splitlines() if line.strip()]
+    if not non_empty_lines:
+        return False
+    matches = sum(1 for line in non_empty_lines if _SYSTEMD_BLAME_RE.match(line))
+    return matches >= 10 and matches >= 0.7 * len(non_empty_lines)
+
+
+def _classify_systemd_blame(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    blame = []
+    for index, line in enumerate(lines):
+        match = _SYSTEMD_BLAME_RE.match(line)
+        if match:
+            duration = _systemd_duration_seconds(match.group(1))
+            blame.append((duration, index))
+    if len(blame) > 10:
+        keep_indices = {index for _, index in sorted(blame, key=lambda item: (-item[0], item[1]))[:10]}
+        for _, index in blame:
+            if keep[index] and index not in keep_indices:
+                keep[index] = False
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_ZERO_CELL_RE = re.compile(r"^0+(?:\.0+)?%?$")
+_NUMERIC_CELL_RE = re.compile(r"^-?\d+(?:\.\d+)?%?$")
+
+
+def _zero_row(line: str, width: int) -> bool:
+    cells = line.split()
+    return len(cells) == width and width >= 4 and all(
+        _ZERO_CELL_RE.match(cell) for cell in cells[1:]
+    )
+
+
+def _numeric_row(line: str, width: int) -> bool:
+    cells = line.split()
+    return len(cells) == width and width >= 4 and all(
+        _NUMERIC_CELL_RE.match(cell) for cell in cells[1:]
+    )
+
+
+def _detect_zero_rows(text: str) -> bool:
+    lines = [line for line in text.splitlines() if line.strip()]
+    if len(lines) < 2:
+        return False
+
+    header = lines[0]
+    width = len(header.split())
+    if width < 4:
+        return False
+    if any(_NUMERIC_CELL_RE.match(cell) for cell in header.split()):
+        return False
+
+    zero_rows = 0
+    data_rows = 0
+    for line in lines[1:]:
+        data_rows += 1
+        if not _numeric_row(line, width):
+            return False
+        if _zero_row(line, width):
+            zero_rows += 1
+
+    if zero_rows < 8:
+        return False
+    if data_rows == 0:
+        return False
+    return zero_rows * 2 >= data_rows
+
+
+def _classify_zero_rows(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    non_empty = [index for index, line in enumerate(lines) if line.strip()]
+    if not non_empty:
+        return keep, [0] * len(lines), [0] * len(lines)
+
+    width = len(lines[non_empty[0]].split())
+    zero_indices = [index for index in non_empty if _zero_row(lines[index], width)]
+    for index in zero_indices[1:]:
+        keep[index] = False
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
+_PING_REPLY_RE = re.compile(r"^\d+ bytes from .*\bicmp_seq=\d+.*\btime[=<]([\d.]+) ?ms")
+_PING_HEADER_RE = re.compile(r"^PING \S+")
+
+
+def _detect_ping(text: str) -> bool:
+    lines = text.splitlines()
+    if not any(_PING_HEADER_RE.match(line) for line in lines):
+        return False
+    return sum(1 for line in lines if _PING_REPLY_RE.match(line)) >= 8
+
+
+def _classify_ping(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
+    keep = [True] * len(lines)
+    reply_indices = [index for index, line in enumerate(lines) if _PING_REPLY_RE.match(line)]
+    if not reply_indices:
+        return keep, [0] * len(lines), [0] * len(lines)
+
+    keep_indices = set(reply_indices[:2])
+    keep_indices.add(reply_indices[-1])
+
+    def _time_ms(index: int) -> float:
+        match = _PING_REPLY_RE.match(lines[index])
+        return float(match.group(1)) if match else -1.0
+
+    keep_indices.add(max(reply_indices, key=_time_ms))
+
+    for index in reply_indices:
+        if index not in keep_indices:
+            keep[index] = False
+
+    return keep, [0] * len(lines), [0] * len(lines)
+
+
 def detect_test_runner(text: str) -> str | None:
     """``"cargo"``, ``"go"``, ``"jest"``, ``"pytest"``, ``"gradle"``, ``"rspec"``,
     ``"phpunit"``, ``"dotnet"``, ``"lint"``, ``"slowlog"``, ``"env_dump"``,
-    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"``, ``"package_install"``, ``"ps_aux"``, ``"docker_ps"``, ``"requirements"``, ``"npm_audit"``, ``"playwright"``, ``"top"``, ``"cmake"`` or ``"kubectl"`` for recognised output.
+    ``"terraform_plan"``, ``"bundle_assets"``, ``"ansible"``, ``"pip_install"``, ``"rust_build"``, ``"git_status"``, ``"package_install"``, ``"ps_aux"``, ``"docker_ps"``, ``"requirements"``, ``"npm_audit"``, ``"playwright"``, ``"top"``, ``"cmake"``, ``"npm_tree"``, ``"curl_verbose"``, ``"rollout_wait"``, ``"systemd_blame"``, ``"zero_rows"``, ``"ping"`` or ``"kubectl"`` for recognised output.
 
     Vitest-style ``Tests  N passed`` output is left to the legacy path.
     One pass over the lines, each capped at ``_LINE_CAP`` characters (a long
@@ -2120,6 +2398,18 @@ def detect_test_runner(text: str) -> str | None:
             return "top"
         if _detect_cmake(text):
             return "cmake"
+        if _detect_npm_tree(text):
+            return "npm_tree"
+        if _detect_curl_verbose(text):
+            return "curl_verbose"
+        if _detect_rollout_wait(text):
+            return "rollout_wait"
+        if _detect_systemd_blame(text):
+            return "systemd_blame"
+        if _detect_zero_rows(text):
+            return "zero_rows"
+        if _detect_ping(text):
+            return "ping"
         if _detect_git_log(text):
             return "git_log"
         if _detect_docker_build(text):
@@ -2263,6 +2553,18 @@ def detect_test_runner(text: str) -> str | None:
         return "top"
     if _detect_cmake(text):
         return "cmake"
+    if _detect_npm_tree(text):
+        return "npm_tree"
+    if _detect_curl_verbose(text):
+        return "curl_verbose"
+    if _detect_rollout_wait(text):
+        return "rollout_wait"
+    if _detect_systemd_blame(text):
+        return "systemd_blame"
+    if _detect_zero_rows(text):
+        return "zero_rows"
+    if _detect_ping(text):
+        return "ping"
     if _detect_git_log(text):
         return "git_log"
     if _detect_docker_build(text):
@@ -3296,6 +3598,12 @@ _RUNNERS = {
     "playwright": _classify_playwright,
     "top": _classify_top,
     "cmake": _classify_cmake,
+    "npm_tree": _classify_npm_tree,
+    "curl_verbose": _classify_curl_verbose,
+    "rollout_wait": _classify_rollout_wait,
+    "systemd_blame": _classify_systemd_blame,
+    "zero_rows": _classify_zero_rows,
+    "ping": _classify_ping,
 }
 
 
@@ -3414,7 +3722,7 @@ def preprocess_test_output(
                   else ("pod rows" if runner == "kubectl_pods"
                         else ("build lines" if runner == "docker_build"
                               else ("table rows" if runner == "status_table"
-                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else ("package lines" if runner == "package_install" else ("process rows" if runner == "ps_aux" else ("running container rows" if runner == "docker_ps" else ("requirement lines" if runner == "requirements" else ("low-severity advisory lines" if runner == "npm_audit" else ("passed test lines" if runner == "playwright" else ("process rows" if runner == "top" else ("configure check lines" if runner == "cmake" else None)))))))))))))))))))))))
+                                    else ("git log lines" if runner == "git_log" else "describe lines" if runner == "kubectl" else ("lint lines" if runner == "lint" else ("slow log lines" if runner == "slowlog" else ("env lines" if runner == "env_dump" else ("plan lines" if runner == "terraform_plan" else ("asset lines" if runner == "bundle_assets" else ("host lines" if runner == "ansible" else ("install lines" if runner == "pip_install" else ("rustc warning lines" if runner == "rust_build" else ("gradle tasks" if runner == "gradle" else ("git status entries" if runner == "git_status" else ("package lines" if runner == "package_install" else ("process rows" if runner == "ps_aux" else ("running container rows" if runner == "docker_ps" else ("requirement lines" if runner == "requirements" else ("low-severity advisory lines" if runner == "npm_audit" else ("passed test lines" if runner == "playwright" else ("process rows" if runner == "top" else ("configure check lines" if runner == "cmake" else ("dependency tree lines" if runner == "npm_tree" else ("TLS and header trace lines" if runner == "curl_verbose" else ("rollout progress lines" if runner == "rollout_wait" else ("faster unit lines" if runner == "systemd_blame" else ("all-zero rows" if runner == "zero_rows" else ("ping reply lines" if runner == "ping" else None)))))))))))))))))))))))))))))
         ),
     )
     if runner == "pytest":
