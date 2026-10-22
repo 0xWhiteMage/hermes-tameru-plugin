@@ -285,6 +285,16 @@ _STOP = {
     "they", "them", "their", "our", "your", "please", "tell", "give", "show",
     "explain", "summarize", "summary", "function", "return", "class", "def",
     "import", "hmm",
+} | {
+    # es / pt / fr / it / de / id / ms / tr / pl question and function words
+    "qué", "que", "cuál", "cuándo", "dónde", "cómo", "por", "porqué", "el",
+    "los", "las", "una", "del", "con", "hubo", "qual", "quando", "onde",
+    "porque", "como", "uma", "com", "foi", "les", "une", "des", "quoi",
+    "quand", "où", "pourquoi", "comment", "che", "cosa", "dove", "perché",
+    "gli", "der", "das", "was", "wann", "warum", "wie", "und", "apa",
+    "kapan", "bila", "mengapa", "kenapa", "bagaimana", "yang", "ini", "itu",
+    "dengan", "untuk", "pada", "neden", "nasıl", "kiedy", "gdzie",
+    "dlaczego", "jak"
 }
 _KANA_STOP = frozenset("のはがをにでともへやかなねよわさぞぜしてただす")
 
@@ -1856,6 +1866,34 @@ def _fold_repeated_sentences(lines: list[str]) -> list[str]:
     return folded
 
 
+_SENTENCE_BREAK_RE = re.compile(
+    r"(?<=[^\W\d_][.!?\u2026])[\"'\u201d\u2019)\]]*\s+(?=\S)"
+    r"|(?<=[\u3002\uff01\uff1f])\s*(?=\S)"
+    r"|(?<=[\u0964\u0965\u061f\u06d4])\s+(?=\S)"
+    r"|(?<=[\u0e01-\u0e4e])\s+(?=[\u0e01-\u0e4e])"
+)
+
+
+def _split_prose_sentences(lines: list[str]) -> list[str]:
+    """Put each sentence of a long multi-sentence prose line on its own line, separated by blank lines, so each sentence is its own block for the prose brief. Lossless apart from the whitespace between sentences."""
+    out = None
+    for index, line in enumerate(lines):
+        if len(line) >= 120:
+            parts = [part for part in _SENTENCE_BREAK_RE.split(line.strip()) if part]
+            if len(parts) >= 3:
+                if out is None:
+                    out = lines[:index]
+                indent = line[: len(line) - len(line.lstrip())]
+                for part_index, part in enumerate(parts):
+                    if part_index:
+                        out.append("")
+                    out.append(indent + part)
+                continue
+        if out is not None:
+            out.append(line)
+    return lines if out is None else out
+
+
 def _preprocess_scan(
     text: str, query: str, content_hint: str | None = None
 ) -> tuple[list[str], str]:
@@ -2024,7 +2062,24 @@ _WEAK_NEXT_CHAT = frozenset(
 # agent rather than a question about the text ("fix it", "ok thanks", "LGTM").
 # Such a query is treated as an EMPTY query on every path (see
 # _is_filler_query) — adapters, destructive preprocess, selection, fail-open.
-_FILLER_QUERY_WORDS = frozenset(_WEAK_NEXT_CHAT | _STOP | {"fix", "fixes", "do", "so", "now", "then"})
+_FILLER_QUERY_WORDS = frozenset(
+    _WEAK_NEXT_CHAT
+    | _STOP
+    | {"fix", "fixes", "do", "so", "now", "then"}
+    | {
+        # Filler-only: these words only make a query filler when every query word is filler; not stop words because report/resume/happened are real terms in longer queries.
+        "happened", "happen", "overview", "tldr", "report", "resume",
+        "resumen", "resumir", "résume", "résumé", "résumer", "rapport",
+        "informe", "pasó", "ocurrió", "sucedió", "resumo", "resuma",
+        "aconteceu", "ocorreu", "relatório", "riassumi", "riassunto",
+        "successo", "rapporto", "ringkasan", "rangkuman", "ringkaskan",
+        "terjadi", "laporan", "özetle", "özet", "oldu", "rapor", "podsumuj",
+        "podsumowanie", "raport", "zusammenfassung", "passiert", "bericht",
+        "le", "la", "el", "lo", "il", "de", "du", "di", "o", "a", "e", "y",
+        "un", "me", "mi", "se", "ist", "est", "ce", "ne", "es", "isso",
+        "esto", "ça", "qu"
+    }
+)
 
 
 def _is_filler_query(query: str) -> bool:
@@ -2381,6 +2436,11 @@ def _dup_fp(text: str) -> str:
     return " ".join(parts)[:240]
 
 
+# A query term directly after a negator only counts when the block also shows failure/negation.
+# This prevents "not start" from matching boilerplate lines that say a process started.
+_NEGATED_TERM_RE = re.compile(r"\b(?:not|never|no|cannot|can't|won't|didn't|doesn't|don't|isn't|wasn't|couldn't|wouldn't|failed to|fails to|unable to)\s+([a-z][a-z0-9_]*)")
+_FAILURE_EVIDENCE_RE = re.compile(r"fail|error|err\b|fatal|emerg|crit|panic|unable|cannot|can't|couldn't|refused|denied|timed? ?out|abort|killed|\bnot\b|exit(?:ed)? (?:code|status) [1-9]")
+
 def score_blocks(
     blocks: list[dict[str, Any]],
     query: str,
@@ -2393,6 +2453,14 @@ def score_blocks(
     # ``re`` keeps only 512, so a long query (thousands of terms) recompiled
     # every pattern for every block (~80k compiles for a 30 KB query).
     term_tests = [(t, _term_test(t)) for t in terms]
+    negated = {m.group(1) for m in _NEGATED_TERM_RE.finditer((query or "").lower())}
+    if negated:
+        term_tests = [
+            (t, lambda lower, _test=test: _test(lower) and _FAILURE_EVIDENCE_RE.search(lower) is not None)
+            if t in negated
+            else (t, test)
+            for t, test in term_tests
+        ]
     n = max(1, len(blocks))
     entity_df: dict[str, int] = {}
     term_df: dict[str, int] = {}
@@ -3507,9 +3575,22 @@ def select_adaptive(
     # Rate-distortion insight: lossy schemes compound under repeated
     # compaction; a single high scorer shouldn't create a cascade.
     floor = max(2.2, min(11.5, 0.38 * top))
+    any_hit = any(b["entity_hits"] or b["term_hits"] for b in safe_blocks)
+
+    def _bare_fold(b) -> bool:
+        # A folded repeat line with no query hit is boilerplate, not the answer,
+        # once another block answers the query.
+        return (
+            any_hit
+            and _is_collapse_only_block(b)
+            and not b.get("entity_hits")
+            and not b.get("term_hits")
+            and not b.get("pinned")
+        )
+
     kept = set(important) | err_keep
     for b in safe_blocks:
-        if b["score"] >= floor:
+        if b["score"] >= floor and not _bare_fold(b):
             kept.add(b["id"])
     # Saturation guard (v0.6.0, production QA v3 performance finding): on huge
     # homogeneous dumps every line matches a broad query, so the floor
@@ -3530,11 +3611,13 @@ def select_adaptive(
     if (
         (blocks[0].get("reason") != "stale error" or len(kept) == 0)
         and (not blocks[0].get("trust_risk") or blocks[0].get("pinned"))
+        and not (kept and _bare_fold(blocks[0]))
     ):
         kept.add(blocks[0]["id"])
     if (
         not _is_sink_noise(blocks[-1]["text"])
         and not blocks[-1].get("trust_risk")
+        and not (kept and _bare_fold(blocks[-1]))
     ):
         kept.add(blocks[-1]["id"])
     # Perf (v0.6.0): the graph closure tokenises every block (regex-heavy).
@@ -3599,7 +3682,7 @@ def select_adaptive(
 _PROSE_DATA_RE = re.compile(
     r"\d[\d,.]*\s*(?:%|％|万|萬|億|亿|元|円|원|€|\$|£|¥|[kKmM]\b|GB|MB|ms\b)"
     r"|[$€£¥]\s*\d"
-    r"|\b[A-Za-z]{1,8}[-_]\d{2,}\b"
+    r"|\b(?!ke-)[A-Za-z]{1,8}[-_]\d{2,}\b"  # not Indonesian/Malay ordinals (minggu ke-12)
     r"|\d{4,}"
     r"|\d+\.\d+"
     r"|\b\d{1,2}[./-]\d{1,2}[./-]\d{2,4}\b"
@@ -6807,6 +6890,20 @@ def compress_context(
                 lines = _compact_progress_lines(summarized.split("\n"))
         elif content_type == "text":
             lines = _fold_repeated_sentences(lines)
+            # Split long multi-sentence prose lines into sentence blocks so the
+            # no-query prose brief can reach the minimum block count.
+            if (
+                prose_brief
+                and not (query or "").strip()
+                and not code_hint
+                and len(_segment_blocks_memo(lines)) < _PROSE_MIN_BLOCKS
+            ):
+                split = _split_prose_sentences(lines)
+                if (
+                    split is not lines
+                    and len(_segment_blocks_memo(split)) >= _PROSE_MIN_BLOCKS
+                ):
+                    lines = split
         recall_base = text
     # numbered_code: the "N\t" / "N|" gutter stays in the output (_render emits
     # `lines`) but is not part of the code the scorer should read.
