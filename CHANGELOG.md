@@ -22,6 +22,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors the npm/yarn/composer, ps aux and docker ps reducers, jest output without a summary, and go package folding.
 - Vendors repeated-sentence folding for prose in any script, accented query words kept whole, and the pip freeze and npm audit reducers.
 - Vendors the sentence-level prose brief for any script, multilingual query stop words and generic asks, negation-aware and fold-aware query matching, and the Playwright, top and CMake reducers.
+- Vendors the npm ls, curl -v, rollout status, systemd-analyze blame, all-zero table row and ping reducers, failed-build asset folding, snake_case query matching and more filler-only summary words.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
