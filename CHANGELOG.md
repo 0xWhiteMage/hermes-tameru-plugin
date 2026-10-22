@@ -24,6 +24,7 @@ All notable changes to this project are documented here. The format follows
 - Vendors the sentence-level prose brief for any script, multilingual query stop words and generic asks, negation-aware and fold-aware query matching, and the Playwright, top and CMake reducers.
 - Vendors the npm ls, curl -v, rollout status, systemd-analyze blame, all-zero table row and ping reducers, failed-build asset folding, snake_case query matching and more filler-only summary words.
 - Vendors the key/value line segmentation and the progress, traceroute, openssl s_client, PowerShell table and error, msiexec log, netstat, ipconfig, numbered-list and nmap reducers.
+- Vendors the private regex cache with its guard test, and the pg_settings, macOS unified log, docker compose ps, vmstat, apt upgradable and labelled progress reducers.
 
 ### Changed
 - **Catalogue page and README.** `hermes_tameru_plugin/README.md` (the README the Hermes plugin catalogue renders) is
