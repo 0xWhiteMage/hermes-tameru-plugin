@@ -5,6 +5,8 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-11-04
+
 ### Added
 - Vendors error-anchored compression for generic queries that match little or nearly everything and small erroring logs.
 - Vendors structured log levels as error lines and weak failure anchors when there are no error lines.
