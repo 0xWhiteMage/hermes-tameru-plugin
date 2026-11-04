@@ -7,6 +7,12 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.6.0] - 2026-11-04
 
+Summary by area (details below):
+
+- **Vendored engine:** Tameru 1.6.0, with reducers for many more tool outputs (Linux, macOS and Windows tools, containers, builds, package managers, service logs, test runners), anchors and summaries for generic and empty queries, multi-language query handling and sentence splitting, and a private regex cache.
+- **Catalogue page and docs:** a user-facing catalogue README with a hero banner, and plainer `tameru_expand` and `plugin.yaml` descriptions.
+- **Fixes:** vendored engine fixes for progress-bar false positives, numeric terms in clock times, output longer than input, Prometheus metrics and Indonesian ordinals.
+
 ### Added
 - Vendors error-anchored compression for generic queries that match little or nearly everything and small erroring logs.
 - Vendors structured log levels as error lines and weak failure anchors when there are no error lines.
