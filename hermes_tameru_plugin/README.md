@@ -112,7 +112,7 @@ settings:
 | Cost per answered turn | | **7.7% lower** on average (lower in 34 sessions, higher in 8) |
 
 These are scripted sessions, so they measure what stays in context and what it costs, not task success with a live
-model. Method and full results:
+model. Recorded on 1.5.0; method and full results:
 [REPORT-1.5.0](https://github.com/0xWhiteMage/hermes-tameru-plugin/blob/main/docs/REPORT-1.5.0.md).
 
 ## Links

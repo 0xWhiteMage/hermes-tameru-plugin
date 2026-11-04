@@ -4,19 +4,19 @@
 
 [Tameru](https://github.com/0xWhiteMage/tameru-compaction-system) deterministic, extractive context compaction for
 [Hermes Agent](https://github.com/NousResearch/hermes-agent), as a standalone context-engine plugin (no Hermes source
-changes). **Version 1.5.0**, vendoring Tameru 1.5.0.
+changes). **Version 1.6.0**, vendoring Tameru 1.6.0.
 
 When Hermes trims an old tool result, it normally replaces it with a one-line summary. This plugin keeps the part
 that matters instead: a query-aware extract or a structural brief that always holds one line of every distinct
 error, and a `ref=` from which the exact original can be fetched back with the `tameru_expand` tool. Hermes still
 decides when to prune, which rows, and whether a pass is worth committing.
 
-Measurements: [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md). Changes by version: [CHANGELOG.md](CHANGELOG.md).
+Measurements (latest report, recorded on 1.5.0): [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md). Changes by version: [CHANGELOG.md](CHANGELOG.md).
 Releasing: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## At a glance
 
-Replay of five session shapes (debugging, on-call incident, refactor, many small outputs, non-English output) at six
+Replay (recorded on 1.5.0) of five session shapes (debugging, on-call incident, refactor, many small outputs, non-English output) at six
 window sizes (32K to 256K), two seeds each, against Hermes with its default settings (proactive prune off). The
 replay runs on a simulated clock and rejects any request larger than the window, as a provider does
 ([details](docs/REPORT-1.5.0.md#3-measuring-honestly-the-realistic-replay)).
@@ -114,7 +114,7 @@ prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 cha
   refused or blocked results, anything in `exempt_tools`, and results shorter than `min_tool_chars`.
 
 Per result, on 13 agent outputs (logs up to 650 KB, `cat -n` source, diffs, `rg`, pytest, JSON, YAML, CJK) the plugin
-saves 86.1% of characters and keeps 14/14 answer strings and 22/22 error templates (`tests/eval/per_result.py`).
+saves 86.6% of characters and keeps 14/14 answer strings and 22/22 error templates (`tests/eval/per_result.py`).
 
 ## Requirements
 
@@ -186,7 +186,7 @@ plugins:
 | `exempt_tools` | `[]` | Extra tool names left to Hermes (added to the built-in exempt set). |
 | `protect_patterns` | `[]` | Regexes; matching lines are pinned in extracts. |
 | `anchor_errors` | `true` | With no usable query, or a generic query that matches little or nearly everything, compress a result around its errors; small erroring logs keep every error fingerprint and nearby context (compiler/test/runtime diagnostics in many languages). |
-| `prose_brief` | `true` | With no usable query on prose or docs (any language, incl. CJK), keep a structure-preserving extractive brief; the original stays expandable. |
+| `prose_brief` | `true` | With no usable query on prose or docs (any language; sentences are split for Latin scripts, CJK, Thai, Devanagari and Arabic), keep a structure-preserving extractive brief; the original stays expandable. |
 | `supersession` | `true` | Structural supersession. |
 | `pass_char_budget` | `4000000` | Original characters the ladder may process in one pass; rows beyond it use Hermes' line. |
 
@@ -315,7 +315,7 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
 
 ## Compatibility
 
-Tested against Hermes `a0a4992` (CI pin), `63d0b94` and `6e7b83a2f1` (`main`, 2026-10-13): full suite on Python 3.14,
+Tested against Hermes `a0a4992` (CI pin), `1298c8e` and `ccc6956350` (`main`, 2026-10-18): full suite on Python 3.14,
 stub suite on Python 3.11 to 3.14. A nightly job runs the suite against Hermes `main` and may fail without blocking.
 Hermes' catalogue validator passes all 14 checks with a "safe" scan; its one informational note is the private
 `ContextCompressor` import.
@@ -346,7 +346,7 @@ Then update `VENDORED_FROM`, run both test modes and review the replay baselines
 
 ## More
 
-- [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md): measurements, red-team findings and trade-offs of this version.
+- [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md): measurements, red-team findings and trade-offs, recorded on 1.5.0 (the latest report; not re-run for 1.6.0).
 - [docs/RELEASING.md](docs/RELEASING.md): engine, plugin and catalogue release steps.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, real-Hermes setup, replay harness, CI.
 - [docs/compaction-research.md](docs/compaction-research.md): survey of compaction systems and the gap analysis.
