@@ -16,25 +16,27 @@ Releasing: [docs/RELEASING.md](docs/RELEASING.md).
 
 ## At a glance
 
-Replay (recorded on 1.5.0) of five session shapes (debugging, on-call incident, refactor, many small outputs, non-English output) at six
-window sizes (32K to 256K), two seeds each, against Hermes with its default settings (proactive prune off). The
-replay runs on a simulated clock and rejects any request larger than the window, as a provider does
-([details](docs/REPORT-1.5.0.md#3-measuring-honestly-the-realistic-replay)).
+Replay (recorded on 1.6.0, 2026-11-05, Hermes `1298c8e`) of five session shapes (debugging, on-call incident,
+refactor, many small outputs, non-English output) at six window sizes (32K to 256K), two seeds each, against Hermes
+with its default settings (proactive prune off). The replay runs on a simulated clock and rejects any request larger
+than the window, as a provider does ([method](docs/REPORT-1.5.0.md#3-measuring-honestly-the-realistic-replay); one
+cell is `tests/eval/compare.py stock_defaults tameru_1_4_product --scenario oncall --window 32000 --seed 0`, where
+`tameru_1_4_product` is the current plugin with its defaults).
 
 | Over 60 sessions | Hermes as shipped | With the plugin |
 |---|---|---|
 | Turns failed on a context overflow | 76 | **0** |
-| Key facts still in context at the end | 705 | **854** |
-| Error templates still in context | 510 | **912** |
-| Full compactions (LLM summary calls) | 106 | **47** |
-| Calls re-run to recover lost output | 228 | **151** |
-| Cost per answered turn (prompt-cache priced) | | **-7.7%** mean; lower in 34 sessions, higher in 8 |
+| Key facts still in context at the end | 705 | **859** |
+| Error templates still in context | 510 | **940** |
+| Full compactions (LLM summary calls) | 106 | **48** |
+| Calls re-run to recover lost output | 228 | **146** |
+| Cost per answered turn (prompt-cache priced) | | **-7.9%** mean; lower in 34 sessions, higher in 8 |
 
-- **Small windows (32K-48K)** gain the most: no failed turns where Hermes fails up to 17 per session, and 5% to 44%
-  lower cost per answered turn on four of the five shapes.
+- **Small windows (32K-48K)** gain the most: no failed turns where Hermes fails up to 17 per session, and 3% to 46%
+  lower cost per answered turn on four of the five shapes (refactor only at 32K).
 - **Large windows (200K-256K)**: a session that Hermes would never compact is left exactly as Hermes leaves it; a
   session that fills the window (on-call) costs 7% to 36% less, with every error template kept.
-- **Where it costs more:** sessions made of many small outputs (+1.6% to +8.9% at 32K-64K), because nothing in them
+- **Where it costs more:** sessions made of many small outputs (+1.3% to +9.3% at 32K-64K), because nothing in them
   is large enough to compress while the compaction summary gains an artifact trail (which keeps twice the error
   templates); and the refactor shape at 48K (+3% to +4%, with more facts kept and fewer compactions).
 
@@ -305,9 +307,9 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
   trigger is pruned and can lose a fact Hermes would have kept; `tameru_expand` recovers it.
 - Output whose extract cannot shrink under `max_extract_chars` (big logs, very large `grep` output) ends as a brief:
   every error template stays, but a specific matching line can be cut.
-- Savings per result are lower than the engine alone on the same text (64.4% against 81.6% mean on the engine's
+- Savings per result are lower than the engine alone on the same text (68.6% against 82.3% mean on the engine's
   benchmark corpus, 16/16 gold kept by both): Hermes' elision marker is about 100 characters per gap and each row
-  carries a header. Short documents with many gaps suffer most (`travis_yaml` 23.2% against 64.1%).
+  carries a header. Short documents with many gaps suffer most (`travis_yaml` 23.2% against 76.8%).
 - `tameru_expand` is offered only when Hermes injects context-engine tools: with no toolset restriction, or one that
   includes `context_engine` (`hermes chat -t terminal,file,context_engine`). Newer Hermes logs
   `capability_check ... capability=tools.override decision=deny` at plugin load; that is Hermes probing its
@@ -315,8 +317,10 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
 
 ## Compatibility
 
-Tested against Hermes `a0a4992` (CI pin), `1298c8e` and `ccc6956350` (`main`, 2026-10-18): full suite on Python 3.14,
-stub suite on Python 3.11 to 3.14. A nightly job runs the suite against Hermes `main` and may fail without blocking.
+Tested against Hermes `a0a4992` (CI pin), `1298c8e` and `ccc6956350` (`main`, 2026-10-18): full suite on Python 3.14
+(re-run on 1.6.0, 2026-11-05), stub suite on Python 3.11 to 3.14. Hermes `main` has moved since: at `b63eb8b`
+(2026-11-05) 33 tests fail, mostly the replay baselines and a seam parity check, plus one `tameru_expand`
+session-archive test. A nightly job runs the suite against Hermes `main` and may fail without blocking.
 Hermes' catalogue validator passes all 14 checks with a "safe" scan; its one informational note is the private
 `ContextCompressor` import.
 

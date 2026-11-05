@@ -5,6 +5,10 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Documentation
+- The README replay table, the catalogue page's "Measured" table and its 451-line log example were re-measured on 1.6.0 (2026-11-05); the per-result limits line now quotes 68.6% against the engine's 82.3%.
+- Compatibility notes that Hermes `main` at `b63eb8b` fails 33 tests (replay baselines, a seam parity check, one archive-backed `tameru_expand` test); the CI pin and `1298c8e` still pass.
+
 ## [1.6.0] - 2026-11-04
 
 Summary by area (details below):
