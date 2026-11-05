@@ -11,7 +11,7 @@ agent fetch the exact original back whenever it needs it.
 
 ## What you get
 
-- **Longer sessions before the context fills up.** A 451-line server log drops to 33 lines, 89% fewer characters.
+- **Longer sessions before the context fills up.** A 451-line server log drops to 24 lines, 95% fewer characters.
 - **Errors stay in view.** At least one line of every distinct error (`ERROR`, `FAIL`, tracebacks...) is kept, so
   the agent does not forget what broke.
 - **Nothing is lost.** Every shortened result carries a `ref=`. The agent can call `tameru_expand` to get the exact
@@ -29,18 +29,20 @@ agent fetch the exact original back whenever it needs it.
 
 ## Example
 
-A `terminal` call returned 451 lines of a payment service log (49,431 characters). In context it becomes 33 lines
-(5,221 characters). The header and some of the kept lines:
+A `terminal` call returned 451 lines of a payment service log (49,431 characters). In context it becomes 24 lines
+(2,681 characters). The header and some of the kept lines:
 
 ```text
-[terminal] {"command": "tail -n 450 /var/log/payments/gateway.log"} (49,431 chars) [tameru:extract kept 33/451 lines (5,012 of 48,930 chars) omitted: log 443 ref=e0d1a349035b54c9]
-[×3] 2025-03-14T02:14:22.500Z FATAL worker.pool WorkerCrash: worker-4 exited with signal 9 (out of memory)
-[×3] 2025-03-14T02:14:59.909Z ERROR http.server UpstreamBadGateway: 502 from inventory-svc POST /v2/reserve trace_id=d3b6ebf3
-[×6] 2025-03-14T02:15:18.152Z ERROR payments.gateway PaymentGatewayTimeout: upstream stripe-proxy timed out after 2318ms (order_id=ORD-27624, attempt=3)
-[×3] 2025-03-14T02:17:40.646Z ERROR ledger.writer LedgerWriteError: duplicate key value violates unique constraint "ledger_entries_pkey" (entry_id=8fa7bdb1-9f49-6417-11ce-d79c33086062)
+[terminal] {"command": "tail -n 450 /var/log/payments/gateway.log"} (49,431 chars) [tameru:brief kept 14/451 lines (2,474 of 48,930 chars) omitted: log 436 ref=e0d1a349035b54c9]
+2025-03-14T02:14:22.500Z FATAL worker.pool WorkerCrash: worker-4 exited with signal 9 (out of memory)
+⟪HERMES-CONTEXT-COMPRESSION: 1,968 of 48,930 chars omitted here by Hermes's context compressor.⟫
+2025-03-14T02:14:59.909Z ERROR http.server UpstreamBadGateway: 502 from inventory-svc POST /v2/reserve trace_id=d3b6ebf3
+⟪HERMES-CONTEXT-COMPRESSION: 1,213 of 48,930 chars omitted here by Hermes's context compressor.⟫
+2025-03-14T02:15:18.152Z ERROR payments.gateway PaymentGatewayTimeout: upstream stripe-proxy timed out after 2318ms (order_id=ORD-27624, attempt=3)
 ```
 
-`[×6]` means six lines of the same kind, shown once. To see every timeout, the agent calls `tameru_expand` with:
+Each distinct error is shown once; the markers say how much was left out between kept lines. The log has six of
+these timeouts. To see every one, the agent calls `tameru_expand` with:
 
 ```json
 {"ref": "e0d1a349035b54c9", "grep": "timeout"}
@@ -107,12 +109,12 @@ settings:
 | | Hermes as shipped | With Tameru |
 |---|---|---|
 | Turns that failed because the context overflowed | 76 | **0** |
-| Key facts still in context at the end | 705 | **854** |
-| Full compactions (LLM summary calls) | 106 | **47** |
-| Cost per answered turn | | **7.7% lower** on average (lower in 34 sessions, higher in 8) |
+| Key facts still in context at the end | 705 | **859** |
+| Full compactions (LLM summary calls) | 106 | **48** |
+| Cost per answered turn | | **7.9% lower** on average (lower in 34 sessions, higher in 8) |
 
 These are scripted sessions, so they measure what stays in context and what it costs, not task success with a live
-model. Recorded on 1.5.0; method and full results:
+model. Recorded on 1.6.0 (2026-11-05); method and the 1.5.0 results:
 [REPORT-1.5.0](https://github.com/0xWhiteMage/hermes-tameru-plugin/blob/main/docs/REPORT-1.5.0.md).
 
 ## Links
