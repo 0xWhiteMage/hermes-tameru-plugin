@@ -20,6 +20,7 @@ All notable changes to this project are documented here. The format follows
 - `score_blocks` is split into seven helpers (496 to 141 lines, engine commit `b77eed3`, no behaviour change: the golden corpus, the engine suite and all 914 replay baselines are identical). `compress_context` is split the same way (1,149 to 440 lines including its docstring, 22 private helpers, engine commit `c7e4453`, same checks: golden corpus, engine suite and 914 replay baselines unchanged).
 
 ### Fixed
+- Adaptive host settings no longer change when Tameru prunes. Tameru's trigger and budgets were sized from the tuned summary threshold, so a threshold raised for a slowly growing chat also delayed pruning (+2-6% cost and a few lost facts at a 128K window in the replay). Pruning is now sized from the threshold you configured; only Hermes' own summary timing moves.
 - Two more ignored errors in `update_model` (threshold lookup, prune size) are counted in the telemetry like the others instead of vanishing.
 
 ### Testing

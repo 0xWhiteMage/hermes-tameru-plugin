@@ -193,6 +193,16 @@ def test_a_slow_chat_moves_the_engines_own_values_and_leaves_hermes_to_derive_th
     assert engine.protect_last_n == base_n
 
 
+def test_tameru_prunes_from_the_configured_threshold_not_the_tuned_one():
+    """Host tuning changes when Hermes summarises; the size Tameru's own pruning is sized from stays what the user configured."""
+    engine = _engine()
+    configured, base = engine._policy_threshold_tokens(), engine.threshold_percent
+    assert configured == engine.threshold_tokens
+    _grow(engine)
+    assert engine.threshold_percent > base                            # Hermes' trigger moved later
+    assert engine._policy_threshold_tokens() == configured  # Tameru's did not
+
+
 def test_revisiting_an_old_output_widens_the_engines_protected_tail():
     from test_edits import _shortened
     engine, out, idx, ref, original = _shortened()

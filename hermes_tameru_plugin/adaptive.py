@@ -314,8 +314,8 @@ class AdaptiveMixin:
         base = Retention(
             extract_chars=settings.max_extract_chars,
             brief_chars=settings.brief_chars,
-            retained_chars=scaled_retained_budget(settings, getattr(self, "threshold_tokens", 0)),
-            error_chars=scaled_error_budget(settings, getattr(self, "threshold_tokens", 0)),
+            retained_chars=scaled_retained_budget(settings, self._policy_threshold_tokens()),
+            error_chars=scaled_error_budget(settings, self._policy_threshold_tokens()),
             error_row_chars=settings.errors_row_chars,
             recent_tokens=self._raw_tail_budget() or 0,
         )
@@ -326,7 +326,7 @@ class AdaptiveMixin:
         return PlanningInput(
             budget=self._request_budget(), current_tokens=measured,
             input_complete=complete,
-            host_threshold_tokens=int(getattr(self, "threshold_tokens", 0) or 0),
+            host_threshold_tokens=int(self._policy_threshold_tokens() or 0),
             retention=base,
             minimum_reclaim_tokens=self._raw_native("proactive_prune_min_reclaim_tokens"),
             minimum_result_chars=self._raw_native("proactive_prune_min_result_chars", 8000),

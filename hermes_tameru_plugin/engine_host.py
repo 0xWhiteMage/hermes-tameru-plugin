@@ -23,6 +23,23 @@ class HostSettingsMixin:
             self._host_anchor_n = int(self.protect_last_n)
         return base, int(self._host_anchor_n), room
 
+    def _policy_threshold_tokens(self) -> int:
+        """The summary threshold in tokens that Tameru's own pruning (trigger, budgets, regrowth gap) is sized from.
+
+        Host tuning moves Hermes' threshold to change *when Hermes summarises*; it must not also move when Tameru
+        prunes, so while the threshold is tuned this returns the size of the threshold the user configured."""
+        tokens = int(getattr(self, "threshold_tokens", 0) or 0)
+        try:
+            saved = getattr(self, "_untuned_threshold", None)
+            window = int(getattr(self, "context_length", 0) or 0)
+            if saved and saved[0] == window and self._host_enabled():
+                base = self._host_anchor()[0]
+                if abs(float(getattr(self, "threshold_percent", 0) or 0) - base) > 1e-9:
+                    return int(saved[1])
+        except Exception:
+            swallowed(self, "policy_threshold")
+        return tokens
+
     def _host_enabled(self) -> bool:
         return (bool(self._settings.adaptive_host) and bool(self._settings.enabled)
                 and self._settings.policy_mode == "adaptive" and not self._policy.paused)
@@ -32,6 +49,11 @@ class HostSettingsMixin:
         small-window floor, the configured cap and the summariser ceiling all still apply."""
         self.protect_last_n = last_n
         window = int(getattr(self, "context_length", 0) or 0)
+        try:
+            if abs(float(self.threshold_percent) - self._host_anchor()[0]) <= 1e-9:     # untuned: remember what it is
+                self._untuned_threshold = (window, int(getattr(self, "threshold_tokens", 0) or 0))
+        except Exception:
+            swallowed(self, "policy_threshold")
         floor = getattr(self, "_effective_threshold_percent", None)
         if callable(floor) and window:
             percent = float(floor(window, percent))

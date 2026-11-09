@@ -493,7 +493,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         if getattr(self, "_scaled_prune", False) and getattr(self, "_resolved_context_length", 0) is not None:
             try:
                 self.proactive_prune_tokens = scaled_prune_tokens(
-                    self._settings, getattr(self, "threshold_tokens", 0),
+                    self._settings, self._policy_threshold_tokens(),
                 )
             except Exception:
                 swallowed(self, "prune_tokens")
@@ -505,7 +505,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         """
         settings = self._pass_settings()
         try:
-            return scaled_retained_budget(settings, getattr(self, "threshold_tokens", 0))
+            return scaled_retained_budget(settings, self._policy_threshold_tokens())
         except Exception:
             return settings.retained_extract_budget_chars
 
@@ -513,7 +513,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         """The retained ``errors``-row budget now (``_retained_budget``'s counterpart)."""
         settings = self._pass_settings()
         try:
-            return scaled_error_budget(settings, getattr(self, "threshold_tokens", 0))
+            return scaled_error_budget(settings, self._policy_threshold_tokens())
         except Exception:
             return settings.retained_error_budget_chars
 
@@ -1065,7 +1065,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         """The regrowth re-arm applies to the plugin's own, window-scaled trigger; a user's or caller's value is Hermes'."""
         return (
             bool(getattr(self, "_scaled_prune", False)) and self._settings.prune_regrowth_ratio > 0
-            and prune_trigger_follows_window(self._settings, getattr(self, "threshold_tokens", 0))
+            and prune_trigger_follows_window(self._settings, self._policy_threshold_tokens())
         )
 
     def _regrowth_trigger(self, trigger: int) -> int:
@@ -1085,11 +1085,11 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         rearm = getattr(self, "_proactive_prune_rearm_tokens", 0)
         if (
             not self._regrowth_active() or ratio <= 0 or not isinstance(rearm, int) or rearm <= 0
-            or not reprune_gate_applies(self._settings, getattr(self, "threshold_tokens", 0))
+            or not reprune_gate_applies(self._settings, self._policy_threshold_tokens())
         ):
             return min_reclaim
         try:
-            target = round(ratio * int(getattr(self, "threshold_tokens", 0) or 0))
+            target = round(ratio * int(self._policy_threshold_tokens() or 0))
             return max(min_reclaim, message_budget_tokens(messages) - target) if target > 0 else min_reclaim
         except Exception:
             return min_reclaim
@@ -1106,7 +1106,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         if not self._regrowth_active():
             return
         if gap <= 0:
-            gap = prune_regrowth_tokens(self._settings, getattr(self, "threshold_tokens", 0))
+            gap = prune_regrowth_tokens(self._settings, self._policy_threshold_tokens())
         rearm = getattr(self, "_proactive_prune_rearm_tokens", 0)
         if gap <= 0 or not isinstance(rearm, int) or isinstance(rearm, bool) or rearm <= 0:
             return
