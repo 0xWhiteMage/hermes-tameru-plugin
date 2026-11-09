@@ -526,7 +526,7 @@ def test_real_discovery_keeps_profile_and_session_ownership(tmp_path, monkeypatc
                 assert view['ok'] and view['content'] == originals[i][:view['end_offset']]
                 assert json.dumps(after, sort_keys=True) == histories[i]
                 schemas = engine.get_tool_schemas()
-                assert {'tameru_read_original','tameru_expand'} <= {s['name'] for s in schemas}
+                assert {s['name'] for s in schemas} == {'tameru_read_original'}
                 read = json.loads(engine.handle_tool_call('tameru_read_original', {'ref': refs[i]}))
                 assert 'error' not in read and read['content'].startswith(f'PROFILE_OWNER_{i}\n')
                 assert engine.get_tool_schemas() == schemas

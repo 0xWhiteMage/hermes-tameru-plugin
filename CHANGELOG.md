@@ -5,6 +5,19 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed (cost tuning, gauntlet round 1)
+- Tameru lists one tool, `tameru_read_original`. The old name `tameru_expand` is still answered by `handle_tool_call` but is no longer
+  listed, so the same ~1,600 characters are not sent twice on every request. The tool description and its parameter text are shorter
+  (1,627 to 1,232 characters); the trigger sentence and the credential note are unchanged.
+- Adaptive full compaction prunes results from 1,000 characters (it used 8,000, the proactive pass's floor), so the summarizer reads stubs
+  instead of raw rows. This was the largest adaptive loss: smallrows at 32K went from +30.9% to about +10% against Hermes as shipped,
+  and refactor, i18n and the default scenario now cost less than stock at 32K. A floor of 200 lost a recall fact in the oncall gate; 2,500 and above brings the loss back.
+- The balanced preference keeps less detail per pruned result (0.67 to 0.50).
+
+### Testing
+- `tests/eval/test_cost_matrix.py` (set `TAMERU_COST_MATRIX=out.json`; `TAMERU_COST_SCENARIOS`, `TAMERU_COST_WINDOWS` and `TAMERU_COST_ARMS` narrow it) measures every scenario, window and arm.
+- Baselines re-recorded; three strict known-loss entries (refactor and i18n at 32K, i18n at 48K) and the default-session cost xfail removed because they now pass.
+
 ## [1.9.0] - 2026-11-09
 
 ### Changed

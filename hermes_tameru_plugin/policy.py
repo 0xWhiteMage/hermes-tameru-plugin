@@ -33,7 +33,7 @@ class _Preference:
 # These are choices to evaluate, not empirically established optima.
 _PREFERENCES = {
     "save_space": _Preference(0.70, 0.75, 0.80, 0.20, 0.10),
-    "balanced": _Preference(0.60, 0.67, 1.00, 0.35, 0.15),
+    "balanced": _Preference(0.60, 0.50, 1.00, 0.35, 0.15),
     "preserve_detail": _Preference(1.00, 2.00, 1.50, 0.50, 0.20),
 }
 _ACTIVATIONS = {"earlier": 0.70, "standard": 0.85, "later": 1.00}

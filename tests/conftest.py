@@ -33,7 +33,7 @@ REPO_ROOT = TESTS_DIR.parent
 STUB_ROOT = TESTS_DIR / "hermes_stub"
 
 # ---- environment isolation -----------------------------------------------------------------
-_KEEP_ENV = {"HERMES_REPO_ROOT", "HERMES_HOME", "TAMERU_WRITE_BASELINES"}
+_KEEP_ENV = {"HERMES_REPO_ROOT", "HERMES_HOME", "TAMERU_WRITE_BASELINES", "TAMERU_COST_MATRIX", "TAMERU_COST_ARMS", "TAMERU_COST_WINDOWS", "TAMERU_COST_SCENARIOS"}
 for _name in list(os.environ):
     if _name.startswith(("TAMERU_", "HERMES_")) and _name not in _KEEP_ENV:
         del os.environ[_name]

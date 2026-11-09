@@ -51,7 +51,7 @@ retune does not need a disclosure edit. It must mention:
 - it replaces Hermes' context engine and subclasses `ContextCompressor` through a private import;
 - it turns on Hermes' proactive tool-result pruning when the user has not configured it, scaled to the model's
   context window;
-- it adds the `tameru_read_original` tool (`tameru_expand` remains registered as a compatible alias) and a bundled read-only `/tameru` activity table plus Desktop composer panel;
+- it adds the `tameru_read_original` tool (`tameru_expand` is still answered as a compatible alias but is no longer listed, so the schema is sent once) and a bundled read-only `/tameru` activity table plus Desktop composer panel;
 - grep patterns with repeats run in a short-lived stdlib-only `python -I -S` child with a timeout;
 - no external network calls or credential reads added by the extraction/recovery code; Desktop inspection uses
   Hermes' existing connection; a telemetry file only when `telemetry_log` is set; in-process isolation.

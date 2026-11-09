@@ -102,7 +102,7 @@ prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 cha
   `[tameru:<rung> kept K/N lines (KC of TC chars) ... ref=<16 hex>]`. Hermes' envelope fields (`exit_code`,
   `error`, `total_lines`) stay on a compact meta line, so Hermes' own regexes still match; gaps use Hermes' elision
   marker.
-- **Read original: `tameru_read_original(ref, start_line, end_line, grep, max_chars)`** (`tameru_expand` is a compatible alias). Returns the exact original lines (a
+- **Read original: `tameru_read_original(ref, start_line, end_line, grep, max_chars)`** (the old name `tameru_expand` is still answered but not listed, so the schema is sent once). Returns the exact original lines (a
   range, or the lines matching a regex) as JSON, capped at `max_chars` (default 12,000; at most 50,000) with a
   continuation hint. Originals come from a per-agent in-memory store and, when Hermes' session database is
   reachable, from the compaction archive, so a ref can also resolve after a restart, `--resume` or a session rotation.
@@ -119,7 +119,7 @@ prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 cha
 - **Lean tail.** In Hermes' `tail_mode: lean`, tail rows Hermes stubs get a Tameru header-only row that keeps the
   ref. Hermes' `<persisted-output>` spill rows keep their "Full output saved to" path.
 - **Exempt** (Hermes' handling applies): `skill_view`, `skills_list`, `skill_manage`, `clarify`, `todo`,
-  `todo_list`, `memory`, `session_search`, `tameru_read_original`, `tameru_expand`, `delegate_task`, `cronjob_manage`, `process_manage`,
+  `todo_list`, `memory`, `session_search`, `tameru_read_original`, `delegate_task`, `cronjob_manage`, `process_manage`,
   refused or blocked results, anything in `exempt_tools`, and results shorter than `min_tool_chars`.
 
 Historical v1.6.0 per-result measurements (not rerun for 1.7.0): per result, on 13 agent outputs (logs up to 650 KB, `cat -n` source, diffs, `rg`, pytest, JSON, YAML, CJK) the plugin
@@ -242,7 +242,7 @@ plugins:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `expand_tool` | `true` | Add `tameru_expand` to the tool list. |
+| `expand_tool` | `true` | Add `tameru_read_original` to the tool list (the old name `tameru_expand` is still answered, but no longer listed). |
 | `expand_grep_timeout` | `2.0` | Seconds a grep with a repeat or alternation may run. It runs in a stdlib-only child process (`python -I -S`) that is killed after this; plain patterns run in-process. |
 | `expand_grep_line_chars` | `20000` | Characters of each line a grep searches (longer lines: their head only, reported as `lines_capped`). |
 | `store_max_entries` | `512` | Originals kept in memory per agent (LRU). |
@@ -334,7 +334,7 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
 - Historical v1.6.0 measurements: savings per result are lower than the engine alone on the same text (68.6% against 82.3% mean on the engine's
   benchmark corpus, 16/16 gold kept by both): Hermes' elision marker is about 100 characters per gap and each row
   carries a header. Short documents with many gaps suffer most (`travis_yaml` 23.2% against 76.8%).
-- `tameru_expand` is offered only when Hermes injects context-engine tools: with no toolset restriction, or one that
+- `tameru_read_original` is offered only when Hermes injects context-engine tools: with no toolset restriction, or one that
   includes `context_engine` (`hermes chat -t terminal,file,context_engine`). Newer Hermes logs
   `capability_check ... capability=tools.override decision=deny` at plugin load; that is Hermes probing its
   tool-override policy, not an error.

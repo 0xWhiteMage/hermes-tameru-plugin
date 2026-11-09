@@ -26,6 +26,9 @@ _QUIET_REASONS = {"ample_room", "not_considered", "activation_disabled"}
 _WIRE_KEYS = ("role", "content", "tool_call_id", "tool_calls", "name")
 
 
+_FULL_PRUNE_MIN_CHARS = 1000     # a full compaction prunes results from this size, not from the 8000 of a proactive pass: Hermes' summarizer then reads stubs, not raw rows (stock floor 200; 200 lost a recall fact, 2500+ brings the loss back)
+
+
 def _positive_native(value: Any) -> int:
     """Preserve a larger native reservation, including its accepted numeric strings."""
     try:
@@ -444,7 +447,7 @@ class AdaptiveMixin:
             tail = (plan.retention.recent_tokens
                     if self._uses_token_tail(plan.controls, full=base_scope.full) else None)
             for key, value in (("protect_tail_tokens", tail),
-                               ("min_prune_chars", plan.minimum_result_chars)):
+                               ("min_prune_chars", _FULL_PRUNE_MIN_CHARS if base_scope.full else plan.minimum_result_chars)):
                 if key in sig.parameters:
                     call.arguments[key] = value
             return call.args, call.kwargs

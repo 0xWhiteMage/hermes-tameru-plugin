@@ -1866,7 +1866,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         if not (self._settings.enabled and self._settings.expand_tool):
             return schemas
         self._expand_injected = True
-        return [READ_ORIGINAL_SCHEMA, EXPAND_SCHEMA, *schemas]
+        # One schema, not two: the old name ``tameru_expand`` has the same parameters, and listing both made every request
+        # carry the same ~1,600 characters twice. ``handle_tool_call`` still answers the old name for transcripts that use it.
+        return [READ_ORIGINAL_SCHEMA, *schemas]
 
     def handle_tool_call(self, name: str, args: dict[str, Any], **kwargs: Any) -> str:
         if name not in (EXPAND_TOOL_NAME, READ_ORIGINAL_TOOL_NAME):

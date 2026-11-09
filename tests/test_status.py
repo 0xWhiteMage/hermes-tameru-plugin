@@ -82,7 +82,8 @@ def test_expand_schema_is_injected_first_and_flagged():
     engine = make_engine()
     schemas = engine.get_tool_schemas()
     assert schemas[0] == READ_ORIGINAL_SCHEMA and schemas[0]["name"] == READ_ORIGINAL_TOOL_NAME
-    assert schemas[1] == EXPAND_SCHEMA and schemas[1]["name"] == EXPAND_TOOL_NAME
+    assert len(schemas) == 1                      # one schema: the old name is answered by handle_tool_call, not listed
+    assert schemas[0]["parameters"] == EXPAND_SCHEMA["parameters"]
     assert engine.get_status()["tameru"]["expand_injected"] is True
     assert engine.get_tool_schemas() == schemas   # static: cache-safe
 
@@ -183,3 +184,11 @@ def test_the_ledger_is_on_by_default_and_off_when_disabled():
         engine = make_engine(settings)
         engine.tail_mode = "lean"
         assert "Artifact Trail" not in engine._augment_summary_lean("## Goal\nfix it", _turns())
+
+
+def test_old_tool_name_is_still_answered_though_not_listed():
+    engine = make_engine()
+    assert [s["name"] for s in engine.get_tool_schemas()] == [READ_ORIGINAL_TOOL_NAME]
+    for name in (EXPAND_TOOL_NAME, READ_ORIGINAL_TOOL_NAME):
+        reply = engine.handle_tool_call(name, {"ref": "does-not-exist"})
+        assert "unknown tool" not in str(reply).lower()

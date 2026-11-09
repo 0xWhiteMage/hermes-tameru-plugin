@@ -76,8 +76,8 @@ def test_stages_preserve_more_early_and_keep_fixed_retention_constant():
     low_plans, high_plans = plans(Controls(), low), plans(Controls(), high)
     assert [p.stage for p in low_plans] == ["standard"]
     assert [p.stage for p in high_plans] == ["standard", "strong"]
-    assert low_plans[0].retention.retained_chars == 6030
-    assert high_plans[-1].retention.retained_chars == 4020
+    assert low_plans[0].retention.retained_chars == 4500
+    assert high_plans[-1].retention.retained_chars == 3000
     assert plans(Controls(mode="fixed"), low)[0].retention == plans(Controls(mode="fixed"), high)[0].retention
 
 
@@ -86,7 +86,7 @@ def test_preferences_keep_their_detail_tradeoff_even_under_pressure():
     save = plans(Controls(preference="save_space"), current)[-1]
     balanced = plans(Controls(), current)[-1]
     preserve = plans(Controls(preference="preserve_detail"), current)[-1]
-    assert [p.retention.retained_chars for p in (save, balanced, preserve)] == [4500, 4020, 12_000]
+    assert [p.retention.retained_chars for p in (save, balanced, preserve)] == [4500, 3000, 12_000]
     assert balanced.activation_tokens < save.activation_tokens < preserve.activation_tokens
 
 

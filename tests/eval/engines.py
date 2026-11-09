@@ -113,3 +113,12 @@ def tameru_1_9_host_off() -> Any:
 @register("tameru_1_9_host_on")
 def tameru_1_9_host_on() -> Any:
     return _host_tuning_arm(True)
+
+
+@register("tameru_legacy")
+def tameru_legacy() -> Any:
+    """The plugin as shipped but in ``policy_mode: legacy`` (the fixed prune gates, no adaptive policy)."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(settings=TameruSettings(policy_mode="legacy"), quiet_mode=True)

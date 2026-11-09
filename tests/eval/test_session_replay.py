@@ -241,8 +241,6 @@ def test_acceptance_tool_call_pairs_stay_intact(name):
 
 
 # ---- against Hermes as shipped (``stock_defaults``: no proactive prune) -----------------------------------
-@pytest.mark.xfail(strict=True, reason=(
-    "LOSS +0.8% on Hermes v0.23 (seed 0): 1,176,218 vs 1,166,635 char-eq for the plugin as shipped (adaptive default)."))
 def test_acceptance_the_shipped_plugin_costs_no_more_than_hermes_defaults():
     ours, theirs = _metrics("tameru_1_4_product"), _metrics("stock_defaults")
     assert ours["total_simulated_input_cost"] <= theirs["total_simulated_input_cost"]

@@ -55,43 +55,34 @@ EXPAND_SCHEMA: dict[str, Any] = {
     "description": (
         "Call this whenever you need a detail that is not visible in a tool result marked [tameru:...], and before you "
         "quote it, rely on it, or say it is missing: exact values, paths, error text, line numbers. Prefer grep or a "
-        "line range over a full read. Reads the exact original output Tameru shortened. "
-        "A shortened tool result starts with a one-line summary ending in "
-        "[tameru:... ref=xxxxxxxxxxxxxxxx]; pass those hex characters (16, or 8 on older rows) as ref. Returns the original "
-        "lines (1-based, inclusive start_line..end_line), or only the lines matching a "
-        "case-insensitive regex given as grep (matched_lines lists their line numbers). Output is "
-        "capped at max_chars; when truncated is true, continue from the line after returned_lines. "
+        "line range over a full read. Pass the hex ref from the result's header [tameru:... ref=xxxxxxxxxxxxxxxx] "
+        "(16 characters, 8 on older rows). Returns the original lines (start_line..end_line, 1-based), or only those "
+        "matching the case-insensitive regex grep. If truncated is true, continue after returned_lines. "
         "Originals that looked like they held credentials are never stored, so a miss there is expected. "
-        "For a ref that is not found, search the session with session_search(role_filter='tool')."
+        "If a ref is not found, try session_search(role_filter='tool')."
     ),
     "parameters": {
         "type": "object",
         "properties": {
             "ref": {
                 "type": "string",
-                "description": "The hex characters after ref= in the pruned result's header (16, or 8 on older rows).",
+                "description": "Hex after ref= in the header.",
             },
             "start_line": {
                 "type": "integer",
-                "description": "First line to return, 1-based (default 1).",
+                "description": "First line (1-based).",
             },
             "end_line": {
                 "type": "integer",
-                "description": "Last line to return, inclusive (default: the last line).",
+                "description": "Last line, inclusive.",
             },
             "grep": {
                 "type": "string",
-                "description": (
-                    f"Case-insensitive regex (at most {MAX_GREP_CHARS} chars): return only the "
-                    "matching lines within the range."
-                ),
+                "description": f"Case-insensitive regex (max {MAX_GREP_CHARS} chars); only matching lines.",
             },
             "max_chars": {
                 "type": "integer",
-                "description": (
-                    f"Cap on returned characters (default {DEFAULT_MAX_CHARS:,}, "
-                    f"maximum {MAX_MAX_CHARS:,})."
-                ),
+                "description": f"Character cap (default {DEFAULT_MAX_CHARS:,}, max {MAX_MAX_CHARS:,}).",
             },
         },
         "required": ["ref"],

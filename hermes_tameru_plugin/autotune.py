@@ -16,7 +16,7 @@ from typing import Any
 
 # (activation, detail, recent, minimum_reclaim_share, regrowth) of the policy table's three rows.
 _SAVE = (0.70, 0.75, 0.80, 0.20, 0.10)
-_BALANCED = (0.60, 0.67, 1.00, 0.35, 0.15)
+_BALANCED = (0.60, 0.50, 1.00, 0.35, 0.15)
 _DETAIL = (1.00, 2.00, 1.50, 0.50, 0.20)
 
 # Hard bounds on the effective values: Tuner can never leave them, whatever the signals say.

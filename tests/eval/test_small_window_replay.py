@@ -55,13 +55,6 @@ KNOWN_LOSSES: dict[tuple[str, str, str], str] = {
     ),
     # Measured on Hermes v0.23 (cost per answered turn, seed 0): Hermes as shipped / the plugin as shipped (adaptive default).
     # The plugin in ``policy_mode: legacy`` costs 34,453 and 23,255 here: the loss is the adaptive default's price.
-    ("refactor", "cost", "tameru_1_4_product"): (
-        "LOSS +3.3%: 35,343 vs 34,218 (Hermes as shipped compacts 5 times, the plugin once and prunes; the extra cache "
-        "breaks do not repay at 32K). `policy_mode: legacy` costs 34,453 (+0.7%)."
-    ),
-    ("i18n", "cost", "tameru_1_4_product"): (
-        "LOSS +4.8%: 25,758 vs 24,579 (Hermes compacts 4 times, the plugin twice). `policy_mode: legacy` costs 23,255 (-5.4%)."
-    ),
     # Held-out recipes never reach the plugin's trigger at 32K: the delta is the declared recovery/activity schemas.
     ("longform", "cost", "tameru_1_4_product"): "LOSS (seed 0): under-trigger schema delta.",
     ("mixedlang", "cost", "tameru_1_4_product"): "LOSS (seed 0): under-trigger schema delta.",
@@ -78,7 +71,6 @@ KNOWN_LOSSES_48K: dict[tuple[str, str], str] = {
         "keeps 13 gold facts against 10 and 9 error templates against 0."
     ),
     ("smallrows", "cost"): "LOSS +1.6% (seed 0): the smallrows artifact-trail overhead (see the 32K row); nothing is prunable.",
-    ("i18n", "cost"): "LOSS +0.4% per answered turn (seed 0): 28,953 vs 28,834; the adaptive default's extra cache breaks.",
     ("longform", "cost"): "LOSS (seed 0): under-trigger schema delta.",
     ("mixedlang", "cost"): "LOSS (seed 0): under-trigger schema delta.",
     ("diagnostics", "cost"): "LOSS (seed 0): under-trigger schema delta.",

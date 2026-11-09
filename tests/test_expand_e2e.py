@@ -111,11 +111,11 @@ def test_the_schema_is_injected_through_hermes_inject_context_engine_tools(home)
     agent = build_agent()
     agent_init._inject_context_engine_tools(agent)
     names = [t["function"]["name"] for t in agent.tools]
-    assert names == [READ_ORIGINAL_TOOL_NAME, EXPAND_TOOL_NAME]
-    schema = agent.tools[1]["function"]
+    assert names == [READ_ORIGINAL_TOOL_NAME]
+    schema = agent.tools[0]["function"]
     assert schema["parameters"] == EXPAND_SCHEMA["parameters"] and "ref" in schema["parameters"]["required"]
-    assert EXPAND_TOOL_NAME in agent.valid_tool_names
-    assert agent._context_engine_tool_names == {READ_ORIGINAL_TOOL_NAME, EXPAND_TOOL_NAME}
+    assert READ_ORIGINAL_TOOL_NAME in agent.valid_tool_names
+    assert agent._context_engine_tool_names == {READ_ORIGINAL_TOOL_NAME}
     assert agent.context_compressor._expand_injected is True
     assert agent.context_compressor.get_status()["tameru"]["expand_injected"] is True
 
@@ -135,7 +135,7 @@ def test_injection_is_deduplicated_and_gated_on_enabled_toolsets(home):
 
     allowed = build_agent(enabled_toolsets=["context_engine"])
     agent_init._inject_context_engine_tools(allowed)
-    assert [t["function"]["name"] for t in allowed.tools] == [READ_ORIGINAL_TOOL_NAME, EXPAND_TOOL_NAME]
+    assert [t["function"]["name"] for t in allowed.tools] == [READ_ORIGINAL_TOOL_NAME]
 
 
 def test_expand_tool_can_be_switched_off_in_the_settings(hermes_home):
