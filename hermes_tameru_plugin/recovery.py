@@ -66,15 +66,15 @@ EXPAND_SCHEMA: dict[str, Any] = {
         "properties": {
             "ref": {
                 "type": "string",
-                "description": "Hex after ref= in the header.",
+                "description": "Hex after ref= in the result's header (16 chars, 8 on older rows).",
             },
             "start_line": {
                 "type": "integer",
-                "description": "First line (1-based).",
+                "description": "First line, 1-based (default 1).",
             },
             "end_line": {
                 "type": "integer",
-                "description": "Last line, inclusive.",
+                "description": "Last line, inclusive (default: the last).",
             },
             "grep": {
                 "type": "string",
@@ -407,7 +407,7 @@ def expand(
     try:
         return _expand(store, args, session_lookup, session_id, grep_timeout, grep_line_chars)
     except Exception as exc:  # a tool call must always answer with JSON
-        return _error(f"tameru_expand failed: {type(exc).__name__}: {exc}")
+        return _error(f"tameru_read_original failed: {type(exc).__name__}: {exc}")
 
 
 SECRET_SOURCE = "secret"      # ``lookup_original`` source when the original held a credential and was refused

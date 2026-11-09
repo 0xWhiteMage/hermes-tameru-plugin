@@ -192,3 +192,21 @@ def test_old_tool_name_is_still_answered_though_not_listed():
     for name in (EXPAND_TOOL_NAME, READ_ORIGINAL_TOOL_NAME):
         reply = engine.handle_tool_call(name, {"ref": "does-not-exist"})
         assert "unknown tool" not in str(reply).lower()
+
+
+def test_every_tool_name_the_model_is_told_about_is_listed():
+    import re
+    from hermes_tameru_plugin import RECOVERY_NOTE
+    from hermes_tameru_plugin.recovery import EXPAND_SCHEMA
+    listed = {s["name"] for s in make_engine().get_tool_schemas()}
+    for text in (RECOVERY_NOTE, EXPAND_SCHEMA["description"]):
+        assert set(re.findall(r"tameru_[a-z_]+", text)) <= listed
+
+
+def test_the_tool_schema_keeps_its_contract_and_stays_small():
+    schema = make_engine().get_tool_schemas()[0]
+    props = schema["parameters"]["properties"]
+    assert schema["parameters"]["required"] == ["ref"] and set(props) == {"ref", "start_line", "end_line", "grep", "max_chars"}
+    assert "1-based" in props["start_line"]["description"] and "inclusive" in props["end_line"]["description"]
+    assert "16" in props["ref"]["description"]
+    assert len(__import__("json").dumps(schema)) <= 1400          # sent with every request: a budget, not a target

@@ -13,6 +13,8 @@ All notable changes to this project are documented here. The format follows
   instead of raw rows. This was the largest adaptive loss: smallrows at 32K went from +30.9% to about +10% against Hermes as shipped,
   and refactor, i18n and the default scenario now cost less than stock at 32K. A floor of 200 lost a recall fact in the oncall gate; 2,500 and above brings the loss back.
 - The balanced preference keeps less detail per pruned result (0.67 to 0.50).
+  Cost of the two changes, measured: oncall retains fewer gold facts than before (12 of 20 at 64K, was 17; 9 at 32K, was 13) but still more than Hermes as shipped (8 and 4),
+  and costs less; the default scenario at 32K retains more (11, was 8). Every retention gate against stock passes.
 
 ### Testing
 - `tests/eval/test_cost_matrix.py` (set `TAMERU_COST_MATRIX=out.json`; `TAMERU_COST_SCENARIOS`, `TAMERU_COST_WINDOWS` and `TAMERU_COST_ARMS` narrow it) measures every scenario, window and arm.

@@ -113,7 +113,7 @@ prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 cha
   line per distinct error template of the summarized results. It goes through Hermes' compaction redactor like
   every other section Hermes appends. The summarizer itself sees Tameru rows as Hermes' own one-liners, without refs.
 - **Untrusted content stays marked.** Web, browser and MCP results keep Hermes' `<untrusted_tool_result>` wrapper
-  in every rendered row and every `tameru_expand` answer, and their lines never enter the artifact trail.
+  in every rendered row and every `tameru_read_original` answer, and their lines never enter the artifact trail.
 - **Small windows keep less.** The retained extract and error budgets scale with the window below a 64K window and
   with the compaction threshold above it.
 - **Lean tail.** In Hermes' `tail_mode: lean`, tail rows Hermes stubs get a Tameru header-only row that keeps the
@@ -280,7 +280,7 @@ hooks were found, with `reasons` for missing ones); `expand_injected`; `store` (
 
 The engine must run in the Hermes process, Hermes' default (`plugins.isolation: in_process`). Under `host`
 isolation Hermes hands the plugin a placeholder instead of the session database: the engine detects it
-(`isolated: true`) and serves `tameru_expand` from its own memory only, so refs do not survive a restart.
+(`isolated: true`) and serves `tameru_read_original` from its own memory only, so refs do not survive a restart.
 
 ### Serving many sessions
 
@@ -310,7 +310,7 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
 ## Kill switch and fallbacks
 
 - `enabled: false` (or `TAMERU_HERMES_ENABLED=0`) defers every override to Hermes: no ladder, no artifact trail, no
-  `tameru_expand`, Hermes' own `compression.*` defaults. The replay is byte-identical to Hermes'.
+  `tameru_read_original`, Hermes' own `compression.*` defaults. The replay is byte-identical to Hermes'.
 - At start the engine probes the Hermes hooks it needs. If the demotion seam is missing or has another signature,
   the engine runs as stock Hermes and says why in `get_status()["tameru"]["seams"]["reasons"]`; a missing optional
   seam disables only its feature. An exception inside the ladder falls back to Hermes' line for that row and is
@@ -325,7 +325,7 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
 - The plugin hooks private Hermes methods. A Hermes refactor can disable it (safely, as above) until the plugin is
   updated; CI runs against Hermes `main` nightly to catch that early.
 - It is extractive: an extract keeps lines, not meaning. A fact that was only in a cut region is out of context
-  until the model calls `tameru_expand` or re-runs the tool. A row whose original was never stored (evicted,
+  until the model calls `tameru_read_original` or re-runs the tool. A row whose original was never stored (evicted,
   credential-like, or a restart without a reachable archive) cannot be expanded.
 - A proactive prune cannot know whether a session will ever reach compaction. A session that peaks just past the
   trigger is pruned and can lose a fact Hermes would have kept; the recovery tool can return it only while an original remains available.
