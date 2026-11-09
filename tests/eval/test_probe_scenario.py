@@ -67,3 +67,29 @@ def test_every_probe_fact_survives(results, arm):
 
 def test_stock_loses_some_so_the_probe_discriminates(results):
     assert any(len(_kept(m, "")) < 6 for k, m in results.items() if k[2] == "stock_defaults")
+
+
+def test_every_ref_in_the_final_request_resolves():
+    """The fourth probe type: after several compactions, each ``ref=`` Tameru left in the request can be read back."""
+    import json
+    import re
+
+    engines_made = []
+
+    def factory():
+        engine = engines.make_engine("tameru_1_4_product")
+        engines_made.append(engine)
+        return engine
+
+    registry.register_scenario(DIRECTIVES_SPEC)
+    try:
+        out = replay.run_session(factory, scenario="directives", context_length=32_000, seed=0, keep_final_request=True)
+    finally:
+        registry.SCENARIOS.pop("directives", None)
+    text = json.dumps(out["final_request"], ensure_ascii=False)
+    refs = sorted(set(re.findall(r"ref=([0-9a-f]{8,16})", text)))
+    assert refs, "the final request carries no ref: the probe would be vacuous"
+    engine = engines_made[-1]
+    for ref in refs:
+        result = json.loads(engine.handle_tool_call("tameru_read_original", {"ref": ref}))
+        assert "error" not in result and result.get("content"), (ref, str(result)[:200])
