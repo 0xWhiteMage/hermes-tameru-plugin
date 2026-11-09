@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows
   Cost of the two changes, measured: oncall retains fewer gold facts than before (12 of 20 at 64K, was 17; 9 at 32K, was 13) but still more than Hermes as shipped (8 and 4),
   and costs less; the default scenario at 32K retains more (11, was 8). Every retention gate against stock passes.
 
+### Changed (engine)
+- `score_blocks` is split into seven helpers (496 to 141 lines, engine commit `b77eed3`, no behaviour change: the golden corpus, the engine suite and all 914 replay baselines are identical). `compress_context` is still one long function.
+
 ### Fixed
 - Two more ignored errors in `update_model` (threshold lookup, prune size) are counted in the telemetry like the others instead of vanishing.
 
