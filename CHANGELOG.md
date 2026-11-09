@@ -17,7 +17,7 @@ All notable changes to this project are documented here. The format follows
   and costs less; the default scenario at 32K retains more (11, was 8). Every retention gate against stock passes.
 
 ### Changed (engine)
-- `score_blocks` is split into seven helpers (496 to 141 lines, engine commit `b77eed3`, no behaviour change: the golden corpus, the engine suite and all 914 replay baselines are identical). `compress_context` is still one long function.
+- `score_blocks` is split into seven helpers (496 to 141 lines, engine commit `b77eed3`, no behaviour change: the golden corpus, the engine suite and all 914 replay baselines are identical). `compress_context` is split the same way (1,149 to 440 lines including its docstring, 22 private helpers, engine commit `c7e4453`, same checks: golden corpus, engine suite and 914 replay baselines unchanged).
 
 ### Fixed
 - Two more ignored errors in `update_model` (threshold lookup, prune size) are counted in the telemetry like the others instead of vanishing.
