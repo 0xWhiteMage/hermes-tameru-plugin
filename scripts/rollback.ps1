@@ -10,11 +10,11 @@
 
 .EXAMPLE
   pwsh scripts/rollback.ps1                      # plan only
-  pwsh scripts/rollback.ps1 -Tag v1.8.0 -Apply   # do it (v1.6.0 is the last published release)
+  pwsh scripts/rollback.ps1 -Tag v1.6.0 -Apply   # do it (v1.6.0 is the last published release)
 #>
 [CmdletBinding()]
 param(
-  [string]$Tag = 'v1.8.0',
+  [string]$Tag = 'v1.6.0',
   [string]$HermesHome = $(if ($env:HERMES_HOME) { $env:HERMES_HOME } else { Join-Path $HOME '.hermes' }),
   [switch]$Apply
 )

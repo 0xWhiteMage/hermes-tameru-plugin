@@ -90,7 +90,7 @@ All notable changes to this project are documented here. The format follows
 - Keep and Restore need a reference of at least 8 characters that matches exactly one output.
 - A forced loop of `tameru_read_original` calls can no longer widen the protected tail: a re-read of the same output
   counts once per 5 turns and the revisits counted per step are capped.
-- `scripts/rollback.ps1` and the runbooks point to `v1.8.0` (tagged locally); `v1.6.0` remains the last published release.
+- `scripts/rollback.ps1` and the runbooks point to `v1.6.0`, the last published release (1.7.0 and 1.8.0 were folded into 1.9.0, so no `v1.8.0` tag exists).
 
 ### Testing
 - Test runs can no longer change a real Hermes install: Hermes' bootstrap used to "finish a source update" (install

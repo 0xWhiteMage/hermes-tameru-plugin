@@ -90,7 +90,7 @@ The Desktop panel and the Python plugin carry the same build number; a mismatch 
 
 ## H. Roll back
 
-Use `scripts/rollback.ps1`. It restores a tagged release (default `v1.8.0`, the previous local release; `v1.6.0` is the last published one) from this
+Use `scripts/rollback.ps1`. It restores a tagged release (default `v1.6.0`, the last published release; 1.7.0 and 1.8.0 were never released and are part of 1.9.0) from this
 repository into `$HERMES_HOME/plugins/tameru` (or `tameru_(ためる)` if `scripts/use_display_name.ps1` was run) and the Desktop copy, keeps a timestamped backup of what it replaced in `$HERMES_HOME/plugin-backups/` (outside the folders Hermes and Desktop scan),
 makes no network calls, and changes nothing unless you pass `-Apply`.
 
