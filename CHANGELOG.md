@@ -23,6 +23,7 @@ All notable changes to this project are documented here. The format follows
 - Two more ignored errors in `update_model` (threshold lookup, prune size) are counted in the telemetry like the others instead of vanishing.
 
 ### Testing
+- New `directives` replay scenario and `tests/eval/test_probe_scenario.py`: standing instructions, rejected theories and superseded settings must survive compaction (stock Hermes loses two of the six probe facts; adaptive and legacy lose none).
 - The cost matrix takes `TAMERU_COST_SEEDS=0,1,2`; results and the live Desktop check with Haiku are in `docs/COST-TUNING-2026-11-10.md`.
 - `tests/eval/test_cost_matrix.py` (set `TAMERU_COST_MATRIX=out.json`; `TAMERU_COST_SCENARIOS`, `TAMERU_COST_WINDOWS` and `TAMERU_COST_ARMS` narrow it) measures every scenario, window and arm.
 - Baselines re-recorded; three strict known-loss entries (refactor and i18n at 32K, i18n at 48K) and the default-session cost xfail removed because they now pass.
