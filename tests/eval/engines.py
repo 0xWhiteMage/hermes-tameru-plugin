@@ -64,6 +64,26 @@ def stock() -> Any:
     return ContextCompressor(model="test-model", proactive_prune_tokens=48_000, quiet_mode=True)
 
 
+@register("plain_masking")
+def plain_masking() -> Any:
+    """Naive observation masking, the reference any smarter method must beat: Hermes' compressor whose prune replaces every
+    tool result older than the protected tail with one fixed placeholder (no summary line, no recovery ref, no ledger)."""
+    from agent.context_compressor import ContextCompressor
+
+    class PlainMasking(ContextCompressor):
+        def _prune_old_tool_results(self, messages, protect_tail_count, protect_tail_tokens=None, *args, **kwargs):
+            cut = max(0, len(messages) - int(protect_tail_count or 0))
+            out, count = list(messages), 0
+            for index, row in enumerate(messages[:cut]):
+                content = row.get("content") if isinstance(row, dict) else None
+                if row.get("role") == "tool" and isinstance(content, str) and len(content) > 200:
+                    out[index] = dict(row, content="[tool output omitted]")
+                    count += 1
+            return (out, count) if count else (messages, 0)
+
+    return PlainMasking(model="test-model", proactive_prune_tokens=48_000, quiet_mode=True)
+
+
 @register("tameru_1_3")
 def tameru_1_3() -> Any:
     """The plugin's current ``ExtractiveContextEngine`` (1.3.0: prune-and-post-check around the parent)."""
