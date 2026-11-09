@@ -53,3 +53,13 @@ Single-seed cells move 2 to 3 points between runs of the same code; run `TAMERU_
 Cost against Hermes as shipped (seed 0): default 32K +46%, oncall 32K +63%, refactor 32K +23%, i18n 32K +28%; it is cheaper only in smallrows (-2.5% at 32K, -6.8% at 64K),
 where it also keeps fewer error templates at 64K (8 against Tameru's 23). `tests/eval/test_masking_reference.py` gates that Tameru keeps at least as many gold facts
 as masking in every development scenario at 32K.
+
+## Six-seed release gate (seeds 0-5, 11 scenarios, windows 32K-128K, six arms)
+
+Run with `TAMERU_COST_SEEDS=0,1,2,3,4,5` over `stock_defaults`, `plain_masking`, `tameru_1_4_product` (adaptive), `tameru_legacy`, `tameru_1_9_host_off` and `tameru_1_9_host_on` (1,584 cells). It measures the replay only, not model accuracy.
+
+- **Gold facts kept** (the six compacting scenarios, all windows and seeds): stock 1,088, plain masking 1,189, adaptive 1,637, legacy 1,594, host off 1,637, host on 1,626. Adaptive and legacy are never below stock in any cell; no arm fails a turn.
+- **Cost:** adaptive beats stock in the compacting scenarios by 1% (refactor 48K: +0.2%) up to 62% (bursty 32K). It loses 3.2-5.1% in the five never-compacting scenarios (dense, diagnostics, longform, mixedlang, rereads: the tool schema) and 0.5-9.7% on smallrows. Legacy matches adaptive there and is worse in i18n 48K (+3.3%), refactor 48K (+0.9%) and bursty 64K.
+- **Plain masking** costs 5-63% more than stock in most compacting cells and keeps fewer gold facts than adaptive in every one.
+- **Host tuning (the plan's gate "host on is at least host off") fails narrowly at 128K:** host on keeps 11 fewer gold facts than off in 12 of 66 cell-seeds (i18n 6, default 3, refactor 3) and costs 2-6% more in default and refactor, because the wider protected tail leaves more old output unshortened. Below 128K the two arms are identical. The replay cannot credit the benefit host tuning is meant to bring (fewer re-reads), so the default stays on; revisit with real-use data.
+- **Not built:** the four extra probe types in the plan (instruction kept, rejected hypothesis kept, stale state superseded, quoted refs still resolve) are not in the harness; gold retention is the only quality probe here.
