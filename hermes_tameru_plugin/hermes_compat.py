@@ -17,6 +17,7 @@ import inspect
 import json
 import re
 import sys
+import time
 import types
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -175,18 +176,27 @@ _MERGED_SUMMARY_DELIMITER = "[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]
 
 
 # ---- lazy resolution -------------------------------------------------------------------------
+_MISSING: dict[str, float] = {}
+_MISSING_SECONDS = 5.0
+
+
 def _module(name: str) -> Any:
     """The Hermes module ``name``, or None when it cannot be imported.
 
-    Nothing is cached: ``sys.modules`` already memoizes successes, and a failure may be transient
-    (a circular import while Hermes is still initialising) or undone later (a swapped stub).
+    ``sys.modules`` already memoizes successes. A failure is remembered for a few seconds only: it may be transient (a
+    circular import while Hermes is still initialising) or undone later (a swapped stub), but retrying a missing module
+    on every call made a per-turn history scan 30 times slower on a Hermes that lacks one of these helpers.
     """
     mod = sys.modules.get(name)
     if mod is not None:
         return mod
+    failed = _MISSING.get(name)
+    if failed is not None and time.monotonic() - failed < _MISSING_SECONDS:
+        return None
     try:
         return importlib.import_module(name)
     except Exception:
+        _MISSING[name] = time.monotonic()
         return None
 
 

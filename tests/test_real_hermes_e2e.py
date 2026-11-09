@@ -35,6 +35,11 @@ compression:
   proactive_prune_tokens: 1000
   proactive_prune_min_result_chars: 200
   proactive_prune_min_reclaim_tokens: 0
+plugins:
+  entries:
+    tameru:
+      settings:
+        policy_mode: legacy        # these tests drive the fixed prune gates above; adaptive (the default) has its own trigger
 """
 SKU_QUERY = "What is the SKU of titanium-torsion-rod?"
 
@@ -268,7 +273,7 @@ def test_a_failing_host_line_survives_in_a_japanese_log(home):
 
 
 def test_the_japanese_log_collapses_to_the_host_line_when_high_risk_is_allowed(hermes_home):
-    config = CONFIG + "plugins:\n  entries:\n    tameru:\n      settings:\n        max_risk: high\n"
+    config = CONFIG + "        max_risk: high\n"      # CONFIG already ends inside plugins.entries.tameru.settings
     install_plugin(hermes_home, config)
     try:
         engine = build_through_agent_init(session_db=FakeSessionDB())
@@ -302,6 +307,10 @@ def test_a_short_bulky_chat_is_not_empty_for_the_compress_preflight(home):
 def test_compress_force_runs_a_real_pass_and_demotes_with_tameru_renders(home, monkeypatch):
     fake_summary_llm(monkeypatch)
     engine = build_through_agent_init()
+    # The seam-telemetry contract below is the legacy path's; the adaptive default routes differently.
+    from dataclasses import replace as dc_replace
+    engine._settings = dc_replace(engine._settings, policy_mode="legacy")
+    engine._init_policy(engine._settings)
     chat = Chat("why did the payment gateway time out?")
     for i in range(6):
         chat.tool("terminal", {"command": f"tail -n {100 + i} app.log"}, hp.terminal_result(hp.server_log(__import__("random").Random(i), n_lines=200)[0]))
@@ -310,6 +319,8 @@ def test_compress_force_runs_a_real_pass_and_demotes_with_tameru_renders(home, m
     assert out is not messages and len(out) < len(messages)
     assert any("payment gateway timed out" in str(m.get("content")) for m in out)
     assert engine.compression_count == 1
+    assert engine._telemetry.snapshot()["events"] == {}, "speculative seam state stays unpublished until adoption"
+    engine.on_turn_complete(out)
     events = engine._telemetry.snapshot()["events"]
     assert events, "the seam ran under the compress pass scope"
 

@@ -34,7 +34,9 @@ def make_engine(settings: TameruSettings | None = None, **kwargs: Any) -> Tameru
         "proactive_prune_min_reclaim_tokens": 0, "proactive_prune_min_result_chars": MIN_PRUNE_CHARS,
         "protect_last_n": PROTECT_LAST_N,
     }
-    return TameruContextEngine(settings=settings or TameruSettings(small_window_threshold_tokens=0), **{**options, **kwargs})
+    return TameruContextEngine(
+        settings=settings or TameruSettings(small_window_threshold_tokens=0, policy_mode="legacy"),
+        **{**options, **kwargs})
 
 
 class Chat:
@@ -65,7 +67,11 @@ class Chat:
         self.messages.append({"role": "user", "content": text})
 
     def finish(self, text: str = "continue") -> list[dict]:
-        """Add short filler rounds and a user turn, so every earlier row is outside the tail."""
+        """Add short filler rounds and a user turn, so every earlier row is outside the count tail.
+
+        The fillers protect the newest ``protect_last_n`` rows only — token-tail
+        fixtures need enough suffix bytes after the old result to keep it outside
+        the token walk as well."""
         for i in range(PROTECT_LAST_N):
             self.tool("terminal", {"command": f"echo filler {i}"}, hp.terminal_result("ok"))
         self.user(text)
@@ -114,7 +120,9 @@ def in_scope(engine: TameruContextEngine, messages: list[dict] | None = None, **
     token = engine_module._SCOPE.set(scope)
     try:
         yield scope
+        engine._publish_pass_state(scope)
     finally:
+        engine._close_pass(scope)
         engine_module._SCOPE.reset(token)
 
 
@@ -124,19 +132,24 @@ def demote(
 ) -> tuple[bool, list[dict]]:
     """Call seam A on a copy of ``messages``; ``(changed, result)``. ``rest=()`` is the pass-4 shape."""
     result = [dict(m) for m in messages]
-    with in_scope(engine, messages, **(scope or {})):
+    with in_scope(engine, messages, **(scope or {})) as pass_scope:
         changed = engine._demote_tool_result_at(
             result, idx, tool_calls_by_id(result), MIN_PRUNE_CHARS, *rest,
         )
+    if changed:
+        engine._activity.confirm(pass_scope.changes.values(), result)
     return changed, result
 
 
 def prune_pass(engine: TameruContextEngine, messages: list[dict], **fields: Any) -> tuple[list[dict], int]:
     """Hermes' ``_prune_old_tool_results`` (passes 1 to 4) under a pass scope, bypassing the gates."""
-    with in_scope(engine, messages, **fields):
-        return engine._prune_old_tool_results(
+    with in_scope(engine, messages, **fields) as pass_scope:
+        out, count = engine._prune_old_tool_results(
             messages, protect_tail_count=PROTECT_LAST_N, min_prune_chars=MIN_PRUNE_CHARS,
         )
+    if count:
+        engine._activity.confirm(pass_scope.changes.values(), out)
+    return out, count
 
 
 def fake_summary_llm(monkeypatch) -> None:
@@ -154,3 +167,13 @@ def fake_summary_llm(monkeypatch) -> None:
         return {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
 
     monkeypatch.setattr(cc, "call_llm", reply)
+
+
+def use_archive_commit(monkeypatch, engine) -> None:
+    """Make a prune persist through ``SessionDB.archive_and_compact``, the one commit path a test can count or fail.
+
+    Current Hermes first tries an in-place rewrite of the pruned rows and falls back to ``archive_and_compact`` only
+    when that returns None. Tests that count or reject ``archive_and_compact`` need the fallback path; older Hermes
+    has no in-place rewrite, so there is nothing to switch off."""
+    if hasattr(engine, "_rewrite_pruned_rows_in_place"):
+        monkeypatch.setattr(engine, "_rewrite_pruned_rows_in_place", lambda *args, **kwargs: None)

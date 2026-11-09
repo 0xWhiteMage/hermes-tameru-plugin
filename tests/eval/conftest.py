@@ -43,7 +43,7 @@ if not os.environ.get("HERMES_HOME"):
 
 def _real_hermes_problem() -> str | None:
     """Why the real-Hermes tests cannot run here, or None when they can."""
-    if not _hermes_root:
+    if not os.environ.get('HERMES_REPO_ROOT', '').strip():
         return "HERMES_REPO_ROOT is not set (the session replay needs real Hermes)"
     try:
         mod = importlib.import_module("agent.context_compressor")
@@ -60,6 +60,6 @@ def _skip_without_real_hermes(request):
         return
     problem = _real_hermes_problem()
     if problem:
-        if _hermes_root:
+        if os.environ.get('HERMES_REPO_ROOT', '').strip():
             pytest.fail(problem, pytrace=False)  # the caller asked for real Hermes and did not get it
         pytest.skip(problem)

@@ -101,9 +101,14 @@ def is_demoted_stub(content: str) -> bool:
     return len(content) < 1_000 and _DEMOTED_STUB_RE.match(content) is not None
 
 
+def without_skill_safety_rule(content: str) -> str:
+    """Hermes strips an attached skill safety rule here; the stub never attaches one, so there is nothing to strip."""
+    return content
+
+
 def _is_summary_stub_main(content: str) -> bool:
     """``_is_summary_stub`` as on current Hermes main (also true for lean demotion stubs)."""
-    return content.startswith("[") and " chars)" in content and len(content) < 400 or is_demoted_stub(content)
+    return (s := without_skill_safety_rule(content)).startswith("[") and " chars)" in s and len(s) < 400 or is_demoted_stub(s)
 def _tc_get(obj: Any, key: str, default: Any = "") -> Any:
     """Field of a dict- or object-shaped tool call (or its ``function`` sub-object)."""
     return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)

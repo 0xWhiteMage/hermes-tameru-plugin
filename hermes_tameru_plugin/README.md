@@ -1,69 +1,58 @@
-# Tameru (貯める)
+# Tameru (ためる)
 
-**Big tool outputs, kept small. Nothing lost.**
+**Smaller tool results. Clearer context changes.**
 
-Tameru is a context engine for [Hermes Agent](https://github.com/NousResearch/hermes-agent). When a long session
-fills up with old tool results (logs, test runs, file reads, search output), Hermes normally replaces each one
-with a one-line summary. Tameru keeps the lines that matter instead, always keeps every distinct error, and lets the
-agent fetch the exact original back whenever it needs it.
+Tameru is a deterministic, extractive context engine for
+[Hermes Agent](https://github.com/NousResearch/hermes-agent). When Hermes shortens
+an old tool result, Tameru tries to retain useful excerpts and diagnostic evidence
+instead of only a one-line summary.
 
-*Tameru* (貯める) is Japanese for "to store up": what leaves the context is kept aside, not thrown away.
+Run `/tameru` to see what changed and inspect an original when it remains
+available. A compatible Hermes Desktop installation can show the same activity
+through the panel bundled with this plugin. It does not require a second plugin.
+
+This plugin is the Hermes integration of Tameru (ためる). It carries the harness-agnostic
+[Tameru engine](https://github.com/0xWhiteMage/tameru-compaction-system) inside it, so you never install the engine
+separately; everything Hermes-specific below lives in this plugin.
 
 ## What you get
 
-- **Longer sessions before the context fills up.** A 451-line server log drops to 24 lines, 95% fewer characters.
-- **Errors stay in view.** At least one line of every distinct error (`ERROR`, `FAIL`, tracebacks...) is kept, so
-  the agent does not forget what broke.
-- **Nothing is lost.** Every shortened result carries a `ref=`. The agent can call `tameru_expand` to get the exact
-  original lines back, all of them or only the lines matching a search.
-- **No extra cost or risk.** No LLM calls and no network access are added; the trimming is plain, deterministic
-  Python. Hermes still decides when to trim and which results.
+- **Excerpts and diagnostic checks.** Tameru checks error-template retention when
+  choosing an extract or brief. Stronger pressure or retention-budget demotion
+  can remove older bodies; a savings percentage is not a guarantee of understanding.
+- **A view of context changes.** The activity table distinguishes retained,
+  changed and removed results and shows original availability.
+- **Read original.** `tameru_read_original` returns original payload lines from
+  the bounded per-agent store or a reachable session archive. `tameru_expand`
+  remains a compatible alias.
+- **Local extraction.** The extractive pass adds no LLM calls or external network
+  services. Hermes can still call an LLM to summarize, and prefix changes can
+  affect cost. The interface uses Hermes' existing connection.
 
-## How it works
+## Inspection and recovery
 
-1. A tool returns a large result, and the agent carries on working.
-2. When Hermes trims old tool results to make room, Tameru writes a short version in its place: the lines that
-   match the task, every distinct error, and a header with a `ref=`.
-3. If the agent later needs something that was cut, it calls `tameru_expand` with that ref and gets the original
-   text back, word for word.
+The UI's original viewer is read-only: it does not restore past model context.
+If the agent calls the recovery tool, the returned text can be used as a new
+result; this does not undo an earlier Hermes summary.
 
-## Example
+A `ref=` identifies an original, but does not guarantee it remains available.
+Storage limits, credential screening and archive availability can prevent
+recovery. Persistent Restore and Keep controls are not implemented.
 
-A `terminal` call returned 451 lines of a payment service log (49,431 characters). In context it becomes 24 lines
-(2,681 characters). The header and some of the kept lines:
+## The tool: `tameru_read_original`
 
-```text
-[terminal] {"command": "tail -n 450 /var/log/payments/gateway.log"} (49,431 chars) [tameru:brief kept 14/451 lines (2,474 of 48,930 chars) omitted: log 436 ref=e0d1a349035b54c9]
-2025-03-14T02:14:22.500Z FATAL worker.pool WorkerCrash: worker-4 exited with signal 9 (out of memory)
-⟪HERMES-CONTEXT-COMPRESSION: 1,968 of 48,930 chars omitted here by Hermes's context compressor.⟫
-2025-03-14T02:14:59.909Z ERROR http.server UpstreamBadGateway: 502 from inventory-svc POST /v2/reserve trace_id=d3b6ebf3
-⟪HERMES-CONTEXT-COMPRESSION: 1,213 of 48,930 chars omitted here by Hermes's context compressor.⟫
-2025-03-14T02:15:18.152Z ERROR payments.gateway PaymentGatewayTimeout: upstream stripe-proxy timed out after 2318ms (order_id=ORD-27624, attempt=3)
-```
-
-Each distinct error is shown once; the markers say how much was left out between kept lines. The log has six of
-these timeouts. To see every one, the agent calls `tameru_expand` with:
-
-```json
-{"ref": "e0d1a349035b54c9", "grep": "timeout"}
-```
-
-and gets the 6 matching lines back exactly as the tool printed them, with their line numbers.
-
-## The tool: `tameru_expand` (展開, *tenkai*: "unfold")
-
-Gives back the full, exact text of a tool result that Tameru shortened. The model calls it on its own when it needs
-something that was cut; you never have to call it yourself.
+The model can request original lines using the reference in a shortened result.
+The alias `tameru_expand` accepts the same arguments.
 
 | Argument | What it does |
 |---|---|
-| `ref` (required) | The code after `ref=` in the shortened result's header. |
-| `start_line`, `end_line` | Return only this range of lines (1-based, inclusive). |
-| `grep` | Return only the lines matching this case-insensitive pattern. |
-| `max_chars` | Cap on the answer (default 12,000, at most 50,000). A longer answer says where to continue. |
+| `ref` (required) | The value after `ref=` in the result header. |
+| `start_line`, `end_line` | Return this line range, 1-based and inclusive. |
+| `grep` | Return lines matching this case-insensitive pattern. |
+| `max_chars` | Response cap: 12,000 by default, at most 50,000; longer output includes a continuation hint. |
 
-The tool is available when Hermes offers context-engine tools: with no toolset restriction, or with one that includes
-`context_engine`.
+These tools are offered when Hermes permits context-engine tools: with no
+restricted toolset, or one including `context_engine`.
 
 ## Install
 
@@ -71,51 +60,60 @@ The tool is available when Hermes offers context-engine tools: with no toolset r
 hermes plugins install tameru
 ```
 
-Then select the engine in `~/.hermes/config.yaml` and restart Hermes:
+Select the engine in the active profile's `config.yaml` and restart Hermes:
 
 ```yaml
 context:
   engine: tameru
 ```
 
-To go back to Hermes' built-in behaviour, set `context.engine: compressor`, or set the plugin's `enabled: false`.
+Catalog installations use the version pinned by Hermes; a source checkout can
+be ahead of that pin. Desktop also uses its normal plugin-enable control.
 
-## Settings
+To have Desktop's Settings list the engine as "Tameru (ためる)", run `scripts/use_display_name.ps1` from the
+repository (it renames the plugin folder and `context.engine` together; `-Revert` undoes it).
 
-The defaults work as they are. Settings go under `plugins.entries.tameru.settings` in `config.yaml`, or in
-`TAMERU_HERMES_<SETTING>` environment variables. For a gateway serving many sessions in one process, consider
-`store_max_chars: 8000000` (the per-session store of originals defaults to 32 million characters). The full list is
-in the [repository README](https://github.com/0xWhiteMage/hermes-tameru-plugin#configuration).
+To return to Hermes' built-in behavior, set `context.engine: compressor` or
+set this plugin's `enabled: false`.
 
-## Good to know
+## Settings and boundaries
 
-- **It turns on early trimming.** Hermes ships its proactive tool-result pruning off. Unless you set
-  `compression.proactive_prune_tokens` yourself, Tameru turns it on with a trigger sized to the model's context
-  window. Your own `compression.*` values always win.
-- **It builds on a private part of Hermes.** It extends Hermes' `ContextCompressor` and checks at startup that the
-  parts it needs are there. If a Hermes update changes them, it steps aside and Hermes compacts as usual.
-- **It runs one small helper process.** A `tameru_expand` search pattern that could run slowly is checked in a
-  short-lived local Python process with a time limit.
-- **No data leaves your machine.** No network calls and no credentials. Results that look like they contain a
-  secret are never stored. A telemetry file is written only if you set `telemetry_log`.
-- **Keep the default `plugins.isolation: in_process`.** Under `host` isolation, refs work only until Hermes
-  restarts.
+Settings live under `plugins.entries.tameru.settings` in `config.yaml`.
+The original store defaults to 32 million characters per agent; gateways serving
+many sessions can lower `store_max_chars`. See the
+[full configuration reference](https://github.com/0xWhiteMage/hermes-tameru-plugin#configuration).
 
-## Measured
+- Tameru enables window-scaled proactive pruning only when the user has not set
+  `compression.proactive_prune_tokens`; explicit host settings retain priority.
+- It uses private Hermes compressor seams and checks compatibility at startup.
+  A missing seam causes it to defer to Hermes' built-in behavior.
+- A potentially slow recovery search uses a short-lived local Python child
+  process with a timeout.
+- Credential-like originals are not put into Tameru's store. This does not claim
+  that Hermes' own transcript or model requests contain no sensitive content.
+- Telemetry is off unless `telemetry_log` is configured.
+- Use the default `plugins.isolation: in_process`. Under `host` isolation,
+  archive-backed recovery after restart is limited.
 
-A replay of 60 scripted sessions (5 session types, 32K to 256K context windows) against Hermes with its default
-settings:
+## Measured on the 1.7.0 candidate (first released in 1.8.0)
 
-| | Hermes as shipped | With Tameru |
-|---|---|---|
-| Turns that failed because the context overflowed | 76 | **0** |
-| Key facts still in context at the end | 705 | **859** |
-| Full compactions (LLM summary calls) | 106 | **48** |
-| Cost per answered turn | | **7.9% lower** on average (lower in 34 sessions, higher in 8) |
+A replay compared 60 scripted sessions per arm at six context-window sizes
+against Hermes `a0a49926`:
 
-These are scripted sessions, so they measure what stays in context and what it costs, not task success with a live
-model. Recorded on 1.6.0 (2026-11-05); method and the 1.5.0 results:
-[REPORT-1.5.0](https://github.com/0xWhiteMage/hermes-tameru-plugin/blob/main/docs/REPORT-1.5.0.md).
+| Metric | Stock Hermes | With Tameru |
+|---|---:|---:|
+| Turns failing after overflow recovery | 76 | 0 |
+| Required snippets present in final requests | 705 / 1,044 | 859 / 1,044 |
+| Fake-summary calls | 106 | 48 |
+
+Mean paired simulated input-cost change was **−3.21%**; Tameru cost more in
+12 of 60 pairs. These are synthetic retention and character-priced cache checks,
+not live task-success or provider-billing measurements.
+[Full report and raw captures](https://github.com/0xWhiteMage/hermes-tameru-plugin/blob/main/docs/REPORT-1.7.0.md).
+
+Live Electron validation remains pending; the bundled panel's DOM behavior tests
+pass. Pressure-aware task preferences are a research proposal, not a shipped
+feature of this candidate.
 
 ## Links
 

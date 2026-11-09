@@ -1,47 +1,54 @@
 # hermes-tameru-plugin
 
-![Tameru (貯める): big tool outputs, kept small. Nothing lost.](docs/assets/hero.png)
+![Tameru (ためる): big tool outputs, kept small.](docs/assets/hero.png)
 
 [Tameru](https://github.com/0xWhiteMage/tameru-compaction-system) deterministic, extractive context compaction for
 [Hermes Agent](https://github.com/NousResearch/hermes-agent), as a standalone context-engine plugin (no Hermes source
-changes). **Version 1.6.0**, vendoring Tameru 1.6.0.
+changes). **Version 1.9.0**, vendoring Tameru 1.9.0 (1.7.0 was a release candidate that was never published; see the
+[changelog](CHANGELOG.md)).
 
-When Hermes trims an old tool result, it normally replaces it with a one-line summary. This plugin keeps the part
-that matters instead: a query-aware extract or a structural brief that always holds one line of every distinct
-error, and a `ref=` from which the exact original can be fetched back with the `tameru_expand` tool. Hermes still
-decides when to prune, which rows, and whether a pass is worth committing.
+When Hermes trims an old tool result, Tameru keeps a query-aware extract or a structural brief, with diagnostic
+retention checks. Use /tameru to inspect what changed and view an original when it remains in the bounded recovery
+store or the session archive. Viewing an original does not by itself restore it to the model's context; **Restore** and **Keep** (Desktop, or
+`/tameru restore|keep REF`) show the full original on the next requests and never edit saved history. Hermes still
+decides when to prune, which rows, and whether a pass commits.
 
-Measurements (latest report, recorded on 1.5.0): [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md). Changes by version: [CHANGELOG.md](CHANGELOG.md).
-Releasing: [docs/RELEASING.md](docs/RELEASING.md).
+Measurements: [docs/REPORT-1.7.0.md](docs/REPORT-1.7.0.md) (the replay of the 1.7.0 candidate; the extraction engine is
+unchanged apart from two later fixes). Validation of the 1.8.0 additions, with what was and was not run:
+[docs/RELEASE-1.8.0.md](docs/RELEASE-1.8.0.md). Changes by version: [CHANGELOG.md](CHANGELOG.md).
+Releasing: [docs/RELEASING.md](docs/RELEASING.md). When something looks wrong: [docs/RUNBOOKS.md](docs/RUNBOOKS.md).
+
+## Two repositories
+
+Tameru (ためる) is split on purpose. The **engine**
+([`tameru-compaction-system`](https://github.com/0xWhiteMage/tameru-compaction-system)) is harness-agnostic: it runs on
+any agent harness through its Python API, CLI or transcript adapter. **This repository is the Hermes plugin**: it
+vendors the engine unchanged and owns everything Hermes-specific, namely the adaptive policy and self-tuning, Restore
+and Keep, the per-turn note, the Desktop panel, the `/tameru` commands and the chat-surface security gates. Who owns
+what, where a change belongs, and how releases flow between them: [docs/REPOSITORIES.md](docs/REPOSITORIES.md).
 
 ## At a glance
 
-Replay (recorded on 1.6.0, 2026-11-05, Hermes `1298c8e`) of five session shapes (debugging, on-call incident,
-refactor, many small outputs, non-English output) at six window sizes (32K to 256K), two seeds each, against Hermes
-with its default settings (proactive prune off). The replay runs on a simulated clock and rejects any request larger
-than the window, as a provider does ([method](docs/REPORT-1.5.0.md#3-measuring-honestly-the-realistic-replay); one
-cell is `tests/eval/compare.py stock_defaults tameru_1_4_product --scenario oncall --window 32000 --seed 0`, where
-`tameru_1_4_product` is the current plugin with its defaults).
+A frozen replay of the 1.7.0 candidate compares 60 scripted sessions per arm against Hermes
+`a0a49926`: five session shapes, six windows from 32K to 256K, and two seeds.
+It uses real Hermes imports, a simulated clock and a lossy fake summarizer.
+[Protocol, raw captures and limitations](docs/REPORT-1.7.0.md).
 
-| Over 60 sessions | Hermes as shipped | With the plugin |
-|---|---|---|
-| Turns failed on a context overflow | 76 | **0** |
-| Key facts still in context at the end | 705 | **859** |
-| Error templates still in context | 510 | **940** |
-| Full compactions (LLM summary calls) | 106 | **48** |
-| Calls re-run to recover lost output | 228 | **146** |
-| Cost per answered turn (prompt-cache priced) | | **-7.9%** mean; lower in 34 sessions, higher in 8 |
+| Over 60 scripted sessions | Stock Hermes | With Tameru |
+|---|---:|---:|
+| Turns failing after context-overflow recovery | 76 | **0** |
+| Required snippets present in the final requests | 705 / 1,044 | **859 / 1,044** |
+| Error-template opportunities retained | 510 / 1,056 | **940 / 1,056** |
+| Fake-summary calls standing in for LLM summaries | 106 | **48** |
+| Potential re-fetch calls identified from missing facts | 228 | **146** |
 
-- **Small windows (32K-48K)** gain the most: no failed turns where Hermes fails up to 17 per session, and 3% to 46%
-  lower cost per answered turn on four of the five shapes (refactor only at 32K).
-- **Large windows (200K-256K)**: a session that Hermes would never compact is left exactly as Hermes leaves it; a
-  session that fills the window (on-call) costs 7% to 36% less, with every error template kept.
-- **Where it costs more:** sessions made of many small outputs (+1.3% to +9.3% at 32K-64K), because nothing in them
-  is large enough to compress while the compaction summary gains an artifact trail (which keeps twice the error
-  templates); and the refactor shape at 48K (+3% to +4%, with more facts kept and fewer compactions).
+Mean paired **simulated input-cost change was −3.21%**; Tameru cost more in
+12 of 60 pairs. This is total input cost per scripted session, not the older
+cost-per-answered-turn statistic. Some stock runs failed turns; the report also
+shows completed-pair results and scenario differences.
 
-These are scripted sessions with a fake summarizer: they measure what stays in context and what it costs, not task
-success with a live model.
+These checks measure literal retention and simulated prefix-cache cost. They do
+not measure live-agent task success, actual provider bills or executed re-fetches.
 
 ## What it does
 
@@ -95,10 +102,10 @@ prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 cha
   `[tameru:<rung> kept K/N lines (KC of TC chars) ... ref=<16 hex>]`. Hermes' envelope fields (`exit_code`,
   `error`, `total_lines`) stay on a compact meta line, so Hermes' own regexes still match; gaps use Hermes' elision
   marker.
-- **Recovery: `tameru_expand(ref, start_line, end_line, grep, max_chars)`** (展開, *tenkai*: "unfold"). Returns the exact original lines (a
+- **Read original: `tameru_read_original(ref, start_line, end_line, grep, max_chars)`** (`tameru_expand` is a compatible alias). Returns the exact original lines (a
   range, or the lines matching a regex) as JSON, capped at `max_chars` (default 12,000; at most 50,000) with a
   continuation hint. Originals come from a per-agent in-memory store and, when Hermes' session database is
-  reachable, from the compaction archive, so a ref also resolves after a restart, `--resume` or a session rotation.
+  reachable, from the compaction archive, so a ref can also resolve after a restart, `--resume` or a session rotation.
   Originals that look like they hold a credential are never stored. A miss points the model to `session_search`.
   Refs are hashes of the call ids and the original; they are not secret.
 - **Artifact trail** (`ledger`, on by default). Hermes' compaction summary gains an exact
@@ -112,10 +119,10 @@ prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 cha
 - **Lean tail.** In Hermes' `tail_mode: lean`, tail rows Hermes stubs get a Tameru header-only row that keeps the
   ref. Hermes' `<persisted-output>` spill rows keep their "Full output saved to" path.
 - **Exempt** (Hermes' handling applies): `skill_view`, `skills_list`, `skill_manage`, `clarify`, `todo`,
-  `todo_list`, `memory`, `session_search`, `tameru_expand`, `delegate_task`, `cronjob_manage`, `process_manage`,
+  `todo_list`, `memory`, `session_search`, `tameru_read_original`, `tameru_expand`, `delegate_task`, `cronjob_manage`, `process_manage`,
   refused or blocked results, anything in `exempt_tools`, and results shorter than `min_tool_chars`.
 
-Per result, on 13 agent outputs (logs up to 650 KB, `cat -n` source, diffs, `rg`, pytest, JSON, YAML, CJK) the plugin
+Historical v1.6.0 per-result measurements (not rerun for 1.7.0): per result, on 13 agent outputs (logs up to 650 KB, `cat -n` source, diffs, `rg`, pytest, JSON, YAML, CJK) the plugin
 saves 86.6% of characters and keeps 14/14 answer strings and 22/22 error templates (`tests/eval/per_result.py`).
 
 ## Requirements
@@ -156,11 +163,28 @@ context:
 
 `get_status()["tameru"]` confirms that the Hermes seams were found (see [Status](#status-and-isolation)).
 
+**Showing "Tameru (ためる)" in Desktop's Settings.** Desktop's Settings > Context Engine labels each engine from the
+saved `context.engine` value, and Hermes finds the engine by a plugin folder of exactly that name, so the label only
+changes if the folder and the value change together. `scripts/use_display_name.ps1` does exactly that (plan first,
+`-Apply` to do it, `-Revert` to undo):
+
+```powershell
+pwsh scripts/use_display_name.ps1 -Apply     # plugins	ameru -> plugins	ameru_(ためる), context.engine to match
+```
+
+The plugin's own id stays `tameru` (it comes from `plugin.yaml`), so `plugins.enabled`, `plugins.entries.tameru` and the
+Desktop panel are untouched, the old folder is kept in `plugin-backups/` (never inside `plugins/` or `desktop-plugins/`: Hermes and Desktop load every folder
+there, hidden or not, and two copies clash on the id), and `config.yaml` is copied first.
+Restart the gateway and reload Desktop afterwards. Without it everything works as before under the plain name `tameru`,
+which is also what `hermes plugins install tameru` creates.
+
 ## Configuration
 
-Every setting is read, highest priority first, from the environment variable `TAMERU_HERMES_<FIELD>` (the field name
-upper-cased, e.g. `TAMERU_HERMES_MAX_EXTRACT_CHARS`), `ctx.get_config(<field>)` when the host offers it, then
+Every setting is read, highest priority first, from `TAMERU_HERMES_<FIELD>` (the field name upper-cased,
+e.g. `TAMERU_HERMES_MAX_EXTRACT_CHARS`), `ctx.get_config(<field>)` when the host offers it, then
 `plugins.entries.tameru.settings` in the Hermes config (`plugins.entries.tameru.config` is read as a fallback).
+The legacy process-environment overrides apply only to the process's launch profile. Other profiles served by
+that process use their own YAML settings. The Python API can still accept an explicit `env` mapping.
 Booleans accept `1/0/true/false/yes/no/on/off`; lists take a YAML list or, in an environment variable, a
 comma-separated string. A value that does not parse is ignored with a warning (listed in
 `get_status()["tameru"]["warnings"]`). Settings are read when the engine is created: restart Hermes after a change.
@@ -222,7 +246,7 @@ plugins:
 | `expand_grep_timeout` | `2.0` | Seconds a grep with a repeat or alternation may run. It runs in a stdlib-only child process (`python -I -S`) that is killed after this; plain patterns run in-process. |
 | `expand_grep_line_chars` | `20000` | Characters of each line a grep searches (longer lines: their head only, reported as `lines_capped`). |
 | `store_max_entries` | `512` | Originals kept in memory per agent (LRU). |
-| `store_max_chars` | `32000000` | Characters of originals kept in memory per agent (LRU). |
+| `store_max_chars` | `32000000` | Combined character budget for original text, tool names and compact envelope metadata (LRU). |
 | `ledger` | `true` | Add the artifact trail to Hermes' compaction summary. |
 | `telemetry_log` | `""` | Path of a JSONL file for render events; empty means off. |
 
@@ -262,12 +286,12 @@ isolation Hermes hands the plugin a placeholder instead of the session database:
 
 - Each agent (including subagents, via `clone_for_agent`) has its own store, memo and telemetry; one agent cannot
   read another's originals.
-- Memory per live agent is bounded by `store_max_chars` (32M characters) plus a 4M-character memo. A typical 30-turn
-  session stores 0.1M to 0.25M. For a gateway with many concurrent sessions, `store_max_chars: 8000000` is a
-  reasonable cap.
+- The recovery store applies `store_max_chars` to original text, tool names and compact metadata, and also has an
+  entry-count cap. The extract memo has a separate 4M-character cap. Python object overhead is additional.
 - Telemetry holds counts, tool names, rungs and ref hashes only: no message text and no session id.
-- The plugin makes no network calls. The only process it starts is the short-lived grep child, and the only file
-  it writes is `telemetry_log`, when set.
+- Tameru's Python extraction and recovery code adds no external network calls. Its only child process is the
+  short-lived grep worker, and its optional file output is `telemetry_log`. Desktop inspection uses Hermes'
+  existing connection.
 
 ## Telemetry
 
@@ -304,10 +328,10 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
   until the model calls `tameru_expand` or re-runs the tool. A row whose original was never stored (evicted,
   credential-like, or a restart without a reachable archive) cannot be expanded.
 - A proactive prune cannot know whether a session will ever reach compaction. A session that peaks just past the
-  trigger is pruned and can lose a fact Hermes would have kept; `tameru_expand` recovers it.
+  trigger is pruned and can lose a fact Hermes would have kept; the recovery tool can return it only while an original remains available.
 - Output whose extract cannot shrink under `max_extract_chars` (big logs, very large `grep` output) ends as a brief:
   every error template stays, but a specific matching line can be cut.
-- Savings per result are lower than the engine alone on the same text (68.6% against 82.3% mean on the engine's
+- Historical v1.6.0 measurements: savings per result are lower than the engine alone on the same text (68.6% against 82.3% mean on the engine's
   benchmark corpus, 16/16 gold kept by both): Hermes' elision marker is about 100 characters per gap and each row
   carries a header. Short documents with many gaps suffer most (`travis_yaml` 23.2% against 76.8%).
 - `tameru_expand` is offered only when Hermes injects context-engine tools: with no toolset restriction, or one that
@@ -317,12 +341,34 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
 
 ## Compatibility
 
-Tested against Hermes `a0a4992` (CI pin), `1298c8e` and `ccc6956350` (`main`, 2026-10-18): full suite on Python 3.14
-(re-run on 1.6.0, 2026-11-05), stub suite on Python 3.11 to 3.14. Hermes `main` has moved since: at `b63eb8b`
-(2026-11-05) 33 tests fail, mostly the replay baselines and a seam parity check, plus one `tameru_expand`
-session-archive test. A nightly job runs the suite against Hermes `main` and may fail without blocking.
-Hermes' catalogue validator passes all 14 checks with a "safe" scan; its one informational note is the private
-`ContextCompressor` import.
+The 1.7.0 candidate was exercised against real Hermes `a0a49926` on Windows,
+with stub checks and a clean Python 3.13 import-isolation check. The
+[validation report](docs/REPORT-1.7.0.md#integration-and-packaging-checks)
+distinguishes full assembly runs from targeted post-fix coverage. The plugin
+validator passed 15 checks with zero warnings at that revision.
+
+1.8.0 was also exercised live in Hermes Desktop on Windows (local backend), with Hermes' own plugin validator
+and the real-Hermes seam checks; [docs/RELEASE-1.8.0.md](docs/RELEASE-1.8.0.md) lists exactly what ran and what did
+not. The bundled panel also has DOM behavior tests. Hermes changes independently, and the plugin relies on
+private compressor seams, so these checks are not a promise of compatibility
+with every later Hermes revision. Nightly CI also checks Hermes `main`.
+
+## What Tameru stores
+
+| What | Where | Size | How to remove it |
+|---|---|---|---|
+| Originals of shortened outputs (never anything that looks like a credential) | the engine's memory (512 entries, 32M characters), and Hermes' own session archive | bounded | ends with the process; Hermes' session delete for the archive |
+| Per-chat self-tuning, pause and lean mode | the chat's session metadata, `tameru_tuner_v1` | a few numbers | goes with the chat; a new chat starts clean |
+| Per-chat host settings (summary threshold and protected tail, adapted within bounds) | the chat's session metadata, `tameru_host_v1` | two numbers | `adaptive_host: off`; goes with the chat. Your `config.yaml` is never written |
+| Pinned instructions (your own lines) | the chat's session metadata, `tameru_pins_v1` | up to 5 lines, 1,500 characters | `/tameru unpin N`; goes with the chat |
+| Keeps (pinned outputs) | the chat's session metadata, `tameru_edits_v1` | up to 64 short references | `/tameru unkeep REF`; goes with the chat |
+| Restores | engine memory only | up to 64, five replies each | `/tameru cancel`, or they expire |
+| What self-tuning learned across chats | `$HERMES_HOME/tameru/learned.json` | five numbers, moving at most 0.12 a day | delete the file, or `autotune: off` |
+| Telemetry log (only if `telemetry_log` is set) | under `$HERMES_HOME` or the temp folder | rotates at 5 MB, keeping one `.1` file | delete the file; it holds counts, tool names, rungs and reference hashes, never text |
+| Desktop hint flag | the browser's `localStorage`, one flag | one flag | clear site data |
+
+Tameru makes no network calls. The per-turn note and Restore only change what goes in the request to the model you
+already use.
 
 ## Uninstall
 
@@ -350,8 +396,9 @@ Then update `VENDORED_FROM`, run both test modes and review the replay baselines
 
 ## More
 
-- [docs/REPORT-1.5.0.md](docs/REPORT-1.5.0.md): measurements, red-team findings and trade-offs, recorded on 1.5.0 (the latest report; not re-run for 1.6.0).
-- [docs/RELEASING.md](docs/RELEASING.md): engine, plugin and catalogue release steps.
+- [docs/REPORT-1.7.0.md](docs/REPORT-1.7.0.md): current candidate validation and frozen replay; [1.5.0 report](docs/REPORT-1.5.0.md) for historical measurements.
+- [docs/REPOSITORIES.md](docs/REPOSITORIES.md): what the engine repository and this plugin repository each own.
+- [docs/RELEASING.md](docs/RELEASING.md): engine, plugin and catalogue release steps. [docs/RELEASE-1.8.0.md](docs/RELEASE-1.8.0.md): the 1.8.0 validation record. [docs/RUNBOOKS.md](docs/RUNBOOKS.md): incidents and rollback.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, real-Hermes setup, replay harness, CI.
 - [docs/compaction-research.md](docs/compaction-research.md): survey of compaction systems and the gap analysis.
 - [CHANGELOG.md](CHANGELOG.md), and earlier reports: [1.4.1](docs/REPORT-1.4.1.md), [1.4.0](docs/REPORT-1.4.0.md).
@@ -359,3 +406,79 @@ Then update `VENDORED_FROM`, run both test modes and review the replay baselines
 ## License
 
 MIT, same as upstream Tameru. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+### Compaction policy mode
+
+Existing Tameru configuration stays on **Legacy** unless an explicit `policy_mode` or a new
+preference/timing/recent control selects adaptive. Enable this chat with
+`/tameru policy mode=adaptive`. To persist the adaptive default, set
+`plugins.entries.tameru.settings.policy_mode: adaptive`. Input/output budget settings alone do not
+switch the retention policy. Direct unconfigured settings default to adaptive.
+
+### Self-tuning and compression progress (unreleased)
+
+In adaptive mode Tameru tunes itself while a chat runs (`autotune`, on by default; `TAMERU_AUTOTUNE=off`
+returns to the fixed table). It starts at the old "balanced" numbers and moves them in small, bounded steps
+from four signals: Hermes summarizing before Tameru acted, repeated checks that found too little to reclaim,
+the model re-reading a shortened output, and context refilling quickly after cleanup. Calm stretches relax it
+back. The only user choices are a bias (Save space, Balanced, Preserve detail) and Pause; both persist with the chat.
+
+**Adaptive is the default.** Unless `policy_mode` is set explicitly (`legacy` and `fixed` stay available by choice),
+Tameru runs the adaptive, self-tuning policy, including when it is selected with `context.engine: tameru` alone.
+
+**It learns across chats.** Each chat's adjustments also move a small profile-wide memory
+(`$HERMES_HOME/tameru/learned.json`, five numbers, a moving average); calm stretches ease it back toward neutral. A new
+chat starts from 60% of what that memory holds, and its own saved state, if it has one, wins. This is online learning
+with small, bounded, explainable steps, not a trained model: it adapts to how your sessions behave, and it can be
+inspected, reset (delete the file) or switched off (`autotune: off`).
+
+`/tameru` shows compression progress. `/tameru changes` lists shortened outputs, `/tameru show REF` (or `view`) opens an
+original, `/tameru ask REF [START-END | term]` gives the exact instruction that makes the agent re-read one, `/tameru bias save|balanced|detail` and `/tameru pause|resume` set the two choices. The older
+`/tameru policy key=value` form still works.
+
+- **Desktop:** one condensed panel above the composer, about 30px when closed and a fixed 196px when open (so it never
+  jumps). The header reads `Tameru (ためる)` and holds the lean mode (a borderless dropdown), working memory as a thin
+  gauge with "N% full" (ticks where Tameru starts and where Hermes compacts), "Saved ~N%", a pause button and a collapse
+  button. It stays silent while everything is fine and only speaks for a state worth knowing (paused, compacting,
+  starts with your next message). Every control explains itself in a small hover card, also shown on keyboard focus.
+  Below the header, when the panel is wide enough, the list sits on the left and the viewer on the right; when it is
+  narrow they swap in one pane. The list shows each Tameru pass, each Hermes summary and each output restored after a
+  restart: time, source, lines kept, reduction, exact tokens reduced, status. Click a row's arrow for its method, lean
+  mode, input and output tokens, duration and whether the original is available. The eye button opens **Left Out**:
+  kept lines show normally and each removed stretch folds into one bar ("117 hidden · 40–156") that expands with a
+  highlighted edge. Click line numbers (Shift for a range) or "All" on a bar, then **Add** (small, trusted text) or
+  **Re-Read** (large or outside text, or when you would rather the AI fetch it). Both only put text in your message
+  box: nothing is sent until you send it, and earlier messages are not edited. Keys inside the viewer: R re-read,
+  A select all left-out lines, `[` and `]` turn pages, Enter adds, Esc goes back.
+- **Keep and Restore:** on each row, ↺ **Restore** shows the AI the full output for its next few replies and 📌 **Keep**
+  does the same until you unpin it. Both wait for your next message, work on what is sent to the model (saved history
+  is never edited), and are refused for web content and for anything that held a credential. The Status column reads
+  Pending, then Applied or Kept, or Failed with the reason in the hover card. The same verbs exist as
+  `/tameru restore|keep|unkeep REF` and `/tameru cancel` on your own clients, and are off in shared chats.
+- **Pinned instructions:** `/tameru pin TEXT` keeps a line you wrote (up to 5, 300 characters each, 1,500 together)
+  word for word in every Hermes summary of this chat, under `## Pinned by you (Tameru, verbatim)`, so a rule such as
+  "never touch production config" cannot be softened by the summarizer. `/tameru pins` lists them and
+  `/tameru unpin N` removes one. Nothing is ever pinned for you, text that looks like a credential is refused, the
+  verbs work on your own clients only, and `pins: off` / `TAMERU_PINS=off` switches it off. In Desktop the 📌 button in the panel header opens the same list. Saved per chat as
+  `tameru_pins_v1`.
+- **What the model is told:** each turn, only when something changed, Tameru adds a short `<tameru_note>` to your message
+  for the model: how many tool results are shortened and which files it wrote or patched (base names only). It says
+  it is data, not instructions, never repeats itself, is capped per session and can be switched off with
+  `manifest: off`.
+- **CLI, TUI and messaging:** Hermes lets plugins show text only. Hermes's compaction status line gains a short
+  "Tameru is ..." clause, and a chat line follows each Tameru commit. Run `/tameru` for the full view.
+- After a restart the table is rebuilt from rows Tameru already shortened, only where an archived original proves
+  the row for that exact message.
+
+Validated live on Windows: in Hermes Desktop (card, analysis panel, lean mode, a self-adjustment, a real commit,
+View original, and the table rebuilt after a gateway restart) and in the classic CLI and the Ink TUI (`/tameru` and
+`/tameru changes`, including after a restart). No model turn ran in the CLI or TUI (the provider was rate-limited), so
+the compaction status line and the post-commit chat line were checked on Hermes's real compressor and in unit tests only.
+
+### Getting back what was left out
+
+Hermes does not let a plugin rewrite saved history, so recovery adds information instead of editing the past. The
+agent is also told, in a short note frozen into each new session, that lines which are not shown are not absent from
+the original, and to call `tameru_read_original` with a grep or line range before relying on a detail. Originals that
+looked like they held credentials are never stored, so a miss there is expected. Pinning an output so future
+compactions keep it is planned, not built yet.

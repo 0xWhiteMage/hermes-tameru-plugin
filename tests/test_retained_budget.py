@@ -42,15 +42,18 @@ def _all_bodies() -> TameruSettings:
 
 def test_rows_beyond_the_budget_step_down_newest_first():
     messages, idxs = _session()
-    committed, _ = prune_pass(make_engine(_all_bodies()), messages)
+    engine = make_engine(_all_bodies())
+    committed, _ = prune_pass(engine, messages)
     rungs = _rungs(committed, idxs)
     assert set(rungs) <= {"brief", "extract"}
     newest_two = sum(len(committed[i]["content"]) for i in idxs[-2:])
 
-    engine = make_engine(TameruSettings(small_window_threshold_tokens=0, retained_extract_budget_chars=newest_two + 50, retained_extract_budget_ratio=0))
+    engine._settings = TameruSettings(small_window_threshold_tokens=0, retained_extract_budget_chars=newest_two + 50, retained_extract_budget_ratio=0)
     stepped, n = prune_pass(engine, committed)
     assert n == ROWS - 2
-    assert _rungs(stepped, idxs) == ["header"] * (ROWS - 2) + rungs[-2:]
+    stepped_rungs = _rungs(stepped, idxs)
+    assert all(rung in ("header", "errors") for rung in stepped_rungs[:ROWS - 2])
+    assert stepped_rungs[ROWS - 2:] == rungs[-2:]
     assert all(stepped[i] is committed[i] for i in idxs[-2:]) or all(
         stepped[i]["content"] == committed[i]["content"] for i in idxs[-2:]
     )
@@ -75,8 +78,9 @@ def test_one_pass_keeps_its_bodies_within_the_budget():
 
 def test_a_budget_that_fits_everything_changes_nothing():
     messages, idxs = _session()
-    committed, _ = prune_pass(make_engine(_all_bodies()), messages)
-    engine = make_engine(TameruSettings(small_window_threshold_tokens=0, retained_extract_budget_chars=10**6, retained_extract_budget_ratio=0))
+    engine = make_engine(_all_bodies())
+    committed, _ = prune_pass(engine, messages)
+    engine._settings = TameruSettings(small_window_threshold_tokens=0, retained_extract_budget_chars=10**6, retained_extract_budget_ratio=0)
     again, n = prune_pass(engine, committed)
     assert n == 0 and again == committed
 
@@ -95,15 +99,16 @@ def test_new_rows_stop_taking_bodies_when_the_budget_is_spent():
 def test_the_budget_counts_rows_outside_this_pass_too():
     """Rendered rows in the protected tail still use up budget, so older rows give way."""
     messages, idxs = _session()
-    committed, _ = prune_pass(make_engine(_all_bodies()), messages)
+    engine = make_engine(_all_bodies())
+    committed, _ = prune_pass(engine, messages)
     chat = Chat()
     tail_idx = chat.tool("terminal", {"command": "tail -n 449 app.log"}, server_log(9))
     tail = chat.messages[2:]
     session = [*committed, *tail]
     one = len(committed[idxs[0]]["content"])
-    engine = make_engine(TameruSettings(small_window_threshold_tokens=0, retained_extract_budget_chars=one + 50, retained_extract_budget_ratio=0))
+    engine._settings = TameruSettings(small_window_threshold_tokens=0, retained_extract_budget_chars=one + 50, retained_extract_budget_ratio=0)
     out, _ = prune_pass(engine, session)
-    assert tail_idx and _rungs(out, idxs).count("header") >= ROWS - 1
+    assert tail_idx and sum(rung in ("header", "errors") for rung in _rungs(out, idxs)) >= ROWS - 1
 
 
 @pytest.mark.real_hermes

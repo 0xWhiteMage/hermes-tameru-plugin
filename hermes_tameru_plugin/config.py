@@ -3,6 +3,8 @@
 ``load_settings`` resolves each field from, highest first: the ``TAMERU_HERMES_<FIELD>`` environment
 variable, ``ctx.get_config`` (when the host context offers it), ``plugins.entries.tameru.settings``
 and the legacy ``plugins.entries.tameru.config`` of the merged Hermes config, then the default.
+An implicit ``os.environ`` read applies only to the process's launch profile; other profiles served
+by the same process use their own YAML settings.
 A value that does not parse is reported in the warnings and falls through to the next layer.
 
 Hermes hands a plugin engine none of the user's ``compression.*`` section (G11), so
@@ -22,8 +24,12 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, NamedTuple
 
+from .policy import ACTIVATIONS, POLICY_MODES, PREFERENCES, RECENT_PROTECTIONS
+
 PLUGIN_ID = "tameru"
 ENV_PREFIX = "TAMERU_HERMES_"
+SHORT_ENV_PREFIX = "TAMERU_"
+_SHORT_ENV_SWITCHES = frozenset({"edits", "manifest", "autotune", "adaptive_host", "pins"})   # also settable without HERMES_; the long name wins
 RISK_LEVELS = ("low", "medium", "high")
 PRUNE_TAILS = ("tokens", "count")
 
@@ -36,6 +42,17 @@ class TameruSettings:
     """Every plugin knob; the defaults are what runs when nothing is configured."""
 
     enabled: bool = True                       # kill switch -> pure stock ContextCompressor behaviour
+    policy_mode: str = "adaptive"             # adaptive | fixed (matched comparison) | legacy
+    autotune: bool = True                     # adaptive mode retunes itself from live session signals
+    adaptive_host: bool = True                # adapt Hermes' summary threshold and protected tail per chat, within bounds (TAMERU_ADAPTIVE_HOST=off)
+    pins: bool = True                         # keep the lines you pin word for word in every Hermes summary (TAMERU_PINS=off)
+    edits: bool = True                        # Keep and Restore: put a shortened output back in front of the model (TAMERU_EDITS=off turns it off)
+    manifest: bool = True                     # tell the model, once per change, how many results are shortened (TAMERU_MANIFEST=0 turns it off)
+    preference: str = "balanced"              # save_space | balanced | preserve_detail
+    activation: str = "auto"                  # auto | earlier | standard | later
+    recent_protection: str = "auto"           # auto | short | standard | long
+    input_budget_tokens: int | None = None    # already usable input, not a combined window
+    output_reserve_tokens: int | None = None  # None = unknown; explicit zero is meaningful
     min_tool_chars: int = 400                  # shorter results take the parent path
     max_extract_chars: int = 6000              # incl. header/meta/marker bytes
     brief_chars: int = 1200                    # smallest brief row
@@ -122,6 +139,24 @@ def _min_int(minimum: int) -> Callable[[Any], int]:
     return parse
 
 
+def _optional_int(minimum: int) -> Callable[[Any], int | None]:
+    def parse(raw: Any) -> int | None:
+        if raw is None or (isinstance(raw, str) and raw.strip().lower() in {"", "auto", "none", "null"}):
+            return None
+        return _min_int(minimum)(raw)
+    return parse
+
+
+def _choice(choices: tuple[str, ...]) -> Callable[[Any], str]:
+    def parse(raw: Any) -> str:
+        if isinstance(raw, str):
+            value = raw.strip().lower().replace("-", "_")
+            if value in choices:
+                return value
+        raise ValueError(f"expected one of {', '.join(choices)}")
+    return parse
+
+
 def _parse_savings(raw: Any) -> float:
     value = _parse_float(raw)
     if not 0.0 <= value < 1.0:
@@ -185,6 +220,17 @@ def _parse_patterns(raw: Any) -> tuple[str, ...]:
 
 _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "enabled": _parse_bool,
+    "policy_mode": _choice(POLICY_MODES),
+    "autotune": _parse_bool,
+    "manifest": _parse_bool,
+    "edits": _parse_bool,
+    "pins": _parse_bool,
+    "adaptive_host": _parse_bool,
+    "preference": _choice(PREFERENCES),
+    "activation": _choice(ACTIVATIONS),
+    "recent_protection": _choice(RECENT_PROTECTIONS),
+    "input_budget_tokens": _optional_int(1),
+    "output_reserve_tokens": _optional_int(0),
     "min_tool_chars": _min_int(0),
     "max_extract_chars": _min_int(1),
     "brief_chars": _min_int(0),
@@ -304,6 +350,15 @@ def _ctx_values(ctx: Any, warnings: list[str]) -> dict[str, Any]:
     return values
 
 
+def _default_policy_mode(merged, ctx_values, env, chosen):
+    """Adaptive unless ``policy_mode`` is set explicitly (``legacy`` and ``fixed`` stay available by choice).
+
+    Earlier releases kept ``legacy`` for any existing Tameru configuration, which meant that selecting the engine
+    with ``context.engine: tameru`` never reached the self-tuning policy. Adaptive is now the default everywhere.
+    """
+    return 'adaptive'
+
+
 def _load_settings(ctx: Any, env: Mapping[str, str], warnings: list[str]) -> TameruSettings:
     merged = read_hermes_config()[0]
     ctx_values = _ctx_values(ctx, warnings) if ctx is not None else {}
@@ -312,6 +367,10 @@ def _load_settings(ctx: Any, env: Mapping[str, str], warnings: list[str]) -> Tam
     for name, parse in _SETTING_PARSERS.items():
         env_name = ENV_PREFIX + name.upper()
         candidates: list[tuple[str, Any]] = [(env_name, env[env_name])] if env_name in env else []
+        if not candidates and name in _SHORT_ENV_SWITCHES:
+            short = SHORT_ENV_PREFIX + name.upper()          # the documented emergency switches: TAMERU_EDITS=off ...
+            if short in env:
+                candidates.append((short, env[short]))
         if name in ctx_values:
             candidates.append((f"ctx.get_config({name!r})", ctx_values[name]))
         candidates += [
@@ -324,6 +383,8 @@ def _load_settings(ctx: Any, env: Mapping[str, str], warnings: list[str]) -> Tam
                 warnings.append(f"{label}={_short(raw)}: {exc}; ignored")
             else:
                 break
+    if 'policy_mode' not in chosen:
+        chosen['policy_mode'] = _default_policy_mode(merged, ctx_values, env, chosen)
     return TameruSettings(**chosen)
 
 
@@ -332,11 +393,24 @@ def load_settings(
 ) -> tuple[TameruSettings, list[str]]:
     """Resolve the plugin settings and the warnings about what was ignored; never raises.
 
-    ``env`` defaults to ``os.environ``; ``ctx`` is the plugin context handed to ``register`` (optional).
+    ``env`` defaults to the launch profile's ``TAMERU_HERMES_*`` process environment; ``ctx`` is the
+    plugin context handed to ``register`` (optional).
     """
     warnings: list[str] = []
     try:
-        return _load_settings(ctx, os.environ if env is None else env, warnings), warnings
+        if env is None:
+            env = {key: value for key, value in os.environ.items()
+                   if key.startswith(ENV_PREFIX)
+                   or key in {SHORT_ENV_PREFIX + n.upper() for n in _SHORT_ENV_SWITCHES}}
+            if env:
+                try:
+                    from hermes_constants import get_routing_process_hermes_home, hermes_home_key
+                except ImportError:
+                    pass  # Older single-profile hosts lack the scoped-home helpers.
+                else:
+                    if hermes_home_key() != hermes_home_key(get_routing_process_hermes_home()):
+                        env = {}
+        return _load_settings(ctx, env, warnings), warnings
     except Exception as exc:
         warnings.append(f"settings could not be loaded ({exc!r}); using defaults")
         return TameruSettings(), warnings

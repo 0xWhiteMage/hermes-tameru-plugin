@@ -23,6 +23,10 @@ from replay import error_fingerprints
 from scenario import CATEGORIES
 
 EXTRA = tuple(n for n in registry.scenario_names() if n != registry.DEFAULT_SCENARIO)
+# The development recipes carry the full probe contract (every gold category twice, user/assistant/tool sources,
+# facts over >=8 turns, >=6 error fingerprints). Held-out recipes are adversarial additions; the general invariants
+# (seed-only builds, JSON-shaped results, planted-needle purity) still apply to them.
+DEV = ("oncall", "refactor", "smallrows", "i18n")
 HERE = Path(__file__).resolve().parent
 
 
@@ -41,7 +45,9 @@ def results(sc):
 
 # ---- registry -------------------------------------------------------------------------------------
 def test_the_registry_has_the_default_and_the_four_shapes():
-    assert registry.scenario_names() == ("default", "oncall", "refactor", "smallrows", "i18n")
+    dev = ("default", "oncall", "refactor", "smallrows", "i18n")
+    holdout = ("longform", "mixedlang", "diagnostics", "rereads", "bursty", "dense")
+    assert registry.scenario_names() == dev + holdout
     assert registry.get_spec("default").build is original.build_scenario
     assert registry.get_spec("default").turns == original.N_TURNS == 30
 
@@ -68,7 +74,7 @@ def test_natural_length_and_the_final_question_turn(name):
 
 
 def test_natural_lengths():
-    assert [registry.get_spec(n).turns for n in EXTRA] == [40, 35, 40, 32]
+    assert [registry.get_spec(n).turns for n in EXTRA] == [40, 35, 40, 32, 26, 26, 24, 24, 26, 24]
 
 
 @pytest.mark.parametrize("name", EXTRA)
@@ -92,7 +98,7 @@ def test_shorter_builds_drop_the_facts_and_errors_after_the_cut(name):
         build(name, 0, registry.get_spec(name).turns + 1)
 
 
-@pytest.mark.parametrize("name", EXTRA)
+@pytest.mark.parametrize("name", DEV)
 def test_every_probe_category_has_gold_and_needs(name):
     sc = build(name)
     by_cat = collections.Counter(g.category for g in sc.gold)
@@ -107,7 +113,7 @@ def test_every_probe_category_has_gold_and_needs(name):
     assert len({g.turn for g in sc.gold}) >= 8, "facts are spread over the session"
 
 
-@pytest.mark.parametrize("name", EXTRA)
+@pytest.mark.parametrize("name", DEV)
 def test_error_lines_make_several_fingerprints_and_each_is_shown_to_the_model(name):
     sc = build(name)
     fps = error_fingerprints("\n".join(sc.error_lines))

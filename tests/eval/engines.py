@@ -90,3 +90,26 @@ def tameru_1_4_product() -> Any:
     from hermes_tameru_plugin.engine import TameruContextEngine
 
     return TameruContextEngine(quiet_mode=True)
+
+
+def _host_tuning_arm(enabled: bool) -> Any:
+    """The shipped plugin with the per-turn host-settings step run by the replay, switched on or off.
+
+    The two arms differ only in ``adaptive_host``; everything else is the plugin as shipped, so a difference in the
+    results is what moving Hermes' summary threshold and protected tail did."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    engine = TameruContextEngine(settings=TameruSettings(adaptive_host=enabled), quiet_mode=True)
+    engine.replay_runs_host_tuning = True
+    return engine
+
+
+@register("tameru_1_9_host_off")
+def tameru_1_9_host_off() -> Any:
+    return _host_tuning_arm(False)
+
+
+@register("tameru_1_9_host_on")
+def tameru_1_9_host_on() -> Any:
+    return _host_tuning_arm(True)

@@ -13,11 +13,11 @@ import types
 from pathlib import Path
 
 import pytest
-from engine_support import Chat, pytest_failure, server_log
+from engine_support import Chat, fake_summary_llm, pytest_failure, server_log, use_archive_commit
 from fixtures import hermes_payloads as hp
 
-from hermes_tameru_plugin.recovery import EXPAND_SCHEMA, EXPAND_TOOL_NAME
-from hermes_tameru_plugin.render import is_tameru_rendered, parse_header
+from hermes_tameru_plugin.recovery import EXPAND_SCHEMA, EXPAND_TOOL_NAME, READ_ORIGINAL_TOOL_NAME
+from hermes_tameru_plugin.render import is_tameru_rendered, make_ref, parse_header
 
 pytestmark = pytest.mark.real_hermes
 
@@ -31,6 +31,15 @@ compression:
   proactive_prune_min_result_chars: 200
   proactive_prune_min_reclaim_tokens: 0
 """
+
+
+def config(**settings) -> str:
+    """The base config plus ``plugins.entries.tameru.settings``. These tests drive the fixed prune gates above, so they
+    opt in to the legacy policy; adaptive (the default everywhere) has its own trigger."""
+    merged = {"policy_mode": "legacy", **settings}
+    lines = "".join(
+        f"        {name}: {str(value).lower() if isinstance(value, bool) else value}\n" for name, value in merged.items())
+    return CONFIG + "plugins:\n  entries:\n    tameru:\n      settings:\n" + lines
 
 
 # ---- helpers ------------------------------------------------------------------------------------
@@ -53,7 +62,7 @@ def build_agent(session_db=None, *, enabled_toolsets=None, tools=None):
 def home(hermes_home):
     (hermes_home / "plugins").mkdir()
     shutil.copytree(PLUGIN_DIR, hermes_home / "plugins" / "tameru", ignore=shutil.ignore_patterns("__pycache__"))
-    (hermes_home / "config.yaml").write_text(CONFIG, encoding="utf-8")
+    (hermes_home / "config.yaml").write_text(config(), encoding="utf-8")
     try:
         yield hermes_home
     finally:
@@ -102,10 +111,11 @@ def test_the_schema_is_injected_through_hermes_inject_context_engine_tools(home)
     agent = build_agent()
     agent_init._inject_context_engine_tools(agent)
     names = [t["function"]["name"] for t in agent.tools]
-    assert names == [EXPAND_TOOL_NAME]
-    schema = agent.tools[0]["function"]
+    assert names == [READ_ORIGINAL_TOOL_NAME, EXPAND_TOOL_NAME]
+    schema = agent.tools[1]["function"]
     assert schema["parameters"] == EXPAND_SCHEMA["parameters"] and "ref" in schema["parameters"]["required"]
-    assert EXPAND_TOOL_NAME in agent.valid_tool_names and agent._context_engine_tool_names == {EXPAND_TOOL_NAME}
+    assert EXPAND_TOOL_NAME in agent.valid_tool_names
+    assert agent._context_engine_tool_names == {READ_ORIGINAL_TOOL_NAME, EXPAND_TOOL_NAME}
     assert agent.context_compressor._expand_injected is True
     assert agent.context_compressor.get_status()["tameru"]["expand_injected"] is True
 
@@ -113,7 +123,8 @@ def test_the_schema_is_injected_through_hermes_inject_context_engine_tools(home)
 def test_injection_is_deduplicated_and_gated_on_enabled_toolsets(home):
     from agent import agent_init
 
-    existing = [{"type": "function", "function": {"name": EXPAND_TOOL_NAME, "parameters": {"type": "object"}}}]
+    existing = [{"type": "function", "function": {"name": READ_ORIGINAL_TOOL_NAME, "parameters": {"type": "object"}}},
+                {"type": "function", "function": {"name": EXPAND_TOOL_NAME, "parameters": {"type": "object"}}}]
     agent = build_agent(tools=list(existing))
     agent_init._inject_context_engine_tools(agent)
     assert agent.tools == existing                                  # already registered: not appended twice
@@ -124,7 +135,7 @@ def test_injection_is_deduplicated_and_gated_on_enabled_toolsets(home):
 
     allowed = build_agent(enabled_toolsets=["context_engine"])
     agent_init._inject_context_engine_tools(allowed)
-    assert [t["function"]["name"] for t in allowed.tools] == [EXPAND_TOOL_NAME]
+    assert [t["function"]["name"] for t in allowed.tools] == [READ_ORIGINAL_TOOL_NAME, EXPAND_TOOL_NAME]
 
 
 def test_expand_tool_can_be_switched_off_in_the_settings(hermes_home):
@@ -264,3 +275,134 @@ def test_expand_returns_exact_original_lines_for_a_log_row(home):
     full = json.loads(engine.handle_tool_call(EXPAND_TOOL_NAME, {"ref": ref, "max_chars": 50_000}))
     inner = json.loads(log)["output"]
     assert full["content"] == inner and full["total_lines"] == inner.count("\n") + 1
+
+
+@pytest.mark.real_hermes
+def test_a_failed_db_commit_commits_no_cache_state(home, tmp_path, monkeypatch):
+    """Native DB persistence failure: the declined prune leaves the live store,
+    memo and input untouched; the retry commits for real."""
+    from hermes_state import SessionDB
+    from hermes_tameru_plugin.payload import parse_payload
+
+    (home / "config.yaml").write_text(config(store_max_entries=1), encoding="utf-8")
+    db = SessionDB(tmp_path / "state.db")
+    try:
+        agent = build_agent(session_db=db)
+        engine = agent.context_compressor
+        use_archive_commit(monkeypatch, engine)
+        old_raw = hp.terminal_result(long_log(), exit_code=1)
+        conversation = _persist(db, "sess-1", old_raw)
+        pruned, n = engine.prune_tool_results_only(conversation, current_tokens=10**6)
+        assert n > 0 and pruned is not conversation
+        live = [m["content"] for m in db.get_messages("sess-1") if m["role"] == "tool"]
+        old_ref = parse_header(next(c for c in live if is_tameru_rendered(c)))["ref"]
+        old_inner = parse_payload(old_raw).inner
+        assert engine._store.peek(old_ref) is not None
+
+        # a fresh eligible round, persisted durably before the failed prune
+        new_raw = hp.terminal_result(long_log() + "\nsecond marker", exit_code=1)
+        rows = [{"role": "assistant", "content": "I will check the next run."},
+                {"role": "user", "content": "Check the second run."}]
+        ids = [("second-run", new_raw)] + [
+            (f"second-fill-{i}", hp.terminal_result("ok")) for i in range(6)]
+        for call_id, content in ids:
+            rows += [
+                {"role": "assistant", "content": "", "tool_calls": [{
+                    "id": call_id, "type": "function",
+                    "function": {"name": "terminal", "arguments": json.dumps({"command": call_id})}}]},
+                {"role": "tool", "content": content, "tool_name": "terminal", "tool_call_id": call_id},
+            ]
+        rows.append({"role": "user", "content": "What changed?"})
+        db.append_messages_batch("sess-1", rows)
+        convo = db.get_messages_as_conversation("sess-1")
+        new_row = next(m for m in convo if m.get("tool_call_id") == "second-run")
+        new_ref = make_ref(new_row, new_raw)
+        new_inner = parse_payload(new_raw).inner
+        snapshot_db = db.get_messages("sess-1")
+        snapshot_in = json.dumps(convo, sort_keys=True)
+        memo_before = len(engine._memo._items)
+        chars_before = engine._telemetry.snapshot()["chars"]
+
+        failures = []
+        real_commit = db.archive_and_compact
+
+        def reject(*a, **k):
+            failures.append(1)
+            raise OSError("simulated persistence failure")
+
+        db.archive_and_compact = reject
+        res = engine.prune_tool_results_only(convo, current_tokens=10**6)
+        assert res[0] is convo and res[1] == 0
+        assert failures == [1], "persistence failure must not trigger a stronger second commit attempt"
+        assert db.get_messages("sess-1") == snapshot_db
+        assert json.dumps(convo, sort_keys=True) == snapshot_in
+        assert engine._store.peek(old_ref) is not None and engine._store.peek(new_ref) is None
+        assert json.loads(engine.handle_tool_call(EXPAND_TOOL_NAME, {"ref": old_ref}))["content"] == old_inner
+        assert len(engine._memo._items) == memo_before
+        assert engine._telemetry.snapshot()["chars"] == chars_before
+
+        db.archive_and_compact = real_commit
+        res2 = engine.prune_tool_results_only(convo, current_tokens=10**6)
+        assert res2[0] is not convo and res2[1] > 0
+        live2 = [m["content"] for m in db.get_messages("sess-1") if m["role"] == "tool"]
+        assert any(is_tameru_rendered(c) and new_ref in c for c in live2), "the new ref landed in the real DB"
+        assert engine._store.peek(new_ref) is not None
+        assert engine._store.peek(old_ref) is None, "cap=1: the committed retry evicts the warm entry"
+        assert json.loads(engine.handle_tool_call(EXPAND_TOOL_NAME, {"ref": new_ref}))["content"] == new_inner
+    finally:
+        db.close()
+
+
+@pytest.mark.parametrize("newer_attempt", [False, True])
+def test_full_commit_callback_uses_actual_rows_and_current_attempt(home, tmp_path, monkeypatch, newer_attempt):
+    from agent.conversation_compression import _claim_compressor_attempt
+    from hermes_state import SessionDB
+    from hermes_tameru_plugin.payload import parse_payload
+
+    fake_summary_llm(monkeypatch)
+    db = SessionDB(tmp_path / "full-state.db")
+    try:
+        engine = build_agent(session_db=db).context_compressor
+        _persist(db, "sess-1", hp.terminal_result(long_log(), exit_code=1))
+        for seed in range(10, 17):
+            call_id = f"full-{seed}"
+            db.append_messages_batch("sess-1", [
+                {"role": "assistant", "content": "", "tool_calls": [{
+                    "id": call_id, "type": "function",
+                    "function": {"name": "terminal", "arguments": json.dumps({"command": f"tail app-{seed}.log"})},
+                }]},
+                {"role": "tool", "content": server_log(seed), "tool_name": "terminal", "tool_call_id": call_id},
+            ])
+        db.append_message("sess-1", "user", "Explain why the payment gateway timed out.")
+        conversation = db.get_messages_as_conversation("sess-1")
+        originals = {
+            make_ref(row, row["content"]): parse_payload(row["content"]).inner
+            for row in conversation if row.get("role") == "tool"
+        }
+        _claim_compressor_attempt(engine)
+        candidate = engine.compress(conversation, 200_000, force=True)
+        assert candidate != conversation and candidate[-1]["role"] == "user"
+        assert engine.get_status()["tameru"]["store"]["entries"] == 0
+        assert engine.activity_snapshot()["items"] == []
+        candidate[-1] = dict(candidate[-1], content=candidate[-1]["content"] + "\nTODO: explain the timeout.")
+        db.archive_and_compact("sess-1", candidate)
+        if newer_attempt:
+            _claim_compressor_attempt(engine)
+        engine.on_session_start("sess-1", boundary_reason="compression", old_session_id="sess-1")
+        status = engine.get_status()["tameru"]
+        if newer_attempt:
+            assert status["store"]["entries"] == 0
+            assert status["activity"]["items"] == []
+            assert status["telemetry"]["chars"]["before"] == 0
+        else:
+            assert status["store"]["entries"] > 0
+            assert status["activity"]["items"]
+            assert status["telemetry"]["chars"]["before"] > 0
+            for item in status["activity"]["items"]:
+                ref = item["ref"]
+                assert ref in originals
+                restored = json.loads(engine.handle_tool_call(
+                    EXPAND_TOOL_NAME, {"ref": ref, "max_chars": 100_000}))
+                assert restored["content"] == originals[ref]
+    finally:
+        db.close()

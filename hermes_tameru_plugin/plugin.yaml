@@ -1,6 +1,12 @@
 name: tameru
-label: Tameru (貯める)
-description: "Big tool outputs, kept small, nothing lost: shortens old tool results to the lines that matter and every distinct error, with a tameru_expand (展開) tool that brings back the exact original. Deterministic, no LLM or network calls."
-version: 1.6.0
+label: Tameru (ためる)
+description: "Tameru (ためる) shortens old tool outputs locally and shows what changed in chat and in a Desktop panel. You can Restore or Keep a shortened output so the model sees it in full, and view or re-read any original with tameru_read_original (tameru_expand remains supported). Extraction adds no LLM or network calls (engine: Tameru 1.9.0); Hermes may still summarize."
+version: 1.9.0
+provides_hooks:
+  - pre_api_request
+  - post_api_request
+  - api_request_error
+  - post_compaction
+  - pre_llm_call
 license: MIT
 homepage: https://github.com/0xWhiteMage/hermes-tameru-plugin

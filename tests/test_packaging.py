@@ -126,3 +126,13 @@ def test_vendored_engine_is_pinned_to_a_commit_and_matches_the_package_version(p
 
     assert re.fullmatch(r"[0-9a-f]{40}", VENDORED_FROM), VENDORED_FROM
     assert ENGINE_VERSION == pyproject["project"]["version"]
+
+
+def test_the_desktop_panel_and_the_backend_agree_on_their_build_number():
+    """A stale Desktop copy or a stale plugin shows up as 'Out of date' because these two numbers differ."""
+    import re
+    from pathlib import Path
+    from hermes_tameru_plugin.progress import PANEL_BUILD, SCHEMA
+    panel = (Path(__file__).resolve().parent.parent / "hermes_tameru_plugin" / "desktop" / "plugin.js").read_text(encoding="utf-8")
+    assert int(re.search(r"const PANEL_BUILD = (\d+)", panel).group(1)) == PANEL_BUILD
+    assert SCHEMA == 3

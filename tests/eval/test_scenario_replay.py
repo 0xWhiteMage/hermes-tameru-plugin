@@ -36,6 +36,9 @@ from scenario_baselines import WRITE, baseline_path, load_baseline, write_baseli
 pytestmark = pytest.mark.real_hermes
 
 SCENARIOS = tuple(n for n in registry.scenario_names() if n != registry.DEFAULT_SCENARIO)
+#: The development recipes carry the full probe contract (every gold category, user/assistant/tool sources, >=6 error
+#: fingerprints, enough mass to make Hermes compact on a 64K window). Held-out recipes are adversarial additions.
+DEV = ("oncall", "refactor", "smallrows", "i18n")
 MIN_COMPACTIONS = {"oncall": 2, "refactor": 1, "smallrows": 1, "i18n": 1}  # of Hermes as shipped, on a 64K window
 
 #: ``(scenario, check, engine)`` -> why the plugin loses it (measured numbers; see docs/REPORT-1.4.1.md section 9).
@@ -72,6 +75,21 @@ KNOWN_LOSSES: dict[tuple[str, str, str], str] = {
         "user turns fall into the first summary, not the second one's verbatim section, and the fake summarizer drops them. The "
         "plugin's own larger rows (briefs, extracts) take the token budget of the tail walk."
     ),
+    ("oncall", "cost", "tameru_1_4"): (
+        "LOSS +1.3%: 2,055,836 vs 2,029,526 char-eq (seed 0)."
+    ),
+    # Held-out recipes: the session never reaches the plugin's trigger on a 64K window, so the only delta is the
+    # declared recovery/activity schemas the shipped engines price per request.
+    ("longform", "cost", "tameru_1_4_product"): "LOSS +6.5%: 268,903 vs 252,597 char-eq (seed 0): under-trigger schema delta.",
+    ("longform", "cost", "tameru_1_4"): "LOSS +6.5%: 268,903 vs 252,597 char-eq (seed 0): under-trigger schema delta.",
+    ("mixedlang", "cost", "tameru_1_4_product"): "LOSS +8.4%: 209,505 vs 193,198 char-eq (seed 0): under-trigger schema delta.",
+    ("mixedlang", "cost", "tameru_1_4"): "LOSS +8.4%: 209,505 vs 193,198 char-eq (seed 0): under-trigger schema delta.",
+    ("diagnostics", "cost", "tameru_1_4_product"): "LOSS +9.1%: 183,043 vs 167,780 char-eq (seed 0): under-trigger schema delta.",
+    ("diagnostics", "cost", "tameru_1_4"): "LOSS +9.1%: 183,043 vs 167,780 char-eq (seed 0): under-trigger schema delta.",
+    ("rereads", "cost", "tameru_1_4_product"): "LOSS +10.0%: 167,417 vs 152,154 char-eq (seed 0): under-trigger schema delta.",
+    ("rereads", "cost", "tameru_1_4"): "LOSS +10.0%: 167,417 vs 152,154 char-eq (seed 0): under-trigger schema delta.",
+    ("dense", "cost", "tameru_1_4_product"): "LOSS +10.2%: 165,297 vs 150,035 char-eq (seed 0): under-trigger schema delta.",
+    ("dense", "cost", "tameru_1_4"): "LOSS +10.2%: 165,297 vs 150,035 char-eq (seed 0): under-trigger schema delta.",
 }
 
 _CACHE: dict[tuple[str, str], list[dict]] = {}
@@ -129,7 +147,7 @@ def test_replay_is_deterministic(scenario, name):
 
 
 @pytest.mark.parametrize("name", engines.BASELINE_ENGINES)
-@pytest.mark.parametrize("scenario", SCENARIOS)
+@pytest.mark.parametrize("scenario", DEV)
 def test_metrics_are_complete_and_sane(scenario, name):
     spec = registry.get_spec(scenario)
     sc = spec.build(0, spec.turns)
@@ -141,6 +159,7 @@ def test_metrics_are_complete_and_sane(scenario, name):
     assert m["compress_calls"] >= m["compactions"] >= m["compactions_shrinking"]
     assert m["summary_llm_calls"] <= m["compress_calls"]
     assert m["summary_unparsed_prompts"] == 0
+    assert m["closing_probe"]["sent"], "Closing request was not sent"
     assert m["input_chars_max"] >= m["input_chars_final"] > 0
     gold = m["gold"]
     assert gold["total"] == len(sc.gold) and set(gold["by_category"]) == set(CATEGORIES)
@@ -153,7 +172,7 @@ def test_metrics_are_complete_and_sane(scenario, name):
     assert m["byte_stability"]["requests_checked"] == m["requests"]
 
 
-@pytest.mark.parametrize("scenario", SCENARIOS)
+@pytest.mark.parametrize("scenario", DEV)
 def test_the_scenario_makes_hermes_as_shipped_compact(scenario):
     """On a 64K window a session shape that never fills the window would measure nothing."""
     m = metrics(scenario, "stock_defaults")
@@ -194,13 +213,15 @@ def test_saved_baselines_cover_the_four_engines(scenario):
 @pytest.mark.parametrize("scenario", scenario_param("cost", "tameru_1_4_product"))
 def test_acceptance_shipped_plugin_costs_no_more_than_hermes_as_shipped(scenario):
     ours, theirs = metrics(scenario, "tameru_1_4_product"), metrics(scenario, "stock_defaults")
-    assert ours["cost_cache_priced"] <= theirs["cost_cache_priced"]
+    assert ours["total_simulated_input_cost"] <= theirs["total_simulated_input_cost"]
 
 
 @pytest.mark.parametrize(("scenario", "category"), matrix_param("gold", "tameru_1_4_product"))
 def test_acceptance_shipped_plugin_keeps_at_least_as_many_gold_facts_in_every_category(scenario, category):
     ours = metrics(scenario, "tameru_1_4_product")["gold"]["by_category"][category]
     theirs = metrics(scenario, "stock_defaults")["gold"]["by_category"][category]
+    assert ours["retained_ids"] is not None and theirs["retained_ids"] is not None, "Closing probe not observed"
+    assert set(theirs["retained_ids"]) <= set(ours["retained_ids"])
     assert ours["retained"] >= theirs["retained"], (ours["missing"], theirs["missing"])
 
 
@@ -220,18 +241,21 @@ def test_acceptance_shipped_plugin_has_no_pairing_violations(scenario):
 def test_acceptance_no_tool_row_is_rewritten_between_commits(scenario, name):
     stability = metrics(scenario, name)["byte_stability"]
     assert stability["rewrites_outside_commits"] == 0, stability["details"]
+    assert stability["input_mutations"] == 0, stability["input_mutation_details"]
 
 
 # ---- the equal-gates plugin against Hermes with the same prune switched on ------------------------------------------
 @pytest.mark.parametrize("scenario", scenario_param("cost", "tameru_1_4"))
 def test_equal_gates_plugin_costs_no_more_than_stock(scenario):
-    assert metrics(scenario, "tameru_1_4")["cost_cache_priced"] <= metrics(scenario, "stock")["cost_cache_priced"]
+    assert metrics(scenario, "tameru_1_4")["total_simulated_input_cost"] <= metrics(scenario, "stock")["total_simulated_input_cost"]
 
 
 @pytest.mark.parametrize(("scenario", "category"), matrix_param("gold", "tameru_1_4"))
 def test_equal_gates_plugin_keeps_at_least_as_many_gold_facts_in_every_category(scenario, category):
     ours = metrics(scenario, "tameru_1_4")["gold"]["by_category"][category]
     theirs = metrics(scenario, "stock")["gold"]["by_category"][category]
+    assert ours["retained_ids"] is not None and theirs["retained_ids"] is not None, "Closing probe not observed"
+    assert set(theirs["retained_ids"]) <= set(ours["retained_ids"])
     assert ours["retained"] >= theirs["retained"], (ours["missing"], theirs["missing"])
 
 

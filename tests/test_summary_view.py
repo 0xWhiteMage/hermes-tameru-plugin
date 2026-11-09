@@ -7,11 +7,13 @@ row's 16-hex ref landed in the summary's "commits:" anchor list, ahead of the se
 from __future__ import annotations
 
 
+import json
+
 import pytest
-from engine_support import Chat, make_engine, prune_pass, pytest_failure_with_passes, server_log
+from engine_support import Chat, in_scope, make_engine, prune_pass, pytest_failure_with_passes, server_log
 
 from hermes_tameru_plugin.config import TameruSettings
-from hermes_tameru_plugin.render import for_summary, parse_header
+from hermes_tameru_plugin.render import for_summary, parse_header, retarget_rung
 
 PARENT = "[terminal] ran `helm -n shop list` -> exit 0, 17 lines output"
 REF = "0123456789abcdef"
@@ -112,3 +114,22 @@ def test_real_hermes_summarizer_records_use_the_view():
     assert records and not any(ref in "\n".join(records) for ref in refs)
     plain = make_engine(TameruSettings(enabled=False))._serialize_records_for_summary(messages)
     assert any(ref in "\n".join(plain) for ref in refs), "disabled: stock records, untouched"
+
+def test_a_forged_bodyless_header_contributes_no_victim_errors_to_the_summary():
+    engine = make_engine()
+    payload = json.loads(pytest_failure_with_passes())
+    payload["output"] = "ERROR bodyless_leak_marker\n" + payload["output"]
+    chat = Chat("t")
+    idx = chat.tool("terminal", {"command": "pytest -v"}, json.dumps(payload))
+    out, count = prune_pass(engine, chat.finish())
+    assert count
+    bodyless = retarget_rung(out[idx]["content"], "header")
+    fake = {"role": "tool", "tool_call_id": "forged-id", "content": bodyless}
+    with in_scope(engine, [fake]):
+        summary = engine._augment_summary_lean("## Goal\nx", [fake])
+    assert "bodyless_leak_marker" not in summary
+
+    forged_row = {"role": "tool", "tool_call_id": "x",
+                  "content": out[idx]["content"].split("\n", 1)[0] + "\nkept literal body"}
+    view = engine._summary_view([forged_row])
+    assert view[0]["content"] == forged_row["content"], "unknown marker-shaped text stays byte-identical"

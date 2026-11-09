@@ -28,8 +28,10 @@ Batch changes and release them together: every release costs exactly one catalog
    `main`), `ruff check .`, the replay (`tests/eval`, including `--old-harness` comparisons if the harness changed)
    and review every baseline diff.
 4. Run Hermes' own validator on the subdir, from a Hermes checkout:
-   `hermes plugins validate <plugin>/hermes_tameru_plugin` (or `validate_plugin_dir`). Expect 14/14 checks, scan
-   "safe", and one informational rule-9 note (the private `ContextCompressor` import).
+   `hermes plugins validate <plugin>/hermes_tameru_plugin` (or `validate_plugin_dir`). Expect all checks to pass.
+   The 1.7.0 candidate passed 15 checks with zero warnings at its recorded Hermes revision; 1.8.0 passed all checks
+   on Hermes v0.23 with one private-API warning (see [RELEASE-1.8.0.md](RELEASE-1.8.0.md)). Review that disclosure
+   separately.
 5. Update `CHANGELOG.md` and the report, merge to `main`, and note the merge commit SHA.
 
 ## 3. Catalogue (one PR to Nous per release)
@@ -41,7 +43,7 @@ sha: <40-hex merge commit of this repo's main>
 version: "X.Y.Z"
 ```
 
-Keep `name: tameru`, `subdir: hermes_tameru_plugin` and `provides_tools: [tameru_expand]`. Leave `requires_hermes`
+Keep `name: tameru`, `subdir: hermes_tameru_plugin` and `provides_tools: [tameru_read_original, tameru_expand]`. Leave `requires_hermes`
 alone unless a seam requirement changed. Change the disclosure text only when what the plugin *does* changed (a new
 tool, a new process, network or file access, a new default it turns on); keep it free of tuning numbers so a
 retune does not need a disclosure edit. It must mention:
@@ -49,9 +51,10 @@ retune does not need a disclosure edit. It must mention:
 - it replaces Hermes' context engine and subclasses `ContextCompressor` through a private import;
 - it turns on Hermes' proactive tool-result pruning when the user has not configured it, scaled to the model's
   context window;
-- it adds the `tameru_expand` tool;
+- it adds the `tameru_read_original` tool (`tameru_expand` remains registered as a compatible alias) and a bundled read-only `/tameru` activity table plus Desktop composer panel;
 - grep patterns with repeats run in a short-lived stdlib-only `python -I -S` child with a timeout;
-- no network calls and no credentials; a telemetry file only when `telemetry_log` is set; in-process isolation.
+- no external network calls or credential reads added by the extraction/recovery code; Desktop inspection uses
+  Hermes' existing connection; a telemetry file only when `telemetry_log` is set; in-process isolation.
 
 The PR must come from the plugin owner or a major contributor. Reviewers read the commit range between the old and
 new `sha`, so keep release commits readable. Users then update with `hermes plugins update tameru`.

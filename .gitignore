@@ -5,3 +5,6 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+.demo/
+# Raw replay captures behind docs/REPORT-1.7.0.md (about 100 MB): kept locally, attached to a release instead of tracked.
+docs/adaptive-*/

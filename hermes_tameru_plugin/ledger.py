@@ -34,12 +34,13 @@ Import-safe: stdlib, sibling modules and the vendored engine only, nothing happe
 """
 from __future__ import annotations
 
+import hashlib
 import itertools
 import json
 import re
 from collections.abc import Iterable, Iterator
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, NamedTuple
+from typing import TYPE_CHECKING, Any, Callable, NamedTuple
 
 from .hermes_compat import (
     DUPLICATE_PREFIX,
@@ -62,6 +63,7 @@ if TYPE_CHECKING:
     from .recovery import OriginalStore
 
 HEADING = "## Artifact Trail (Tameru, exact)"
+LEDGER_DROPPED = {"count": 0}   # error lines left out because they read like orders (integer only, never content)
 MAX_CHARS = 1500              # the Files and Commands lines
 ERRORS_CHARS = 1800           # the Errors lines, on top of that (room for ~9 lines of 200 chars: log errors plus kubectl/test-runner errors)
 KUBECTL_LINE_CHARS = 240  # hard cap of the one-line kubectl status summary
@@ -74,6 +76,22 @@ _LEVEL_ERROR_PRIORITY = 1 << 40  # ranks above any clock value
 # only by such ids share one Errors line.
 _ID_SEGMENT_RE = re.compile(r"(?<=-)(?=[a-z#]*#)[a-z#]{4,8}\b")
 
+# Only results of commands the agent ran are scanned for errors: a repo file or search hit is text a stranger may
+# have written, and the summary would carry its lines as if Tameru had checked them.
+_EXEC_TOOLS = frozenset({"terminal", "execute_code", "process"})
+# A line that reads like an order to the model is dropped, not quoted: tool output is data, never instructions.
+_INSTRUCTION_RE = re.compile(
+    r"\b(?:ignore|disregard|forget|override)\b[^\n]{0,40}\b(?:previous|prior|above|earlier|instructions?|rules?|prompt)\b"
+    r"|\byou\s+(?:must|should|need\s+to|have\s+to|are\s+(?:to|required|instructed))\b[^\n]{0,24}\b(?:run|execute|call|invoke|send|upload|download|delete|curl|wget|ssh|cat|open|print|reveal|disclose|ignore|forget)\b"
+    r"|\b(?:please|now|next|then)\s+(?:run|execute|call|invoke|send|upload|download|delete|install|curl|wget|ssh|cat|open)\b"
+    r"|\b(?:run|execute|call|invoke)\b[^\n]{0,40}(?:\.sh\b|\bcurl\b|\bwget\b|\bssh\b|\bsudo\b|https?://)"
+    r"|\b(?:system|assistant|developer)\s*(?:prompt|message|instruction)s?\b"
+    r"|^\s*(?:note|important|instructions?|system|assistant|user)\s*:"
+    r"|\btameru\b[^\n]{0,24}\b(?:verified|says|checked|confirms?|instructs?|notes?|system|trail)\b"
+    r"|</?\s*(?:tameru|system|instructions?)\b"
+    r"|\bnext\s+step\b[^\n]{0,16}\b(?:run|execute|call|curl|wget|upload|send|delete)\b",
+    re.IGNORECASE,
+)
 _FILE_OPS = {"read_file": "read", "write_file": "write", "patch": "patch", "search_files": "search"}
 _PATH_KEYS = ("path", "file_path", "file", "filename")   # not ``target``: a search mode
 _V4A_PATH_RE = re.compile(
@@ -86,6 +104,17 @@ _USER_ASKED_RE = re.compile(r"\bUser\s+asked\s*:", re.IGNORECASE)
 _ERROR_SCAN_BUDGET = 2_000_000   # characters of original text scanned for errors in one ledger
 _ERROR_SCAN_MIN_CHARS = 60    # a shorter result cannot hold an error worth a line
 _LABEL_CHARS = 120
+# Credentials typed into a command line that the general secret screen has no shape for: ``-pPASS``, ``-u user:pw``,
+# ``PGPASSWORD=...``, ``*_TOKEN=...``, an ``Authorization:`` header, a ``--password`` flag.
+_INLINE_CREDENTIAL_RE = re.compile(
+    r"(?:^|\s)-p(?!\d{1,5}(?:\s|$))\S{4,}"                 # -pSECRET, but not a port such as -p2222
+    r"|(?:^|\s)-u\s*[^\s:@]+:\S{3,}"
+    r"|\b\w*(?:PASS(?:WORD|WD)?|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY)\s*=\s*\S{3,}"      # GITHUB_TOKEN=..., not MAX_TOKENS=4096
+    r"|\bauthorization\s*:"
+    r"|--(?:password|passwd|token|secret|api-?key)(?:=|\s+\S)"                          # a flag with a value, not --token-limit
+    r"|\bbearer\s+\S{8,}",
+    re.IGNORECASE,
+)
 _STUB_HEAD_CHARS = 400
 _REFUSAL_MAX_CHARS = 4000     # a refusal notice is short; do not parse megabytes for one
 _MORE_RESERVE = 16            # room for a "- (+NN more)" line
@@ -94,7 +123,8 @@ _UNKNOWN = "?"
 
 _SECTION_RE = re.compile(rf"^{re.escape(HEADING)}[^\n]*(?:\n|\Z).*?(?=^## |\Z)", re.MULTILINE | re.DOTALL)
 _FILE_LINE_RE = re.compile(
-    r"^- `(?P<path>[^`]+)`: (?P<ops>[^;\n]+); last (?P<op>[a-z]+) (?P<result>ok|FAILED|\?)$", re.MULTILINE,
+    r"^- `(?P<path>[^`]+)`: (?P<ops>[^;\n]+); last (?P<op>[a-z]+) (?P<result>ok|FAILED|\?)(?P<changed> \(changed since earlier read\))?$",
+    re.MULTILINE,
 )
 _ERROR_LINE_RE = re.compile(r"^ {2}(?P<line>\S.*)$", re.MULTILINE)
 _COMMAND_LINE_RE = re.compile(
@@ -110,6 +140,9 @@ class _FileEntry:
     last_op: str = ""
     last_result: str = ""
     touched: int = 0          # position of the last touch on the build's clock
+    read_digest: str = ""     # digest of the last read's text (not kept in the trail)
+    wrote_since_read: bool = False   # the agent wrote or patched this file after that read
+    changed: bool = False     # two reads differed with no write by the agent between them
 
 
 @dataclass
@@ -145,14 +178,14 @@ def _json_dict(text: str) -> dict:
     return parsed if isinstance(parsed, dict) else {}
 
 
-def _envelope(content: str, store: OriginalStore | None) -> dict:
+def _envelope(content: str, store: OriginalStore | None, *, rendered: bool = False) -> dict:
     """Envelope fields (``exit_code`` / ``error`` / ``success``) of a tool result.
 
     For a Tameru render: the metadata the store kept with the original, else the render's own meta
     line (the second line, when it is exactly what ``payload.meta_line`` writes: a body that merely
     starts with JSON is not an envelope). For anything else: the result's JSON object.
     """
-    header = parse_header(content)
+    header = parse_header(content) if rendered else None
     if header is None:
         return _json_dict(content)
     entry = store.entry(header["ref"]) if store is not None else None
@@ -163,7 +196,7 @@ def _envelope(content: str, store: OriginalStore | None) -> dict:
     return meta if meta and meta_line(meta) == line else {}
 
 
-def _inspect(tool: str, args: dict, content: str, store: OriginalStore | None) -> _Outcome:
+def _inspect(tool: str, args: dict, content: str, store: OriginalStore | None, *, rendered: bool = False) -> _Outcome:
     if (
         content.startswith((PRUNED_PLACEHOLDER, DUPLICATE_PREFIX)) or is_persisted_block(content)
         or LEAN_STUB_RE.match(content)
@@ -171,7 +204,7 @@ def _inspect(tool: str, args: dict, content: str, store: OriginalStore | None) -
         return _Outcome(unknown=True)
     if len(content) <= _REFUSAL_MAX_CHARS and refused_summary(tool, args, content) is not None:
         return _Outcome(refused=True)
-    envelope = _envelope(content, store)
+    envelope = _envelope(content, store, rendered=rendered)
     code = envelope.get("exit_code")
     head = content[:_STUB_HEAD_CHARS].split("\n", 1)[0] if content.startswith("[") else ""   # a stub's line
     if isinstance(code, bool) or not isinstance(code, int):
@@ -181,7 +214,7 @@ def _inspect(tool: str, args: dict, content: str, store: OriginalStore | None) -
     return _Outcome(failed=failed, exit_code=code)
 
 
-def _original_text(content: str, store: OriginalStore | None) -> str:
+def _original_text(content: str, store: OriginalStore | None, *, rendered: bool = False) -> str:
     """The text a result's errors are read from: the stored original of a Tameru render, else its own text.
 
     "" for what holds no original any more (Hermes' stubs and placeholders).
@@ -191,7 +224,7 @@ def _original_text(content: str, store: OriginalStore | None) -> str:
         or LEAN_STUB_RE.match(content)
     ):
         return ""
-    header = parse_header(content)
+    header = parse_header(content) if rendered else None
     if header is None:
         return parse_payload(content).inner
     kept = store.get(header["ref"]) if store is not None else None
@@ -232,6 +265,9 @@ def _note_errors(
                 if name not in names and len(names) < _KUBECTL_PODS_PER_STATUS:
                     names.append(name)
             continue
+        if _INSTRUCTION_RE.search(line):
+            LEDGER_DROPPED["count"] += 1             # a number only, shown in the Health line
+            continue
         key = _ID_SEGMENT_RE.sub("<id>", fp)
         entry = errors.get(key)
         if entry is None:
@@ -270,7 +306,7 @@ def _args(raw: Any) -> dict:
 def _label(text: str, *, keep_tail: bool = False) -> str:
     """``text`` as one short backtick-free line; a probable credential becomes ``<redacted>``."""
     text = " ".join(text.split()).replace("`", "'")
-    if contains_secret(text):
+    if contains_secret(text) or _INLINE_CREDENTIAL_RE.search(text):
         return _REDACTED
     if len(text) <= _LABEL_CHARS:
         return text
@@ -292,10 +328,20 @@ def _paths(tool: str, args: dict) -> list[str]:
 
 def _note_file(
     files: dict[str, _FileEntry], clock: Iterator[int], path: str, op: str, result: str, count: int = 1,
+    read_text: str | None = None,
 ) -> None:
     entry = files.setdefault(path, _FileEntry())
     entry.ops[op] = entry.ops.get(op, 0) + count
     entry.last_op, entry.last_result, entry.touched = op, result, next(clock)
+    if op in ("write", "patch"):
+        entry.wrote_since_read = True
+    elif op == "read" and read_text is not None and result == "ok":
+        digest = hashlib.sha256(read_text.encode("utf-8", "replace")).hexdigest()[:16]
+        if entry.read_digest and digest != entry.read_digest and not entry.wrote_since_read:
+            entry.changed = True      # it changed under the agent: another process, a checkout, an editor
+        elif digest == entry.read_digest:
+            entry.changed = False
+        entry.read_digest, entry.wrote_since_read = digest, False
 
 
 def _note_command(
@@ -324,6 +370,7 @@ def _seed(
         for op, count in _OP_RE.findall(m["ops"]):
             _note_file(files, clock, m["path"], op, m["result"], int(count or 1))
         files[m["path"]].last_op = m["op"]
+        files[m["path"]].changed = bool(m["changed"])
     for m in _COMMAND_LINE_RE.finditer(text):
         _note_command(commands, clock, m["command"], m["result"], int(m["runs"] or 1))
     marker = text.find("\nErrors:\n")
@@ -338,12 +385,16 @@ def _plain(line: str) -> str:
 
 def _file_line(path: str, entry: _FileEntry) -> tuple[int, str]:
     ops = ", ".join(op if count == 1 else f"{op} x{count}" for op, count in entry.ops.items())
-    return entry.touched, _plain(f"- `{path}`: {ops}; last {entry.last_op} {entry.last_result}")
+    flag = " (changed since earlier read)" if entry.changed else ""
+    # A file that failed, or changed under the agent, is the line the next turn needs most: it is the last to be left out.
+    priority = _LEVEL_ERROR_PRIORITY if entry.changed or entry.last_result == "FAILED" else 0
+    return entry.touched + priority, _plain(f"- `{path}`: {ops}; last {entry.last_op} {entry.last_result}{flag}")
 
 
 def _command_line(command: str, entry: _CommandEntry) -> tuple[int, str]:
     runs = f" (x{entry.runs})" if entry.runs > 1 else ""
-    return entry.touched, _plain(f"- `{command}` -> {entry.result}{runs}")
+    failing = entry.result not in ("exit 0",)
+    return entry.touched + (_LEVEL_ERROR_PRIORITY if failing else 0), _plain(f"- `{command}` -> {entry.result}{runs}")
 
 
 def _size(lines: list[str]) -> int:
@@ -394,10 +445,14 @@ def _kubectl_line(kube: dict[str, set[str]], kube_pods: dict[str, list[str]]) ->
 def build_ledger(
     turns: list[dict], store: OriginalStore | None = None, *, max_chars: int = MAX_CHARS,
     previous: str = "", skip_tools: frozenset[str] = frozenset(), extra_originals: Iterable[str] = (),
+    is_rendered: Callable[[dict], bool] | None = None,
+    is_external: Callable[[dict], bool] | None = None,
 ) -> str:
     """The Artifact Trail section for ``turns`` (the messages being summarized), or "".
 
-    ``store`` supplies the originals of Tameru-rendered rows. ``previous`` is the summary from
+    ``store`` supplies the originals of Tameru-rendered rows. ``is_rendered`` names the rows the
+    engine provably owns (digest + message identity); an unproven header-shaped row is raw input and
+    never inherits a cached original or its metadata. ``previous`` is the summary from
     before ``turns`` (Hermes' ``_previous_summary``, which does not yet account for them): the
     entries of its Artifact Trail section come first, so the trail accumulates across compactions.
     ``skip_tools`` names tools whose results are not scanned for errors (instructions, memory). Web, browser
@@ -433,20 +488,25 @@ def build_ledger(
         elif msg.get("role") == "tool" and msg.get("tool_call_id"):
             tool, raw_args = calls.get(str(msg["tool_call_id"]), ("", None))
             content = text_of(msg.get("content"))
-            if tool not in skip_tools and not is_untrusted_tool(tool) and len(content) >= _ERROR_SCAN_MIN_CHARS:
-                scan(_original_text(content, store))
+            rendered = is_rendered is not None and is_rendered(msg)
+            if (tool in _EXEC_TOOLS and tool not in skip_tools and not is_untrusted_tool(tool)
+                    and not (is_external is not None and is_external(msg))
+                    and len(content) >= _ERROR_SCAN_MIN_CHARS):
+                scan(_original_text(content, store, rendered=rendered))
             if tool != "terminal" and tool not in _FILE_OPS:
                 continue
             args = _args(raw_args)
-            outcome = _inspect(tool, args, content, store)
+            outcome = _inspect(tool, args, content, store, rendered=rendered)
             if tool == "terminal":
                 command = args.get("command")
                 if isinstance(command, str) and command.strip():
                     _note_command(commands, clock, _label(command), _command_result(outcome))
             else:
+                read_text = _original_text(content, store, rendered=rendered) if tool == "read_file" else None
                 for path in _paths(tool, args):
                     _note_file(
                         files, clock, _label(path, keep_tail=True), _FILE_OPS[tool], _file_result(outcome),
+                        read_text=read_text,
                     )
 
     sections = [

@@ -731,3 +731,25 @@ def test_message_budget_tokens_fallback_is_pinned(compat):
     assert compat._local_message_budget_tokens([{"role": "tool", "content": "x" * 1001}]) == 251 + 10
     assert compat._local_message_budget_tokens([{"role": "assistant", "content": None}]) == 10
     assert compat._local_message_budget_tokens([{"role": "user", "content": [{"type": "text", "text": "hi"}]}]) == 10
+
+
+# ---- a missing Hermes module is not retried on every call --------------------------------------------------------
+def test_a_failed_import_is_remembered_briefly_and_retried_later(monkeypatch):
+    from hermes_tameru_plugin import hermes_compat as compat
+    calls = []
+    clock = [1000.0]
+
+    def fake_import(name):
+        calls.append(name)
+        raise ImportError(name)
+
+    monkeypatch.setattr(compat.importlib, "import_module", fake_import)
+    monkeypatch.setattr(compat.time, "monotonic", lambda: clock[0])
+    compat._MISSING.clear()
+    name = "agent.a_module_that_does_not_exist"
+    assert compat._module(name) is None and compat._module(name) is None and compat._module(name) is None
+    assert calls == [name], "one real attempt, then the remembered failure"
+    clock[0] += compat._MISSING_SECONDS + 1
+    assert compat._module(name) is None
+    assert calls == [name, name], "retried once the memory expired"
+    compat._MISSING.clear()

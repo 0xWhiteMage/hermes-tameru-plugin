@@ -22,7 +22,9 @@ def test_conftest_scrubs_hermes_and_tameru_env(tmp_path):
         [sys.executable, "-c", code], cwd=TESTS_DIR, env=env, capture_output=True, text=True, check=True,
     )
     seen = json.loads(done.stdout.strip().splitlines()[-1])
-    assert set(seen) == {"HERMES_HOME"}, seen
+    # HERMES_DISABLE_LAZY_INSTALLS is the one deliberate addition: it stops real Hermes' bootstrap from installing or
+    # relaunching during a test run.
+    assert set(seen) == {"HERMES_HOME", "HERMES_DISABLE_LAZY_INSTALLS"}, seen
     assert seen["HERMES_HOME"] != str(mine) and "tameru-hermes-home-" in seen["HERMES_HOME"]
 
 

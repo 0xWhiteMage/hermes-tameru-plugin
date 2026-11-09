@@ -9,10 +9,14 @@ The suite runs against either a **stub** of Hermes' `agent` package (`tests/herm
 pip install -e .[dev]
 
 # stub mode (any Python >= 3.11)
-python3 -m pytest -q -p no:cacheprovider
+HERMES_PYTHON=/path/to/test/python bash /path/to/hermes-agent/scripts/run_tests.sh -j 1 tests -- -c "$PWD/pyproject.toml" -q
 
 # real mode (Python 3.14 at the pinned SHA; Hermes' dependencies resolve there)
-HERMES_REPO_ROOT=/path/to/hermes-agent /path/to/venv314/bin/python -m pytest -q -p no:cacheprovider
+HERMES_PYTHON=/path/to/test/python bash /path/to/hermes-agent/scripts/run_tests.sh -j 1 tests -- -c "$PWD/pyproject.toml" --hermes-repo-root=/path/to/hermes-agent -q
+
+# The runner clears caller environment variables. Pass --hermes-repo-root after -- to select
+# real Hermes; this option is read before test collection. The older HERMES_REPO_ROOT
+# environment selector remains supported by direct harness scripts.
 
 ruff check .
 ```

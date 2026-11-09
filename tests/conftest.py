@@ -8,7 +8,9 @@ Everything here runs once, at conftest import time (before any test module impor
   ``TAMERU_WRITE_BASELINES`` (a harness switch of ``tests/eval``, not engine configuration).
 * Real Hermes vs stub: with ``HERMES_REPO_ROOT`` set that checkout goes to ``sys.path[0]`` and
   ``REAL_HERMES`` is True; otherwise ``tests/hermes_stub`` (a minimal stand-in for the ``agent``
-  package) is used and ``REAL_HERMES`` is False.
+  package) is used and ``REAL_HERMES`` is False. The initial mode is established at import;
+  the optional ``--hermes-repo-root=PATH`` flag selects a checkout in ``pytest_configure``,
+  still before any test module (and its ``agent.*`` imports) is collected.
 
 Markers: ``real_hermes`` (skipped unless real Hermes), ``stub_only`` (skipped on real Hermes) and
 ``perf`` (scaling assertions; CI excludes them with ``-m "not perf"``).
@@ -36,6 +38,10 @@ for _name in list(os.environ):
     if _name.startswith(("TAMERU_", "HERMES_")) and _name not in _KEEP_ENV:
         del os.environ[_name]
 
+# Real Hermes' bootstrap may "finish a source update" (install dependencies, relaunch the process) when it is imported.
+# A test run must never do that to someone's real Hermes install, so it is switched off for every run.
+os.environ["HERMES_DISABLE_LAZY_INSTALLS"] = "1"
+
 SESSION_HERMES_HOME = tempfile.mkdtemp(prefix="tameru-hermes-home-")
 os.environ["HERMES_HOME"] = SESSION_HERMES_HOME
 atexit.register(shutil.rmtree, SESSION_HERMES_HOME, ignore_errors=True)
@@ -59,7 +65,22 @@ else:
 
 
 # ---- markers --------------------------------------------------------------------------------
+def pytest_addoption(parser):
+    parser.addoption('--hermes-repo-root', metavar='PATH', default=None,
+                     help='Use this real Hermes checkout instead of the test stub.')
+
+
 def pytest_configure(config):
+    global REAL_HERMES, HERMES_REPO_ROOT
+    selected = config.getoption('--hermes-repo-root')
+    if selected:
+        root = Path(selected).expanduser().resolve()
+        if not (root / 'agent' / 'context_compressor.py').is_file():
+            raise pytest.UsageError(f'--hermes-repo-root={selected!r} is not a Hermes Agent checkout')
+        sys.path[:] = [entry for entry in sys.path if entry not in (str(STUB_ROOT), str(root))]
+        sys.path.insert(0, str(root))
+        os.environ['HERMES_REPO_ROOT'] = str(root)
+        REAL_HERMES, HERMES_REPO_ROOT = True, root
     config.addinivalue_line("markers", "real_hermes: needs a real Hermes checkout (HERMES_REPO_ROOT); skipped otherwise")
     config.addinivalue_line("markers", "stub_only: only meaningful against tests/hermes_stub; skipped on real Hermes")
     config.addinivalue_line("markers", "perf: scaling/performance assertion; CI runs the suite with -m 'not perf'")
@@ -80,6 +101,12 @@ def pytest_collection_modifyitems(config, items):
 def hermes_mode() -> str:
     """``"real"`` when ``HERMES_REPO_ROOT`` selected a Hermes checkout, else ``"stub"``."""
     return "real" if REAL_HERMES else "stub"
+
+
+@pytest.fixture(autouse=True)
+def _isolated_learned_prior(tmp_path, monkeypatch):
+    """Every test gets its own cross-chat memory, so one test's tuning never seeds another's."""
+    monkeypatch.setenv("TAMERU_LEARNED_DIR", str(tmp_path / "learned"))
 
 
 @pytest.fixture

@@ -8,7 +8,9 @@ from fixtures import hermes_payloads as hp
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.engine import ENGINE_VERSION
-from hermes_tameru_plugin.recovery import EXPAND_SCHEMA, EXPAND_TOOL_NAME
+from hermes_tameru_plugin.recovery import (
+    EXPAND_SCHEMA, EXPAND_TOOL_NAME, READ_ORIGINAL_SCHEMA, READ_ORIGINAL_TOOL_NAME,
+)
 from hermes_tameru_plugin.render import make_ref, parse_header
 
 TASK = "tests/test_orders.py::test_reserve_stock_rollback failed"
@@ -79,7 +81,8 @@ def test_status_carries_load_warnings():
 def test_expand_schema_is_injected_first_and_flagged():
     engine = make_engine()
     schemas = engine.get_tool_schemas()
-    assert schemas[0] == EXPAND_SCHEMA and schemas[0]["name"] == EXPAND_TOOL_NAME
+    assert schemas[0] == READ_ORIGINAL_SCHEMA and schemas[0]["name"] == READ_ORIGINAL_TOOL_NAME
+    assert schemas[1] == EXPAND_SCHEMA and schemas[1]["name"] == EXPAND_TOOL_NAME
     assert engine.get_status()["tameru"]["expand_injected"] is True
     assert engine.get_tool_schemas() == schemas   # static: cache-safe
 
@@ -87,7 +90,7 @@ def test_expand_schema_is_injected_first_and_flagged():
 def test_expand_schema_is_withheld_when_off():
     for settings in (TameruSettings(expand_tool=False), TameruSettings(enabled=False)):
         engine = make_engine(settings)
-        assert all(s.get("name") != EXPAND_TOOL_NAME for s in engine.get_tool_schemas())
+        assert all(s.get("name") not in (EXPAND_TOOL_NAME, READ_ORIGINAL_TOOL_NAME) for s in engine.get_tool_schemas())
         assert engine.get_status()["tameru"]["expand_injected"] is False
 
 
@@ -97,8 +100,12 @@ def test_handle_tool_call_expands_a_stored_original_and_defers_other_tools():
     idx = chat.tool("terminal", {"command": "pytest -q"}, pytest_failure())
     _, out = demote(engine, chat.finish(), idx)
     ref = parse_header(out[idx]["content"])["ref"]
+    schemas = engine.get_tool_schemas()
     body = json.loads(engine.handle_tool_call(EXPAND_TOOL_NAME, {"ref": ref, "grep": "test_reserve_stock_rollback"}))
     assert body["ref"] == ref and "test_reserve_stock_rollback" in body["content"]
+    alias = engine.handle_tool_call(READ_ORIGINAL_TOOL_NAME, {"ref": ref, "grep": "test_reserve_stock_rollback"})
+    assert alias == engine.handle_tool_call(EXPAND_TOOL_NAME, {"ref": ref, "grep": "test_reserve_stock_rollback"})
+    assert engine.get_tool_schemas() == schemas   # static: cache-safe
     other = json.loads(engine.handle_tool_call("no_such_tool", {}))
     assert "error" in other
     miss = json.loads(engine.handle_tool_call(EXPAND_TOOL_NAME, {"ref": "00000000"}))
@@ -137,9 +144,9 @@ def test_session_reset_and_end_clear_the_originals():
 
 def test_identity():
     engine = make_engine()
-    assert engine.name == "tameru" and engine.DISPLAY_NAME == "Tameru (貯める)"
+    assert engine.name == "tameru" and engine.DISPLAY_NAME == "Tameru (ためる)"
     message = engine.get_automatic_compaction_status_message(phase="start", default_message="working")
-    assert message == "🗜️ Tameru (貯める) compaction — working"
+    assert message.startswith("Tameru · working") and "Tameru is balanced" in message
 
 
 def test_the_status_message_honours_the_suppress_flag_and_the_kill_switch():

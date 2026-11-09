@@ -11,6 +11,7 @@ import dataclasses
 import inspect
 import sys
 import types
+from pathlib import Path
 
 import pytest
 
@@ -58,6 +59,8 @@ def test_defaults_match_the_contract():
         "enabled": True, "min_tool_chars": 400, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
         "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (), "anchor_errors": True, "prose_brief": True,
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
+        "policy_mode": "adaptive", "autotune": True, "manifest": True, "edits": True, "pins": True, "adaptive_host": True, "preference": "balanced", "activation": "auto", "recent_protection": "auto",
+        "input_budget_tokens": None, "output_reserve_tokens": None,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "small_window_threshold_tokens": 54_400, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.75, "small_window_prune_ratio": 0.60,
         "default_proactive_prune_min_result_chars": 8000, "reprune_target_ratio": 0.30, "prune_regrowth_ratio": 0.20,
@@ -87,6 +90,17 @@ ENV_SAMPLES = {
     "expand_tool": ("no", False),
     "expand_grep_timeout": ("0.5", 0.5),
     "expand_grep_line_chars": ("4000", 4000),
+    "policy_mode": ("fixed", "fixed"),
+    "autotune": ("off", False),
+    "manifest": ("off", False),
+    "edits": ("off", False),
+    "adaptive_host": ("off", False),
+    "pins": ("off", False),
+    "preference": ("Preserve-detail", "preserve_detail"),
+    "activation": ("earlier", "earlier"),
+    "recent_protection": ("long", "long"),
+    "input_budget_tokens": ("96000", 96000),
+    "output_reserve_tokens": ("0", 0),
     "store_max_entries": ("10", 10),
     "store_max_chars": ("1000", 1000),
     "pass_char_budget": ("0", 0),
@@ -117,7 +131,8 @@ def test_every_field_is_settable_from_env(hermes_config, name):
     raw, expected = ENV_SAMPLES[name]
     settings, warnings = load_settings(env={ENV + name.upper(): raw})
     assert warnings == []
-    assert settings == dataclasses.replace(TameruSettings(), **{name: expected})
+    mode = "adaptive"     # adaptive is the default for every knob; only an explicit policy_mode changes it
+    assert settings == dataclasses.replace(TameruSettings(policy_mode=mode), **{name: expected})
 
 
 @pytest.mark.parametrize("name", sorted(ENV_SAMPLES))
@@ -131,6 +146,23 @@ def test_every_field_is_settable_from_the_plugin_settings(hermes_config, name):
 
 
 # ---- precedence ----------------------------------------------------------------------------------
+@pytest.mark.parametrize(("input_value", "reserve_value", "expected", "warning_count"), [
+    ("auto", "0", (None, 0), 0),
+    ("-1", "-1", (96_000, 32_000), 2),
+    ("0", "auto", (96_000, None), 1),
+])
+def test_optional_budget_precedence_preserves_unknown_and_zero(
+    hermes_config, input_value, reserve_value, expected, warning_count,
+):
+    hermes_config(plugin_config(input_budget_tokens=96_000, output_reserve_tokens=32_000))
+    settings, warnings = load_settings(env={
+        ENV + "INPUT_BUDGET_TOKENS": input_value,
+        ENV + "OUTPUT_RESERVE_TOKENS": reserve_value,
+    })
+    assert (settings.input_budget_tokens, settings.output_reserve_tokens) == expected
+    assert len(warnings) == warning_count
+
+
 def test_env_beats_settings_and_settings_beat_defaults(hermes_config):
     hermes_config(plugin_config(min_tool_chars=500, brief_chars=900))
     settings, warnings = load_settings(env={ENV + "MIN_TOOL_CHARS": "700"})
@@ -340,6 +372,7 @@ def test_a_settings_section_that_is_not_a_mapping_warns(hermes_config):
 
 
 def test_null_values_in_the_settings_file_mean_unset(hermes_config):
+    # The null fields inside an existing plugin entry still count as unset, not as values.
     hermes_config(plugin_config(min_tool_chars=None, telemetry_log=None))
     assert load_settings(env={}) == (TameruSettings(), [])
 
@@ -749,16 +782,155 @@ def test_hermes_default_config_equals_the_compressor_defaults(init_params, compr
 
 
 @pytest.mark.real_hermes
-def test_the_table_covers_every_config_driven_kwarg_hermes_passes_to_the_compressor():
-    """Drift guard: the ``ContextCompressor(...)`` call in ``_build_context_engine`` names the kwargs we mirror."""
-    import re
+def test_implicit_environment_stays_with_the_launch_profile(tmp_path, monkeypatch):
+    from hermes_constants import (get_routing_process_hermes_home, process_hermes_home_is_pinned,
+        pin_process_hermes_home, set_hermes_home_override, reset_hermes_home_override)
+    from hermes_cli.config import atomic_config_write
+    was_pinned = process_hermes_home_is_pinned()
+    previous_home = get_routing_process_hermes_home()
+    launch, foreign = tmp_path / 'launch', tmp_path / 'foreign'
+    launch.mkdir()
+    foreign.mkdir()
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    monkeypatch.setenv('HERMES_HOME', str(launch))
+    monkeypatch.setenv(ENV + 'ENABLED', 'true')
+    telemetry = str(launch / 'telemetry.jsonl')
+    monkeypatch.setenv(ENV + 'TELEMETRY_LOG', telemetry)
+    pin_process_hermes_home(launch)
+    try:
+        for home, enabled in ((launch, True), (foreign, False)):
+            atomic_config_write(home / 'config.yaml', plugin_config(enabled=False, telemetry_log=''))
+            token = set_hermes_home_override(home)
+            try:
+                # A mirrored process env must not change the pinned launch identity.
+                monkeypatch.setenv('HERMES_HOME', str(home))
+                settings, warnings = load_settings()
+                assert settings.enabled is enabled
+                assert settings.telemetry_log == (telemetry if enabled else '')
+                assert not warnings
+                if home == foreign:
+                    assert load_settings(env={ENV + 'ENABLED': 'true'})[0].enabled is True
+            finally:
+                reset_hermes_home_override(token)
+    finally:
+        pin_process_hermes_home(previous_home if was_pinned else None)
 
+
+@pytest.mark.real_hermes
+def test_the_table_covers_every_config_driven_kwarg_hermes_passes_to_the_compressor(monkeypatch):
+    """The plugin mirrors the config fields Hermes actually forwards to its compressor."""
     from agent import agent_init
+    real_compressor = agent_init.ContextCompressor
+    captured = {}
+    def recording_compressor(*args, **kwargs):
+        captured.update(kwargs)
+        return real_compressor(*args, **kwargs)
+    monkeypatch.setattr(agent_init, 'ContextCompressor', recording_compressor)
+    agent = types.SimpleNamespace(model='plain-model', provider='custom', api_mode='chat_completions',
+        base_url='http://127.0.0.1:9/v1', api_key='', quiet_mode=True, max_tokens=4096, session_id='config-contract')
+    config = {'context': {'engine': 'compressor'}, 'compression': {'checkpoint_required': False}}
+    parsed = agent_init._parse_compression_config(agent, config)
+    agent_init._build_context_engine(agent, config, parsed, [], 128_000, None)
+    runtime = {'model', 'summary_model_override', 'quiet_mode', 'base_url', 'api_key',
+               'config_context_length', 'provider', 'api_mode', 'max_tokens', 'custom_providers'}
+    assert set(captured) - runtime == {entry.kwarg for entry in COMPRESSION_TABLE}
 
-    source = inspect.getsource(agent_init._build_context_engine)
-    call = source[source.index("ContextCompressor("):]
-    forwarded = set(re.findall(r"\b([a-z_]+)=", call[: call.index("custom_providers=")]))
-    ours = {e.kwarg for e in COMPRESSION_TABLE}
-    config_driven = forwarded - {"model", "summary_model_override", "quiet_mode", "base_url", "api_key",
-                                 "config_context_length", "provider", "api_mode", "max_tokens"}
-    assert config_driven == ours
+
+@pytest.mark.parametrize("merged,expected", [
+    (None, "adaptive"),
+    ({}, "adaptive"),
+    ({"plugins": {"entries": {"other": {"settings": {"x": 1}}}}}, "adaptive"),
+    (plugin_config(min_tool_chars=400), "adaptive"),  # adaptive by default
+    (plugin_config(max_extract_chars=1000), "adaptive"),          # adaptive by default
+    (plugin_config(), "adaptive"),                                 # adaptive by default
+    ({"context": {"engine": "tameru"}}, "adaptive"),              # adaptive by default
+    (plugin_config(preference="preserve_detail"), "adaptive"),
+    (plugin_config(output_reserve_tokens=4096), "adaptive"),          # adaptive by default
+    (plugin_config("config", max_extract_chars=1100), "adaptive"),     # adaptive by default
+    (plugin_config(activation="earlier"), "adaptive"),
+    (plugin_config(recent_protection="long"), "adaptive"),
+    (plugin_config(preference="preserve_detail", policy_mode="legacy"), "legacy"),
+    (plugin_config(preference="preserve_detail", policy_mode="adaptive"), "adaptive"),
+])
+def test_policy_mode_migration_default(hermes_config, merged, expected):
+    hermes_config(merged)
+    assert load_settings(env={})[0].policy_mode == expected
+
+
+def test_policy_mode_migration_env_and_ctx_sources(hermes_config):
+    hermes_config({})
+    assert load_settings(env={"TAMERU_HERMES_MIN_TOOL_CHARS": "400"})[0].policy_mode == "adaptive"
+    assert load_settings(env={"TAMERU_HERMES_PREFERENCE": "preserve_detail"})[0].policy_mode == "adaptive"
+    assert load_settings(env={"TAMERU_HERMES_UNKNOWN_KNOB": "x"})[0].policy_mode == "adaptive"
+    assert load_settings(FakeCtx({"min_tool_chars": 400}), env={})[0].policy_mode == "adaptive"
+    assert load_settings(FakeCtx({"preference": "preserve_detail"}), env={})[0].policy_mode == "adaptive"
+
+
+def test_policy_mode_invalid_new_control_still_defaults_to_adaptive(hermes_config):
+    hermes_config(plugin_config(preference="bogus"))
+    settings, warnings = load_settings(env={})
+    assert settings.policy_mode == "adaptive" and settings.preference == "balanced" and warnings
+
+
+def test_selecting_the_engine_through_the_context_section_gets_adaptive_and_self_tuning(hermes_config):
+    hermes_config({"context": {"engine": "tameru"}})
+    settings, warnings = load_settings(env={})
+    assert (settings.policy_mode, settings.autotune) == ("adaptive", True) and warnings == []
+
+
+def test_legacy_is_still_available_by_choice(hermes_config):
+    hermes_config(plugin_config(policy_mode="legacy"))
+    assert load_settings(env={})[0].policy_mode == "legacy"
+
+
+@pytest.mark.real_hermes
+@pytest.mark.parametrize('updates,expected', [
+    ({}, 'adaptive'),                         # adaptive is the default everywhere, `context.engine: tameru` alone included
+    ({'policy_mode': 'adaptive'}, 'adaptive'),
+    ({'policy_mode': 'legacy'}, 'legacy'),    # legacy stays available by choice
+    ({'preference': 'preserve_detail'}, 'adaptive'),
+    ({'output_reserve_tokens': 4096}, 'adaptive'),
+])
+def test_policy_migration_through_native_config_contexts(tmp_path, monkeypatch, updates, expected):
+    from hermes_cli.config import atomic_config_write
+    from hermes_cli.plugins import PluginContext, PluginManifest
+    from hermes_constants import set_hermes_home_override, reset_hermes_home_override
+    from plugins.context_engine import _EngineCollector
+    home = tmp_path / 'native-policy-home'
+    home.mkdir()
+    monkeypatch.setattr(Path, 'home', lambda: tmp_path)
+    token = set_hermes_home_override(home)
+    try:
+        config = plugin_config(max_extract_chars=1234, **updates)
+        config['context'] = {'engine': 'tameru'}
+        path = home / 'config.yaml'
+        atomic_config_write(path, config)
+        before = path.read_bytes()
+        ctx = PluginContext(PluginManifest(name='tameru'), None)
+        assert ctx.get_config('max_extract_chars') == 1234
+        for context in (ctx, _EngineCollector(engine_name='tameru')):
+            settings, warnings = load_settings(context, env={})
+            assert not warnings
+            assert settings.policy_mode == expected
+            assert settings.max_extract_chars == 1234
+            assert settings.preference == updates.get('preference', 'balanced')
+            assert settings.output_reserve_tokens == updates.get('output_reserve_tokens')
+        assert path.read_bytes() == before
+    finally:
+        reset_hermes_home_override(token)
+
+
+@pytest.mark.parametrize("name", ["edits", "manifest", "autotune", "adaptive_host", "pins"])
+def test_documented_short_switches_turn_features_off(name):
+    settings, _warnings = load_settings(env={"TAMERU_" + name.upper(): "off"})
+    assert getattr(settings, name) is False
+
+
+def test_the_long_env_name_wins_over_the_short_one():
+    settings, _warnings = load_settings(env={"TAMERU_EDITS": "off", ENV + "EDITS": "on"})
+    assert settings.edits is True
+
+
+def test_short_names_apply_only_to_the_documented_switches():
+    settings, _warnings = load_settings(env={"TAMERU_MIN_TOOL_CHARS": "123"})
+    assert settings.min_tool_chars != 123

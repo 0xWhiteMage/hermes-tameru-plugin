@@ -2,9 +2,17 @@
 from __future__ import annotations
 
 import pytest
-from engine_support import Chat, make_engine, pytest_failure, server_log, source_file
+from dataclasses import replace
+from engine_support import Chat, make_engine as _make_engine, pytest_failure, server_log, source_file
+
+from hermes_tameru_plugin.config import TameruSettings
 
 pytestmark = pytest.mark.real_hermes
+
+
+def make_engine(settings: TameruSettings | None = None, **kwargs):
+    """These tests exercise the legacy gate semantics: escalation, degrade rungs, Hermes' own pair."""
+    return _make_engine(replace(settings or TameruSettings(), policy_mode="legacy"), **kwargs)
 
 
 def _messages() -> list[dict]:
@@ -81,6 +89,10 @@ def test_the_escalation_pass_runs_with_header_only_rungs():
     new_scope = engine._new_scope
     engine._new_scope = lambda messages, **fields: degrade.append(fields.get("degrade", False)) or new_scope(
         messages, **fields,
+    )
+    candidate_scope = engine._candidate_scope
+    engine._candidate_scope = lambda base, **fields: degrade.append(fields.get("degrade", False)) or candidate_scope(
+        base, **fields,
     )
     engine.prune_tool_results_only(_messages(), 500_000)
     assert degrade == [False, True]

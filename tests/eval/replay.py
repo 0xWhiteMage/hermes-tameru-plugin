@@ -46,10 +46,14 @@ Hermes is imported lazily so this module can be imported (and skipped) without i
 """
 from __future__ import annotations
 
+import copy
 import inspect
 import json
 import re
+import subprocess
 import sys
+import os
+import tempfile
 import time
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager, nullcontext
@@ -67,6 +71,8 @@ from scenario_registry import DEFAULT_SCENARIO, get_spec
 MODEL = "test-model"
 CONTEXT_LENGTH = 64_000  # tiny window so a 30-turn session needs several compactions
 TOOLS_OVERHEAD_TOKENS = 3_000  # tool schemas ride every request but are not in ``messages``
+TOOLS_OVERHEAD_CHARS = TOOLS_OVERHEAD_TOKENS * 4  # fixed, simulated baseline schema size
+PROTOCOL_VERSION = 2
 CACHE_READ = 0.10  # cached prefix chars cost 0.10x
 CACHE_WRITE = 1.25  # new (uncached) chars cost 1.25x
 SUMMARY_FIRST_CHARS = 200  # the fake summarizer keeps this much of every turn
@@ -137,7 +143,7 @@ def error_fingerprints(text: str) -> dict[str, str]:
 # Message helpers
 # =================================================================================================
 def _wire(msg: dict) -> str:
-    """The provider-visible serialization of one message (internal underscore keys etc. dropped)."""
+    """Simulation JSON projection, excluding internal keys; not an actual provider payload."""
     return json.dumps({k: msg[k] for k in WIRE_KEYS if k in msg}, ensure_ascii=False, sort_keys=True)
 
 
@@ -240,6 +246,7 @@ class FakeSummarizer:
     def __init__(self) -> None:
         self.calls = 0
         self.prompt_chars = 0
+        self.input_chars = 0  # all serialized auxiliary messages, including envelope characters
         self.output_chars = 0
         self.unparsed = 0  # prompts whose turn records the fake could not recognise (Hermes changed the format)
 
@@ -267,6 +274,7 @@ class FakeSummarizer:
         prompt = kwargs["messages"][0]["content"]
         self.calls += 1
         self.prompt_chars += len(prompt)
+        self.input_chars += sum(len(_wire(message)) + 1 for message in kwargs["messages"])
         records, prev_actions, prev_task = self._parse(prompt)
         if not records or not _RECORD_START_RE.match(records[0]):
             self.unparsed += 1  # would silently summarise the wrong text; the replay tests assert this stays 0
@@ -416,6 +424,14 @@ class _Session:
         self.clock = clock
         self.window = int(context_length)
         self.max_attempts = int(max_compression_attempts)
+        schemas = getattr(engine, "get_tool_schemas", None)
+        extra_schemas = schemas() if callable(schemas) else []
+        extra_wire = json.dumps(extra_schemas, ensure_ascii=False, sort_keys=True) if extra_schemas else ""
+        # Freeze schemas once, as a real conversation does. The baseline schema size is
+        # assumed; engine-added schemas are serialized, with a four-char token estimate.
+        self._schema_wire = " " * TOOLS_OVERHEAD_CHARS + extra_wire
+        self.schema_chars = len(self._schema_wire)
+        self._overhead_tokens = TOOLS_OVERHEAD_TOKENS + (len(extra_wire) + 3) // 4
         # overflow path / budget state
         self.turn_attempts = 0  # Hermes' per-turn ``compression_attempts`` (every gate shares it)
         self.turn_failed = False
@@ -447,15 +463,34 @@ class _Session:
         self._prev_total = 0
         self.last_request: list[dict] = []
         self.last_usage: dict | None = None
-        self._prev_rows: dict[str, str] | None = None
-        self.rewrites: list[str] = []  # tool rows whose bytes changed in a request that committed nothing
+        self._prev_history: list[dict] | None = None
+        self.rewrites: list[str] = []
+        self.input_mutations: list[str] = []
+        self.request_slots = 0
+        self.closing_request_slot: int | None = None
+        self.closing_request_number: int | None = None
+
+    def _invoke(self, operation: str, messages: list[dict], call: Callable[[], Any]) -> Any:
+        """Time engine work separately from fixture snapshots; a commit never permits
+        mutation of the caller's input values or replacement of its message objects."""
+        before = copy.deepcopy(messages)
+        identities = tuple(map(id, messages))
+        started = time.perf_counter()
+        try:
+            return call()
+        finally:
+            elapsed = time.perf_counter() - started
+            self.engine_seconds += elapsed
+            self.engine_seconds_by_op[operation] = self.engine_seconds_by_op.get(operation, 0) + elapsed
+            if messages != before or tuple(map(id, messages)) != identities:
+                self.input_mutations.append(f"slot {self.request_slots}: {operation}")
 
     # -- Hermes' pre-request check --------------------------------------------------------------
     def preflight(self, messages: list[dict], *, after_tools: bool = False) -> list[dict]:
         """Hermes' pre-request gate. ``after_tools``: the request follows tool results (the post-tool path,
         the only one that may prune); otherwise it is the turn-start preflight (compress gate only)."""
         eng = self.engine
-        est = self._estimate(messages) + TOOLS_OVERHEAD_TOKENS
+        est = self._estimate(messages) + self._overhead_tokens
         if getattr(eng, "awaiting_real_usage_after_compression", False):
             return messages  # a fresh checkpoint must reach the provider before any gate acts on it
         t0 = time.perf_counter()
@@ -468,11 +503,7 @@ class _Session:
             if self.realistic:
                 self.turn_attempts += 1
             before = sum(len(_wire(m)) for m in messages)
-            t0 = time.perf_counter()
-            out = eng.compress(messages, current_tokens=est)
-            dt = time.perf_counter() - t0
-            self.engine_seconds_by_op["compress"] += dt
-            self.engine_seconds += dt
+            out = self._invoke("compress", messages, lambda: eng.compress(messages, current_tokens=est))
             self.compress_calls += 1
             if out is not messages:
                 self.compactions += 1
@@ -488,11 +519,7 @@ class _Session:
         prune = getattr(eng, "prune_tool_results_only", None)
         if after_tools and callable(prune):
             before = sum(len(_wire(m)) for m in messages)
-            t0 = time.perf_counter()
-            new, n = prune(messages, current_tokens=est)
-            dt = time.perf_counter() - t0
-            self.engine_seconds_by_op["prune"] += dt
-            self.engine_seconds += dt
+            new, n = self._invoke("prune", messages, lambda: prune(messages, current_tokens=est))
             self.prune_calls += 1
             if n and new is not messages:  # Hermes' no-op contract: only a NEW list with n > 0 commits
                 self.prune_commits += 1
@@ -518,38 +545,43 @@ class _Session:
         """``select_context``: a request-only replacement of the context, fail-open like Hermes."""
         if not self._overrides("select_context"):
             return messages
-        selected = self.engine.select_context(
+        selected = self._invoke("select_context", messages, lambda: self.engine.select_context(
             list(messages),
             conversation_messages=list(messages),
             incoming_message=None,
             budget_tokens=int(getattr(self.engine, "context_length", 0) or 0),
-        )
+        ))
         if isinstance(selected, list) and selected and all(isinstance(m, dict) for m in selected):
             return selected
         return messages
 
     def turn_complete(self, messages: list[dict]) -> None:
         if self._overrides("on_turn_complete"):
-            self.engine.on_turn_complete(list(messages), usage=self.last_usage)
+            self._invoke("on_turn_complete", messages,
+                         lambda: self.engine.on_turn_complete(list(messages), usage=self.last_usage))
 
     def _check_stability(self, messages: list[dict], *, committed: bool) -> None:
-        """Hermes only rewrites history inside a commit (a prune or a compaction): between commits every
-        tool row must keep its bytes, or the prompt cache breaks for nothing."""
-        rows = {
-            str(m["tool_call_id"]): m["content"] for m in messages
-            if m.get("role") == "tool" and m.get("tool_call_id") and isinstance(m.get("content"), str)
-        }
-        if self._prev_rows is not None and not committed:
-            for cid, content in rows.items():
-                if cid in self._prev_rows and self._prev_rows[cid] != content:
-                    self.rewrites.append(f"request {len(self.request_chars) + 1}: {cid}")
-        self._prev_rows = rows
+        """Between declared replay commits, the entire existing fixture history
+        must remain an unchanged prefix. This is not proof of a durable host commit."""
+        if self._prev_history is not None and not committed:
+            for index, previous in enumerate(self._prev_history):
+                if index >= len(messages) or messages[index] != previous:
+                    identity = previous.get("tool_call_id") or previous.get("role", "unknown")
+                    self.rewrites.append(f"slot {self.request_slots}: row {index} ({identity})")
+                    break
+        self._prev_history = copy.deepcopy(messages)
 
     # -- context overflow (the provider rejects a request larger than the window) -----------------
     def begin_turn(self) -> None:
         """A new user turn: Hermes' per-turn compression budget and failure flag start over."""
         self.turn_attempts = 0
         self.turn_failed = False
+        # The plugin's pre_llm_call hook runs once per turn and takes one bounded step of its host-settings tuning.
+        # Only engines built for that comparison (``replay_runs_host_tuning``) do it here, so the older arms and
+        # their saved baselines measure exactly what they always did.
+        step = getattr(self.engine, "adapt_host_settings", None)
+        if callable(step) and getattr(self.engine, "replay_runs_host_tuning", False):
+            step()
 
     def _overflow_gate_reason(self) -> str | None:
         """Why Hermes' ``compress_context`` would no-op an overflow attempt, or None.
@@ -611,7 +643,7 @@ class _Session:
         """
         eng = self.engine
         while True:
-            est = self._estimate(sent) + TOOLS_OVERHEAD_TOKENS
+            est = self._estimate(sent) + self._overhead_tokens
             self.max_attempted_tokens = max(self.max_attempted_tokens, est)
             if est <= self.window:
                 return messages, sent
@@ -632,11 +664,8 @@ class _Session:
                     self._fail_turn("compression_exhausted")
                 return messages, sent
             before = sum(len(_wire(m)) for m in messages)
-            t0 = time.perf_counter()
-            out = eng.compress(messages, **self._compress_kwargs(est))
-            dt = time.perf_counter() - t0
-            self.engine_seconds_by_op["compress"] += dt
-            self.engine_seconds += dt
+            out = self._invoke("compress", messages,
+                               lambda: eng.compress(messages, **self._compress_kwargs(est)))
             self.compress_calls += 1
             if out is not messages:
                 self.compactions += 1
@@ -669,9 +698,19 @@ class _Session:
         position and never of the engine: a failed turn still takes the time of the requests it would have made
         (and the user's retry), otherwise a session stuck behind a 300 s backoff would never see it lapse.
         """
+        self.request_slots += 1
+        before = copy.deepcopy(messages)
+        identities = tuple(map(id, messages))
+        recorded_mutations = len(self.input_mutations)
         try:
             return self._request(messages)
         finally:
+            # Gates and usage callbacks can retain references to earlier inputs
+            # without receiving them as an explicit argument.
+            if (messages != before or tuple(map(id, messages)) != identities) and (
+                len(self.input_mutations) == recorded_mutations
+            ):
+                self.input_mutations.append(f"slot {self.request_slots}: request callback")
             if self.clock is not None:
                 self.clock.advance(self.clock.seconds_per_request)
 
@@ -686,12 +725,12 @@ class _Session:
         self._check_stability(messages, committed=messages is not before)
         if self.turn_failed:
             return messages
-        sent_tokens = self._estimate(sent) + TOOLS_OVERHEAD_TOKENS
+        sent_tokens = self._estimate(sent) + self._overhead_tokens
         self.max_sent_tokens = max(self.max_sent_tokens, sent_tokens)
         self.max_attempted_tokens = max(self.max_attempted_tokens, sent_tokens)
         if sent_tokens > self.window:
             self.requests_over_window += 1
-        wire = [_wire(m) for m in sent]
+        wire = [self._schema_wire, *(_wire(m) for m in sent)]
         total = sum(len(w) + 1 for w in wire)
         if self._prev_wire is None:
             lcp = 0
@@ -716,7 +755,7 @@ class _Session:
         for v in pairing_violations(sent):
             self.violations.append(f"request {len(self.request_chars)}: {v}")
         self._prev_wire, self._prev_total = wire, total
-        self.last_request = sent
+        self.last_request = copy.deepcopy(sent)
         # provider usage for this request (rough tokens + overhead), fed back like Hermes does
         prompt_tokens = sent_tokens
         self.last_usage = {"prompt_tokens": prompt_tokens, "completion_tokens": 120, "total_tokens": prompt_tokens + 120}
@@ -760,9 +799,9 @@ def run_session(
     (up to ``max_compression_attempts`` compressions per turn). A turn that cannot be recovered FAILS: the model is
     not called again for the rest of that turn, but the script's own rows (the assistant's tool calls, the tool
     results, its final reply) are still appended, so every engine ends with the same conversation content and the
-    next user turn tries again against the grown transcript. If the closing question fails, gold and error retention
-    are measured on the last request that was sent. ``realistic=False`` is the old harness (real clock, any request
-    size is sent and billed), kept only to compare with it.
+    next user turn tries again against the grown transcript. If the closing question fails, its retention
+    measurements are unavailable; an earlier request cannot stand in for it. ``realistic=False`` uses a real
+    clock and sends and bills any request size.
 
     Returns ``{"meta", "metrics", "series", "timing"[, "final_request"]}``. ``metrics`` and ``series`` are
     fully deterministic for a given (engine, turns, seed); ``timing`` is wall-clock and is not.
@@ -783,7 +822,7 @@ def run_session(
                    seconds_per_request, keep_final_request)
 
 
-def _play(sess: _Session, script: Scenario, seed: int) -> tuple[FakeSummarizer, list[dict]]:
+def _play(sess: _Session, script: Scenario, seed: int) -> tuple[FakeSummarizer, list[dict] | None]:
     """Drive the script through ``sess``; returns the fake summarizer and the final request."""
     summarizer = FakeSummarizer()
     call_counter = 0
@@ -810,15 +849,46 @@ def _play(sess: _Session, script: Scenario, seed: int) -> tuple[FakeSummarizer, 
                 sess.turn_complete(messages)
         messages.append({"role": "user", "content": script.final_question})
         sess.begin_turn()
+        sent_before = len(sess.request_chars)
         messages = sess.request(messages)
-    return summarizer, sess.last_request
+        sess.closing_request_slot = sess.request_slots
+        if len(sess.request_chars) > sent_before:
+            sess.closing_request_number = len(sess.request_chars)  # one-based
+    return summarizer, sess.last_request if sess.closing_request_number is not None else None
+
+
+def _hermes_source() -> dict:
+    """Report the imported checkout, never a historical constant or an enclosing repo."""
+    module = sys.modules.get("agent.context_compressor")
+    filename = getattr(module, "__file__", None)
+    unknown = {"hermes_pin": None, "hermes_source_dirty": None}
+    if filename is None:
+        return unknown
+    root = Path(filename).resolve().parents[1]
+    if not (root / ".git").exists():
+        return unknown
+    try:
+        revision = subprocess.run(
+            ["git", "-C", str(root), "rev-parse", "HEAD"],
+            capture_output=True, text=True, check=True, timeout=10,
+        ).stdout.strip()
+        status = subprocess.run(
+            ["git", "-C", str(root), "status", "--porcelain", "--untracked-files=no"],
+            capture_output=True, text=True, check=True, timeout=10,
+        ).stdout
+    except (OSError, subprocess.SubprocessError):
+        return unknown
+    if re.fullmatch(r"[0-9a-f]{40}", revision) is None:
+        return unknown
+    return {"hermes_pin": revision, "hermes_source_dirty": bool(status.strip())}
 
 
 def _result(
-    sess: _Session, summarizer: FakeSummarizer, final: list[dict], script: Scenario, engine: Any, turns: int, seed: int,
+    sess: _Session, summarizer: FakeSummarizer, final: list[dict] | None, script: Scenario, engine: Any, turns: int, seed: int,
     context_length: int, scenario: str, realistic: bool, seconds_per_request: float, keep_final_request: bool,
 ) -> dict:
-    final_text = visible_text(final)
+    observed = final is not None
+    final_text = visible_text(final or [])
 
     # ---- gold retention -----------------------------------------------------------------------
     by_cat: dict[str, dict] = {}
@@ -827,9 +897,10 @@ def _result(
         kept = [g.id for g in facts if g.needle in final_text]
         by_cat[cat] = {
             "total": len(facts),
-            "retained": len(kept),
-            "retention": round(len(kept) / len(facts), 4) if facts else None,
-            "missing": [g.id for g in facts if g.needle not in final_text],
+            "retained": len(kept) if observed else None,
+            "retained_ids": kept if observed else None,
+            "retention": round(len(kept) / len(facts), 4) if observed and facts else None,
+            "missing": [g.id for g in facts if g.needle not in final_text] if observed else None,
         }
     n_total = len(script.gold)
     n_kept = sum(1 for g in script.gold if g.needle in final_text)
@@ -844,14 +915,24 @@ def _result(
     metrics = {
         "turns": turns,
         "requests": len(sess.request_chars),
+        "request_slots": sess.request_slots,
+        "closing_probe": {
+            "sent": observed,
+            "slot": sess.closing_request_slot,
+            "sent_request_number": sess.closing_request_number,
+            "failure_reason": sess.failure_reasons[-1] if not observed and sess.failure_reasons else None,
+        },
         "context_length": context_length,
         "threshold_tokens": int(getattr(engine, "threshold_tokens", 0) or 0),
         "input_chars_total": sum(sess.request_chars),
-        "input_chars_max": max(sess.request_chars),
-        "input_chars_final": sess.request_chars[-1],
+        "input_chars_max": max(sess.request_chars, default=0),
+        "input_chars_final": sess.request_chars[-1] if observed and sess.request_chars else None,
+        "schema_chars_per_request": sess.schema_chars,
         "cost_cache_priced": sess.cost_x100 / 100,
         "cost_uncached": sess.cost_uncached / 100,
-        "cost_ratio_vs_uncached": round(sess.cost_x100 / sess.cost_uncached, 6),
+        "cost_ratio_vs_uncached": round(sess.cost_x100 / sess.cost_uncached, 6) if sess.cost_uncached else None,
+        "cost_auxiliary_input": summarizer.input_chars,  # cold 1x; no auxiliary cache claim
+        "total_simulated_input_cost": sess.cost_x100 / 100 + summarizer.input_chars,
         "cached_chars_total": sum(sess.cached_chars),
         "compress_calls": sess.compress_calls,
         "compactions": sess.compactions,
@@ -864,7 +945,7 @@ def _result(
         "prune_rows_demoted": sess.prune_rows,
         "prefix_invalidated_chars": sum(sess.invalidated_chars),
         "prefix_break_events": sess.prefix_breaks,
-        "messages_final": len(final),
+        "messages_final": len(final) if observed else None,
         "overflow_errors": sess.overflow_errors,
         "overflow_compactions": sess.overflow_compactions,
         "failed_turns": sess.failed_turns,
@@ -873,27 +954,34 @@ def _result(
         "max_request_window_ratio": round(sess.max_sent_tokens / context_length, 4),
         "max_attempted_window_ratio": round(sess.max_attempted_tokens / context_length, 4),
         "gold": {
+            "observed": observed,
             "total": n_total,
-            "retained": n_kept,
-            "retention": round(n_kept / n_total, 4) if n_total else None,
+            "retained": n_kept if observed else None,
+            "retained_ids": [g.id for g in script.gold if g.needle in final_text] if observed else None,
+            "retention": round(n_kept / n_total, 4) if observed and n_total else None,
             "by_category": by_cat,
         },
         "error_fingerprints": {
+            "observed": observed,
             "total": len(log_fps),
-            "retained": len(kept_fps),
-            "retention": round(len(kept_fps) / len(log_fps), 4) if log_fps else None,
+            "retained": len(kept_fps) if observed else None,
+            "retained_ids": sorted(kept_fps) if observed else None,
+            "retention": round(len(kept_fps) / len(log_fps), 4) if observed and log_fps else None,
         },
         "refetch": {
+            "observed": observed,
             "needed_facts": len(needed),
-            "missing_needed_facts": len(missing_needed),
-            "refetch_rate": round(len(missing_needed) / len(needed), 4) if needed else None,
-            "missing_ids": [g.id for g in missing_needed],
-            "refetch_opportunities": len({g.call_key for g in missing_needed if g.call_key}),
+            "missing_needed_facts": len(missing_needed) if observed else None,
+            "refetch_rate": round(len(missing_needed) / len(needed), 4) if observed and needed else None,
+            "missing_ids": [g.id for g in missing_needed] if observed else None,
+            "refetch_opportunities": len({g.call_key for g in missing_needed if g.call_key}) if observed else None,
         },
         "pairing": {"requests_checked": len(sess.request_chars), "violations": len(sess.violations),
                     "details": sess.violations[:10]},
         "byte_stability": {"requests_checked": len(sess.request_chars), "rewrites_outside_commits": len(sess.rewrites),
-                           "details": sess.rewrites[:10]},
+                           "details": sess.rewrites[:10],
+                           "input_mutations": len(sess.input_mutations),
+                           "input_mutation_details": sess.input_mutations[:10]},
     }
     series = {
         "request_chars": sess.request_chars,
@@ -901,12 +989,14 @@ def _result(
         "invalidated_chars": sess.invalidated_chars,
         "events": sess.events,
     }
-    meta = {"engine": type(engine).__name__, "engine_name": getattr(engine, "name", None), "seed": seed,
-            "turns": turns, "hermes_pin": "1298c8e74baa73e1a2b90124228d017261ac6bc4"}
+    meta = {"protocol_version": PROTOCOL_VERSION,
+            "accounting_source": "simulated usage from rough message and schema estimates",
+            "engine": type(engine).__name__, "engine_name": getattr(engine, "name", None), "seed": seed,
+            "turns": turns, **_hermes_source()}
     meta["realistic"] = realistic
     if realistic:
         meta["seconds_per_request"] = seconds_per_request
-    if scenario != DEFAULT_SCENARIO:  # the default session's meta stays exactly what it was
+    if scenario != DEFAULT_SCENARIO:
         meta["scenario"] = scenario
     result = {
         "meta": meta,
@@ -925,3 +1015,25 @@ def _result(
 def deterministic_part(result: dict) -> dict:
     """The comparable (non-timing) part of a ``run_session`` result."""
     return {"metrics": result["metrics"], "series": result["series"]}
+
+
+def _isolated(run):
+    """Run each session with an empty learned-prior folder: an engine is measured from scratch, so one run's
+    cross-chat learning (``$TAMERU_LEARNED_DIR/learned.json``) must not leak into the next run of the same engine."""
+    def wrapper(*args, **kwargs):
+        previous = os.environ.get("TAMERU_LEARNED_DIR")
+        with tempfile.TemporaryDirectory(prefix="tameru-eval-learned-") as folder:
+            os.environ["TAMERU_LEARNED_DIR"] = folder
+            try:
+                return run(*args, **kwargs)
+            finally:
+                if previous is None:
+                    os.environ.pop("TAMERU_LEARNED_DIR", None)
+                else:
+                    os.environ["TAMERU_LEARNED_DIR"] = previous
+    wrapper.__doc__ = run.__doc__
+    wrapper.__name__ = run.__name__
+    return wrapper
+
+
+run_session = _isolated(run_session)

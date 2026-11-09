@@ -5,9 +5,175 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+## [1.9.0] - 2026-11-09
+
+### Changed
+- The name is `Tameru (ためる)` everywhere: the Hermes plugin list, the engine's display name, the Desktop header, the
+  READMEs and the docs (the manifest, engine and README previously said `貯める`). The engine's identifier stays
+  `tameru`, which is the value saved as `context.engine`. The manifest description now starts with the name, which is
+  what Hermes' engine picker shows beside the identifier.
+- One solid look for everything that floats or sticks. The hover cards, the table's sticky header and the lean-mode
+  dropdown list now use one opaque near-black with light text, in a light or a dark app alike, instead of theme tokens
+  that could be translucent and clash with what was behind them. (A first version guessed light or dark from the page
+  and drew white cards on Hermes' dark Desktop, which a live check caught; nothing is guessed now.) The note beside a source also uses the hover card now, so no native tooltip is left in
+  the panel except the line-number gutters.
+- **Adaptive host settings.** `compression.threshold` and `compression.protect_last_n` are now the starting point and
+  guard rails, not fixed values. Per chat, Tameru nudges the effective summary threshold (within 10 points under to 15
+  over your setting, never past 85% of the window, never raised while the cache is cold or soon after a Hermes summary)
+  and the protected tail (half to double, 6 to 60 messages, wider when old outputs are revisited, via re-reads,
+  Restore and Keep). It reads numbers only, never message text, and never writes `config.yaml`; Hermes keeps its own
+  floors and caps. Each visible change gives a plain-language reason, and the memory hint shows "Tuned for this chat".
+  Off with `adaptive_host: off` / `TAMERU_ADAPTIVE_HOST=off`, or when Tameru is paused or not in adaptive mode.
+  Two numbers are saved per chat (`tameru_host_v1`).
+- **Applied now means the provider accepted the request.** A Keep or Restore reads Pending until the `post_api_request`
+  hook reports success for the request that carried it (the older "request started" signal was too early). Before that,
+  the request Hermes built is checked to contain the restored text; if it does not, the edit reads Failed ("Not in the
+  request"). A request that failed for good reads Failed ("Not sent"); one that Hermes will retry stays Pending. Edits
+  whose request never got an answer are counted in the Health line ("edits not confirmed"). The hint says what was sent,
+  never that the model used it.
+- **Last reply timing and new input.** The memory hint shows how many tokens were new in the last reply, how long the
+  call took, and, only when Hermes streamed it, when the first part arrived (a first chunk, not a first token; server
+  prefill is not exposed and is not estimated). Numbers only; additive fields, so the panel schema is unchanged.
+- **Same-named files can be told apart.** The per-turn note shows a parent directory beside a file name only when two
+  different files share it (`src/index.ts`, `lib/index.ts`); the directory is cleaned and capped like a name.
+- **The artifact trail marks a file that changed under the agent.** If two reads of a file differ and the agent did not
+  write it in between, its line ends `(changed since earlier read)` (carried through later compactions, cleared when the
+  reads agree again). It is only what Tameru saw: a command such as `git checkout` never marks anything by itself.
+  When the trail has to drop lines, failing files, changed files and commands that did not exit 0 are the last to go.
+- **Pinned instructions.** `/tameru pin TEXT`, `/tameru unpin N` and `/tameru pins` keep up to five lines you wrote word
+  for word in every Hermes summary (a fixed `## Pinned by you (Tameru, verbatim)` section added after the summarizer
+  runs, replacing an earlier one, so it cannot be softened or dropped). Nothing is inferred; credential-looking text is
+  refused; the verbs work on your own clients only; switch off with `pins: off` / `TAMERU_PINS=off`. Saved per chat
+  (`tameru_pins_v1`). The Desktop panel has a pin button in its header that opens the list (add, remove, "n of 5").
+- **Desktop's engine list can read "Tameru (ためる)".** Desktop labels each engine from the saved `context.engine`
+  value and Hermes loads it from a plugin folder of the same name, so the label changes only if both change together.
+  `scripts/use_display_name.ps1` does exactly that (plan first, `-Apply`, `-Revert`): `plugins/tameru` becomes
+  `plugins/tameru_(ためる)` and `context.engine` follows, with `config.yaml` backed up and the old folder kept in `plugin-backups/`.
+  The plugin's id stays `tameru` (it comes from `plugin.yaml`), so `plugins.enabled`, `plugins.entries.tameru` and the
+  panel are untouched. `scripts/rollback.ps1` restores into whichever folder is installed, and now keeps its plugin
+  backup in `plugin-backups/` and follows the renamed Desktop folder. A backup left inside `plugins/` or `desktop-plugins/` is loaded as a
+  second copy (a leading dot does not hide it from Desktop), and Desktop then refuses the new panel as a duplicate id.
+- Desktop panel build number is 4 (Desktop and the plugin warn "Out of date" if they differ).
+
+### Fixed
+- The emergency switches now work as documented: `TAMERU_EDITS=off`, `TAMERU_MANIFEST=off`, `TAMERU_AUTOTUNE=off` and
+  `TAMERU_ADAPTIVE_HOST=off` were silently ignored because only `TAMERU_HERMES_<NAME>` was read. The short names are
+  accepted for these four; the long name wins if both are set.
+- The artifact trail no longer quotes text a stranger may have written as if Tameru had checked it. Errors are taken
+  only from commands the agent ran (not from files it read or searched), and any line that reads like an order to the
+  model ("ignore previous instructions", "you must run ...", "Tameru verified ...") is left out and only counted
+  (`/tameru` Health: "order-like error lines left out").
+- Credentials typed into a command line are redacted in the trail: `-pSECRET`, `-u user:pw`, `PGPASSWORD=...`,
+  `*_TOKEN=...`, `Authorization:` headers, `--password`.
+- Keep and Restore need a reference of at least 8 characters that matches exactly one output.
+- A forced loop of `tameru_read_original` calls can no longer widen the protected tail: a re-read of the same output
+  counts once per 5 turns and the revisits counted per step are capped.
+- `scripts/rollback.ps1` and the runbooks point to `v1.8.0` (tagged locally); `v1.6.0` remains the last published release.
+
+### Testing
+- Test runs can no longer change a real Hermes install: Hermes' bootstrap used to "finish a source update" (install
+  dependencies, relaunch) when a test imported it, which made 25 tests fail and took a minute; the suite now sets
+  `HERMES_DISABLE_LAZY_INSTALLS=1`, so the same tests run in seconds.
+- The evaluation harness runs each replay with an empty learned-prior folder. Before, the first run's cross-chat learning
+  leaked into the second run of the same engine, so the "two runs are identical" check failed for the plugin.
+- Three expected-loss entries that now pass (strict xfail) were removed, and a real-Hermes policy-migration test was
+  updated to the current default (adaptive everywhere). The saved baselines no longer match this Hermes (even the
+  stock-Hermes ones differ), so they need re-recording against the Hermes version they are meant for.
+- New replay arms `tameru_1_9_host_off` / `tameru_1_9_host_on` and `tests/eval/test_host_tuning_replay.py`: tuning Hermes'
+  threshold and protected tail must not lose gold facts, break pairing or raise cost. On a 64K window Hermes' own floor
+  makes the threshold percent irrelevant, so this guards side effects only; the threshold itself needs a larger window.
+
+### Audit fixes
+- A repo audit ([docs/PONYTAIL-AUDIT-2026-11-09.md](docs/PONYTAIL-AUDIT-2026-11-09.md)) found three real problems in this release's own
+  work, now fixed: the credential and order-like filters hid ordinary commands (`ssh -p2222`, `MAX_TOKENS=4096`,
+  `--token-limit 5`) and dropped ordinary error lines ("next step failed", anything naming the plugin); the install scripts left
+  backups inside `plugins/` and `desktop-plugins/`, where Desktop loads them as a second panel and refuses the new one
+  ("duplicate id tameru"), so backups now go to `plugin-backups/`; and `rollback.ps1` looked for the Desktop panel in the old
+  folder name. One dead method was removed. The Keep/Restore, pin, host-tuning and usage methods moved out of `engine.py` into
+  `engine_edits.py`, `engine_host.py` and `engine_usage.py` (verbatim), errors those methods swallow are now counted and shown
+  as "errors ignored" in the Health line, and a Hermes module that cannot be imported is no longer retried on every call
+  (remembered for five seconds). The vendored engine now includes four steps of `compress_context` moved into their own functions (engine commit
+  `497872d`; the output is byte-identical on a 5,616-case capture). The other findings (the remaining long engine functions,
+  replay captures in git) are listed in the report.
+
+### Documentation
+- New [docs/REPOSITORIES.md](docs/REPOSITORIES.md), and a matching guide and README section in the engine repository,
+  state the split: the engine is harness-agnostic and has no dependency on Hermes; this plugin vendors it unchanged
+  and owns everything Hermes-specific (adaptive policy and self-tuning, Restore and Keep, the per-turn note, the
+  Desktop panel, `/tameru`, chat-surface gates). Where a change belongs and how releases flow between the two are in
+  those guides.
+- Version 1.9.0, vendoring engine 1.9.0 (no engine behaviour change).
+
+## [1.8.0] - 2026-11-09
+
+Tameru 1.8.0 is clearer and calmer in Desktop, lets you put a shortened output back in front of the model (Restore and
+Keep), tells the model what is shortened, tunes itself across chats, and closes the security gaps found in review.
+
+**About 1.7.0:** it was never tagged or published. It stayed a release candidate in both repositories, so everything it
+contained is first released here (its section below is kept as the record of what it was). 1.8.0 also carries the
+engine fixes made after that candidate (source associations across structured compaction, YAML dependencies and Git
+note boundaries). The vendored engine is 1.8.0, and `plugin.yaml`, `pyproject.toml` and the engine agree.
+
+**Upgrading:** new settings, all on by default and each switchable off: `autotune`, `manifest`, `edits` (and
+`policy_mode` now defaults to `adaptive`). New small state is kept per chat in its own session metadata
+(`tameru_tuner_v1`, `tameru_edits_v1`) and one profile-wide file, `$HERMES_HOME/tameru/learned.json` (five numbers).
+Going back to an older release ignores all of it. See `docs/RUNBOOKS.md` for incidents and rollback.
+
+### Added
+- Self-tuning cleanup (`autotune`, default on in adaptive mode): bounded, self-reversing adjustments from four live signals, persisted per chat. The user choices are one bias (Save space, Balanced, Preserve detail) and Pause.
+- Compression-progress snapshot (`/tameru --json` schema 3: gauge, savings, plain-language status, tuner posture and recent adjustments, timeline) and a text view of it for the CLI, TUI and messaging.
+- `/tameru changes`, `/tameru bias`, `/tameru pause` and `/tameru resume`; `/tameru policy` remains.
+- `post_compaction` hook so the tuner learns when Hermes compacted ahead of Tameru.
+- Compaction status line carries a short Tameru clause; the post-commit chat line reports tokens freed.
+- Activity table rebuilt after a restart, or on the first `/tameru`, from rows an archived original proves for the same message id; archive reads now include superseded originals (`include_inactive`) so this works on current Hermes.
+
+### Security
+- Every original now passes one fail-closed `screen_original` gate before it is shown, restored or handed to the model. Originals read back from Hermes' session archive were not screened for credentials before; View original, `tameru_read_original` and the Desktop viewer now refuse them ("Held a secret"). A test forbids reading an original any other way.
+- `/tameru view`, `show`, `policy`, `bias`, `pause` and `resume` only run from Desktop, CLI, TUI or ACP. In a messaging chat Hermes passes no sender, so any member could previously read raw tool output; they now get a one-line refusal. `/tameru` and `/tameru changes` still work everywhere.
+- The Desktop **Add** action quotes text in a code fence one backtick longer than any run inside it, so quoted output cannot close the fence and put instructions into the message.
+- The profile-wide learned prior moves at most 0.12 per offset per UTC day, across all chats.
+- The telemetry log only writes under `$HERMES_HOME` or the system temp folder (no network or device paths) and rotates at 5 MB, keeping one `.1` file.
+
+### Added: getting back what was left out
+- Desktop **Left Out** viewer: removed stretches fold into expandable bars, lines are selectable, with **Add** and **Re-Read** (the main action follows size and trust: untrusted web/MCP text and large selections default to the re-read, and adding is blocked for them).
+- `/tameru show REF` and `/tameru ask REF [START-END | term]` on every surface.
+- A short recovery note in each new session prompt and a tool description that leads with when to call `tameru_read_original`.
+- Each recorded change keeps fingerprints of the lines it kept (no text), so a viewed page can mark what was left out.
+
+### Added (Keep and Restore)
+- **Restore** and **Keep** on each row of the Desktop list, and `/tameru restore REF`, `keep REF`, `unkeep REF`, `cancel` on Desktop, CLI and TUI (never from a messaging platform). They put the full original of an output Tameru already shortened back in front of the model: Restore for the next five replies, Keep until you unpin it (and across a restart). A change waits for your next message, so a batch costs the prompt cache one rebuild.
+- It works on the request that goes to the model (`select_context`), never on saved history. A row is only replaced when it is provably the one Tameru shortened (same message identity and bytes); web content can only be re-read; an original that held a credential is refused; the total it adds is held under 15% of Hermes' compaction point (at most 40k tokens), and a Restore or Keep is refused ("Memory nearly full") when it would push the chat past that compaction point, because a Hermes summary cannot be undone. The same check runs on every request, so an edit that no longer fits reads Failed instead of triggering a summary. Any error leaves the request exactly as Hermes built it, and three errors switch edits off for the chat.
+- A state reads Pending until the request that carried it has started, then Applied (or Kept); a change that could not be applied says why (Failed), and a finished Restore reads Expired. `edits: off` / `TAMERU_EDITS=off` disables the feature.
+- Not in this change: restoring text that a Hermes summary already folded away (the row is no longer in the request, so it reports "Not in this chat's history"), a Restore button inside the viewer, and a second-click confirm for web content (web content is simply refused).
+
+### Added (what the model is told, and real usage)
+- A short per-turn note to the model (`pre_llm_call`, `manifest: on` by default, `TAMERU_MANIFEST=off` to disable): how many tool results are shortened and the base names of files it wrote or patched, in a `<tameru_note>` frame that says it is data, not instructions. It carries structure only (never tool output, commands or full paths), is cleaned and screened for credentials, opens by replacing earlier notes, is sent only when it changed (and again after a Hermes summary), and is capped at about 3,000 characters per session.
+- The provider's own numbers for the last replies (`update_from_response`): the snapshot's new `usage` block carries the prompt size, cache read and write, and the share of the prompt read from cache. The gauge hint says "Reused N% from the last reply" only when the provider reported cache use; a provider that never does shows nothing rather than 0%.
+
+### Changed: the Desktop panel and defaults
+- Desktop panel is slimmer and calmer: a 30px header (title 12px with a lighter `(ためる)`, borderless lean-mode dropdown, 4px gauge with "N% full", "Saved ~N%"), silent while everything is fine, over a fixed 196px body. Wide panels show the list and the viewer side by side; narrow ones swap in one pane. An idle chat is a single line.
+- The viewer is one toolbar row: close ×, "Left Out", source and range, **Add**, **Re-Read**, page arrows and a plain "Not sent until you send". Back stays available while an original is loading or has failed to load. Keys inside the viewer: R, A, `[`, `]`, Enter, Esc.
+- Every control explains itself in a small hover card (hover for 350ms, or keyboard focus; Esc closes it). It is drawn on the page body so it can never add panel height or be clipped by the panel's CSS container; the same text is always available to screen readers.
+- Copy follows a budget (short buttons and status text, no "tokens" or "prompt cache" on the surface) and the table no longer prints a doubled sign ("~−2,984" is now "−2,984", with the estimate noted in a hint).
+- Each recorded change carries who made it, a short reason, characters saved and whether it can be restored; snapshot schema 3 adds `fill_pct` and `saved_pct` and marks timeline events as Tameru or Hermes. `restored` was renamed `recovered_after_restart` so "restore" keeps one meaning.
+- Desktop table is slim (time, source, lines, reduction, tokens reduced, status, actions) with an expandable detail line per row.
+- Desktop header reads `Tameru (ためる)`, and the exact tokens reduced have their own column next to the reduction percentage.
+- Adaptive is now the default policy mode in every configuration, including `context.engine: tameru` on its own (it used to resolve to legacy). Set `policy_mode: legacy` to keep the old policy.
+- Self-tuning now learns across chats: adjustments and calm stretches update a small bounded profile-wide memory (`learned.json`), and new chats start from a damped share of it.
+- Desktop panel redesigned as a single condensed card above the composer: a header (lean mode, status sentence, usage gauge with Tameru and Hermes ticks, tokens saved, average pass time, options, collapse) over one table of passes, Hermes summaries and restored outputs with token counts, percentage and exact token reduction, mode, status, duration and View original. It polls while collapsed and reacts to Hermes compaction events. The Desktop plugin is now on by default.
+- `/tameru` leads with compression progress; the changes table moved to `/tameru changes`.
+
 ### Documentation
 - The README replay table, the catalogue page's "Measured" table and its 451-line log example were re-measured on 1.6.0 (2026-11-05); the per-result limits line now quotes 68.6% against the engine's 82.3%.
 - Compatibility notes that Hermes `main` at `b63eb8b` fails 33 tests (replay baselines, a seam parity check, one archive-backed `tameru_expand` test); the CI pin and `1298c8e` still pass.
+
+## [1.7.0] - 2026-11-05 (release candidate; never published, first released in 1.8.0)
+
+- Bundled `/tameru` activity table and compatible Desktop composer panel; read-only original viewer with session/profile/lifecycle checks; clearer `tameru_read_original` alias with `tameru_expand` compatibility; live retained/changed/removed status; brief automatic notices.
+- Real discovery registry sharing across module namespaces and profile config isolation (implicit process-environment overrides apply to the launch profile only).
+- Bounded provenance receipts: copied or modified header refs cannot borrow another row's cached original or metadata.
+- Recovery metadata credential/size screening; vendored atomic structured-format fixes.
+- Inspection does not restore model context; restoration and "Keep" remain deferred because the host exposes no supported persistent rewrite transaction. (1.8.0 delivers them as an overlay on each request, never as an edit of saved history.)
 
 ## [1.6.0] - 2026-11-04
 

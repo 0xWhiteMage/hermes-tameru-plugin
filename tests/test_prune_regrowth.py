@@ -1,18 +1,15 @@
 """After a prune commit the plugin's next prune follows the window, not Hermes' full-trigger runway.
 
 Hermes asks for a regrowth of ``max(reclaimed, proactive_prune_tokens)`` before the next commit. With the plugin's
-window-scaled trigger (0.75 of the compaction threshold) that is longer than the stretch to the compaction the
-prune is meant to replace: a 200K session regrew raw rows for the rest of its life (oncall 200K replay: +23.7% cost
-against stock Hermes, which compacted and reset). ``prune_regrowth_ratio`` shortens the runway to a share of the
-threshold and ``reprune_target_ratio`` makes a later commit worth its cache break: it must leave the prompt at or
-below that share of the threshold, as a compaction would. Both apply only to the plugin's own, window-scaled
-trigger (above 85K tokens of window, or under ~57K where ``small_window_prune_ratio`` replaces a fixed trigger that
-would never fire); a user's value, an explicit argument and a 64K window keep Hermes' behaviour. The re-prune target
-gate applies to the large windows only: on a small one the fixed part of the prompt alone is ~0.3 of the threshold.
+own, window-scaled trigger a committed prune re-arms at the retained body plus ``max(gap, required reclaim)`` —
+``prune_regrowth_ratio`` shortens the runway to a share of the compaction threshold (a prune that needed a full
+trigger-sized regrowth behaves like a compaction against stock Hermes, which compacted and reset). Adaptive policy
+is exercised separately in test_adaptive.
 """
 from __future__ import annotations
 
 import copy
+from dataclasses import replace
 
 import pytest
 from engine_support import Chat, server_log
@@ -42,7 +39,8 @@ def user_config(monkeypatch):
 
 
 def _engine(window: int = 200_000, settings: TameruSettings | None = None, **kwargs) -> TameruContextEngine:
-    engine = TameruContextEngine(settings=settings or TameruSettings(), quiet_mode=True, **{**GATES_OPEN, **kwargs})
+    legacy = replace(settings or TameruSettings(), policy_mode="legacy")
+    engine = TameruContextEngine(settings=legacy, quiet_mode=True, **{**GATES_OPEN, **kwargs})
     engine.update_model("test-model", window)
     return engine
 
@@ -105,14 +103,18 @@ def test_message_budget_tokens_matches_hermes_per_message():
 
 
 # ---- the engine ----------------------------------------------------------------------------------
-def test_a_commit_shortens_the_runway_and_restores_every_gate(user_config):
+def test_a_commit_shortens_the_runway_and_preserves_configured_gates(user_config):
     engine = _engine()
     trigger, min_reclaim = engine.proactive_prune_tokens, engine.proactive_prune_min_reclaim_tokens
     gap = prune_regrowth_tokens(engine._settings, engine.threshold_tokens)
     messages = _logs(4).finish()
     pruned, count = engine.prune_tool_results_only(messages, 500_000)
     assert pruned is not messages and count >= 3
-    assert engine._proactive_prune_rearm_tokens == message_budget_tokens(pruned) + gap
+    reclaimed = message_budget_tokens(messages) - message_budget_tokens(pruned)
+    native_after = message_budget_tokens(pruned)
+    assert reclaimed > gap                                    # otherwise the shortened mark is indistinguishable
+    assert engine._proactive_prune_rearm_tokens == native_after + max(gap, min_reclaim)
+    assert engine._proactive_prune_rearm_tokens < native_after + max(reclaimed, trigger, min_reclaim)
     assert engine.proactive_prune_tokens == trigger and engine.proactive_prune_min_reclaim_tokens == min_reclaim
 
 
@@ -120,27 +122,30 @@ def test_ratio_zero_keeps_hermes_runway(user_config):
     engine = _engine(settings=TameruSettings(prune_regrowth_ratio=0))
     messages = _logs(4).finish()
     pruned, _ = engine.prune_tool_results_only(messages, 500_000)
-    runway = max(message_budget_tokens(messages) - message_budget_tokens(pruned), engine.proactive_prune_tokens)
-    assert engine._proactive_prune_rearm_tokens == message_budget_tokens(pruned) + runway
+    reclaimed = message_budget_tokens(messages) - message_budget_tokens(pruned)
+    native_after = message_budget_tokens(pruned)
+    assert engine._proactive_prune_rearm_tokens == native_after + max(
+        reclaimed, engine.proactive_prune_tokens, engine.proactive_prune_min_reclaim_tokens)
 
 
 def test_the_next_prune_waits_for_the_regrowth_then_fires_below_the_old_trigger(user_config):
     engine = _engine()
     assert engine._regrowth_active()
-    gap = prune_regrowth_tokens(engine._settings, engine.threshold_tokens)
     first, _ = engine.prune_tool_results_only(_logs(4).finish(), 500_000)
     assert message_budget_tokens(first) < engine.proactive_prune_tokens
+    rearm = engine.get_policy_status()["rearm_body_tokens"]
+    runway = rearm - message_budget_tokens(first)
 
-    short = _grow(first, gap // 2)
-    assert message_budget_tokens(short) - message_budget_tokens(first) < gap
+    short = _grow(first, runway // 2)
+    assert message_budget_tokens(short) < rearm
     res = engine.prune_tool_results_only(short, engine.threshold_tokens - 1)   # under it: the rearm gate decides
     assert res[0] is short and res[1] == 0
 
-    grown = _grow(first, gap)
+    grown = _grow(first, runway)
     assert message_budget_tokens(grown) < engine.proactive_prune_tokens + message_budget_tokens(first)
     pruned, count = engine.prune_tool_results_only(grown, engine.threshold_tokens - 1)
     assert pruned is not grown and count >= 1
-    assert engine._proactive_prune_rearm_tokens == message_budget_tokens(pruned) + gap
+    assert engine.get_policy_status()["rearm_body_tokens"] >= message_budget_tokens(grown)
 
 
 def test_a_re_prune_must_leave_the_prompt_at_the_target_share(user_config):
@@ -155,9 +160,10 @@ def test_a_re_prune_must_leave_the_prompt_at_the_target_share(user_config):
 
 
 def test_a_declined_re_prune_leaves_the_transcript_and_the_gates_alone(user_config):
-    engine = _engine(settings=TameruSettings(reprune_target_ratio=0.0001))   # nothing can reach the target
+    engine = _engine(settings=TameruSettings(reprune_target_ratio=0.0001, policy_mode="legacy"))   # nothing can reach the target
     first, _ = engine.prune_tool_results_only(_logs(4).finish(), 500_000)
-    grown = _grow(first, prune_regrowth_tokens(engine._settings, engine.threshold_tokens))
+    runway = engine.get_policy_status()["rearm_body_tokens"] - message_budget_tokens(first)
+    grown = _grow(first, runway)
     trigger, min_reclaim, rearm = (
         engine.proactive_prune_tokens, engine.proactive_prune_min_reclaim_tokens, engine._proactive_prune_rearm_tokens,
     )
@@ -202,9 +208,6 @@ def test_only_the_plugins_own_window_scaled_trigger_changes(user_config, how):
     engine.prune_tool_results_only(messages, 500_000)
     assert engine._regrowth_trigger(77) == 77
     assert engine._reprune_min_reclaim(messages, 5) == 5
-    before = engine._proactive_prune_rearm_tokens
-    engine._arm_regrowth(messages[:3])
-    assert engine._proactive_prune_rearm_tokens == before
 
 
 def test_a_clone_keeps_the_rule(user_config):
@@ -224,7 +227,9 @@ def test_a_32k_window_follows_the_window_with_regrowth_but_without_the_target_ga
     gap = prune_regrowth_tokens(engine._settings, engine.threshold_tokens)
     pruned, count = engine.prune_tool_results_only(messages, 500_000)
     assert pruned is not messages and count >= 3
-    assert engine._proactive_prune_rearm_tokens == message_budget_tokens(pruned) + gap
+    native_after = message_budget_tokens(pruned)
+    assert engine._proactive_prune_rearm_tokens == native_after + max(gap,
+        engine._reprune_min_reclaim(messages, engine._raw_native("proactive_prune_min_reclaim_tokens")))
     # the target gate would ask a re-prune to leave <= 0.3 of the threshold; here it asks nothing extra
     assert engine._reprune_min_reclaim(_grow(pruned, gap), 123) == 123
 

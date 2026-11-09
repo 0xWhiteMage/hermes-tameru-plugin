@@ -1,0 +1,323 @@
+{
+  "recorded_at": "2026-11-05T14:57:30.257095+00:00",
+  "python": "3.14.10",
+  "system": "Windows",
+  "plugin_engine_version": "1.7.0",
+  "hermes_pin": "a0a49926f44c231f3456faffeaa4b1cc8ee4274c",
+  "hermes_source_dirty": false,
+  "source_files": {
+    "hermes_tameru_plugin/__init__.py": "96104000f0007380d408791961a0d5fcb2627aafcf1ba6feb86430b68674cefb",
+    "hermes_tameru_plugin/activity.py": "c09972f92329573a39c0a6ce80c1712f53f7267fdb203256c146d60654ec4c68",
+    "hermes_tameru_plugin/config.py": "241d7478e203ad4cd31084af507d2484ae00164d3d5e08ea625e18a6c6f889a7",
+    "hermes_tameru_plugin/engine.py": "a1c5a898a39232b5017fdbbdc301f2281c765a51dc208a164a931425967a04f9",
+    "hermes_tameru_plugin/hermes_compat.py": "9140265b893e97d6ee4b5872a84b3e2158f5576b94a0d14f671945310875159c",
+    "hermes_tameru_plugin/ledger.py": "641241b15fd8fde0763546b45cf20513e8b569b5bf3f892e4940de8a921065ac",
+    "hermes_tameru_plugin/payload.py": "3a34bdf860535a9cbb454b2f24ffbec65142e14f6d3e2f06d89b359dce478d9c",
+    "hermes_tameru_plugin/query.py": "f6edb2969fdf9e71459288a9211d7c133c7d07505ffb58696035db5d6d962295",
+    "hermes_tameru_plugin/recovery.py": "9122d7f9c3afc11649d2dad3d99400cb14e111b1bb3f9a4ed2d3483f0c819079",
+    "hermes_tameru_plugin/render.py": "e544310a065c8c90af7b0cacfa79b5da0fe1172b00926123c083a1ec540d245b",
+    "hermes_tameru_plugin/supersede.py": "253ce15655749f21c91a999e7034ff03d3f0cce7aaf9b8a26927f5d666c413f2",
+    "hermes_tameru_plugin/tameru/__init__.py": "6d170646f13ab78985f56ca2bde24907e6af432889df7eb63d09aa8f0d6d46dc",
+    "hermes_tameru_plugin/tameru/agent_extractive_engine.py": "e603f353c3be8a1c40a097eec5d86e073b413213b4b0c34950a2e12eee396d8a",
+    "hermes_tameru_plugin/tameru/agent_formats.py": "41b11d2a064d028dfe879be2edc576cab36dbf9444d05e1969faeb4d64242c7d",
+    "hermes_tameru_plugin/tameru/compress_context.py": "3c7950a1d1d0f9fe46d8ffe5dfc4d63a1f5788bb5688b3b09336575cf756f195",
+    "hermes_tameru_plugin/tameru/contract_gates.py": "ace0895a7120ec5e04d17b29e861c9f726edf1a5281b486f0597c4101412892f",
+    "hermes_tameru_plugin/tameru/coverage_reports.py": "2af0b67c455a0c74bef4196a5d0d2080b2adc557bacbc9292af3fd832acc6eaa",
+    "hermes_tameru_plugin/tameru/folding.py": "3bb0188b2dd9b983bb0e5a8420f25ff28e34265f9020f9ee4104d4169d735a65",
+    "hermes_tameru_plugin/tameru/format_adapters.py": "974557dcf4fff81790e782ec7dfacc7b13d0dcefe6b9f177bdb7dfb9a77e9097",
+    "hermes_tameru_plugin/tameru/hermes_extractive_engine.py": "bbbbda53413a4b09856b1a1713a3eaca8487337ec9102d1a220138539aea499e",
+    "hermes_tameru_plugin/tameru/industrial.py": "3827021e81f86defc0dec7cdc5d7c05f202e72c4ae2235f43af9577391061a0a",
+    "hermes_tameru_plugin/tameru/junit_reports.py": "34383ced0a899297853310784641f778f0f6dc4de8b64ae6d13c614671f8b072",
+    "hermes_tameru_plugin/tameru/regex_cache.py": "b411ef3b9f5bbfbe06d9192f1856d7c4cbd295b0be8da5cc9243c023afb8794a",
+    "hermes_tameru_plugin/tameru/semantic.py": "9181fd73392136296259ceba19282f14053a912694750829ac537905347332c2",
+    "hermes_tameru_plugin/tameru/structured_reports.py": "4ed0cf8b15377e3320f5d30b164db1e819ba8fdba7e377a07d6e47f07a0321de",
+    "hermes_tameru_plugin/tameru/supersession.py": "577e0c0ae2e9d465817677a936fc0e9006f0f2f8674dd4a095f43b8944d5ddab",
+    "hermes_tameru_plugin/tameru/transcript.py": "c6cc46a10082c7f3c8b4bfe1a4cf40120eb28b961cecd6b2868257ec68a7f49e",
+    "hermes_tameru_plugin/tameru/unicode_profile.py": "c5e3563e81c62b878427e5639070fd85340c4c65150db939fb7edb12a8e594cf",
+    "hermes_tameru_plugin/telemetry.py": "8abe25866ae4dc36b5ffaaa3874c79bf010f8f6cfe6f167a4750f6caec67e6c7",
+    "tests/eval/__init__.py": "d202ac180c8435943588a30f989ec9b0e3dd71870b7ce5984fe53b7d4ef29cbe",
+    "tests/eval/compare.py": "dac9777348798c7d9d5ae304481d12da67e558c7c408e8c0865682dcb370cf62",
+    "tests/eval/conftest.py": "d34dcf167e80b872e8be4c721bbc62292b7ddf842255bb1e37679e2c9520710d",
+    "tests/eval/engines.py": "518b1c456bc0be776302c0583dc81ca80941d1fb5958379f9e2750500231d4f2",
+    "tests/eval/payloads_extra.py": "980193aa8f2630fb87b295c44049d2dbcc4c4ee8bfc61c7aaccaa7b669069066",
+    "tests/eval/payloads_rows.py": "8824756445891d6e74bd3f57e8fe6832950bb2fb5979c3aa52d2c6d320683a23",
+    "tests/eval/per_result.py": "422dd8b3f66832ea1886c3ff1d610143d22e34e39ce1d9c563e2f23cb8b6030b",
+    "tests/eval/release_matrix.py": "201a54f202bc6aadf69d1ff10c1e9f384037a45a3b82863f2a0628bc32ebc502",
+    "tests/eval/replay.py": "83933caf76a88ebecfadf414c68ea72114d1e3ab4980b680c3c71897eadbdbbf",
+    "tests/eval/scenario.py": "553f0b9db9d016ec268680cd1743cc57200907a2cf72dc3247ebd9f3b6963240",
+    "tests/eval/scenario_baselines.py": "f97e67d3089b03d0d9e0e30462b68edfad5362a137035d1eb3d9742c77b5cd36",
+    "tests/eval/scenario_kit.py": "04b453961af113a3bd91cac85e230040846ff576035432fa02d03f2978bf0d9c",
+    "tests/eval/scenario_registry.py": "d6d4c87b0b4d2f8b1ac446931019ff65188dbb78615272021bf7b032b054de5b",
+    "tests/eval/scenarios_extra.py": "5a4b57efd6a377b87090cf0358f6c971e05f1dbd7245b8da0f54a55bd8f2192a",
+    "tests/eval/scenarios_refactor.py": "1bdeb28136dbcc92e0e445a16e23cf946d764ea127c14782c3857c21866994e2",
+    "tests/eval/scenarios_rows.py": "eb724b8e495c371c4cc185aad95b16a2383abc48d835a1b385dbcd1fa9e20b60",
+    "tests/eval/test_harness_units.py": "a07e49265ce7182a752c6259e7ab3a1d260364e84eb8b8346e66b48920f4ef9b",
+    "tests/eval/test_large_windows.py": "e3916c9397b3a232fd0e5185a3c9a4f7f4d1d0a38eb98d79385267f565ddc044",
+    "tests/eval/test_scenario_replay.py": "e2cb0d6e5c61dd43fae2acd90f307250c1983bf9d092b9d1a57b2e0267ecbaf8",
+    "tests/eval/test_scenario_units.py": "240df86ce658f055ec657d28948ad4bb6a81831787104a9a98d677bb95a9b1b5",
+    "tests/eval/test_session_replay.py": "80a49d5b5aabe1000ddec3275474bbf109b81f1ba291b870e8758ed3642c21e3",
+    "tests/eval/test_small_window_replay.py": "9a7a0568636dcd9672816d199c90b412c1f69a88bc688056e7cbdafb1186efc5",
+    "tests/fixtures/__init__.py": "5b0a70c443141e5308d2a091c7cac8847f910a42c573251a13b2b4e75b7ca9a1",
+    "tests/fixtures/hermes_payloads.py": "a3259138e9981782d943409a0dd9b528c9f10075ff4d3bd31f649c3eee9a2f26"
+  },
+  "protocol": {
+    "scenarios": [
+      "default",
+      "oncall",
+      "refactor",
+      "smallrows",
+      "i18n"
+    ],
+    "windows": [
+      32000,
+      48000,
+      64000,
+      128000,
+      200000,
+      256000
+    ],
+    "seeds": [
+      0,
+      1
+    ],
+    "engines": [
+      "stock_defaults",
+      "tameru_1_4_product"
+    ],
+    "realistic": true,
+    "seconds_per_request": 20.0,
+    "limits": [
+      "Synthetic sessions and a lossy fake summarizer; no model answer accuracy measured.",
+      "Character-based simulated prefix-cache pricing; no actual billed token savings.",
+      "Fixed 3000-token tool overhead; added tool-schema costs are not separately priced.",
+      "Cost comparisons include incomplete turns when an engine cannot recover overflow.",
+      "Gold and error totals count opportunities across sessions, not globally unique facts.",
+      "Wall-clock timing is observational and machine load is uncontrolled."
+    ]
+  },
+  "source_unchanged_during_run": true,
+  "summary": {
+    "stock_defaults": {
+      "sessions": 60,
+      "failed_turns": 76,
+      "overflow_rejections": 76,
+      "summary_calls": 106,
+      "mean_simulated_cost_char_equivalents": 1698322.4508333334,
+      "gold_retained": 705,
+      "gold_total": 1044,
+      "error_templates_retained": 510,
+      "error_templates_total": 1056,
+      "pairing_violations": 0,
+      "rewrites_outside_commits": 0,
+      "unparsed_summary_prompts": 0
+    },
+    "tameru_1_4_product": {
+      "sessions": 60,
+      "failed_turns": 0,
+      "overflow_rejections": 0,
+      "summary_calls": 48,
+      "mean_simulated_cost_char_equivalents": 1584133.6025,
+      "gold_retained": 859,
+      "gold_total": 1044,
+      "error_templates_retained": 940,
+      "error_templates_total": 1056,
+      "pairing_violations": 0,
+      "rewrites_outside_commits": 0,
+      "unparsed_summary_prompts": 0
+    },
+    "paired_comparison": {
+      "cells": 60,
+      "mean_relative_simulated_cost_change_pct": -3.213567591897676,
+      "aggregate_simulated_cost_change_pct": -6.723625909632358,
+      "cells_with_higher_plugin_cost": 12,
+      "cells_with_lower_plugin_gold_retention": 0
+    }
+  },
+  "by_scenario": {
+    "default": {
+      "stock_defaults": {
+        "sessions": 12,
+        "failed_turns": 12,
+        "overflow_rejections": 12,
+        "summary_calls": 16,
+        "mean_simulated_cost_char_equivalents": 1267005.0291666668,
+        "gold_retained": 118,
+        "gold_total": 204,
+        "error_templates_retained": 28,
+        "error_templates_total": 84,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "tameru_1_4_product": {
+        "sessions": 12,
+        "failed_turns": 0,
+        "overflow_rejections": 0,
+        "summary_calls": 4,
+        "mean_simulated_cost_char_equivalents": 1256488.175,
+        "gold_retained": 170,
+        "gold_total": 204,
+        "error_templates_retained": 84,
+        "error_templates_total": 84,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "paired_comparison": {
+        "cells": 12,
+        "mean_relative_simulated_cost_change_pct": 0.18449162095952137,
+        "aggregate_simulated_cost_change_pct": -0.8300562290256885,
+        "cells_with_higher_plugin_cost": 2,
+        "cells_with_lower_plugin_gold_retention": 0
+      }
+    },
+    "oncall": {
+      "stock_defaults": {
+        "sessions": 12,
+        "failed_turns": 21,
+        "overflow_rejections": 21,
+        "summary_calls": 36,
+        "mean_simulated_cost_char_equivalents": 2313729.533333333,
+        "gold_retained": 128,
+        "gold_total": 240,
+        "error_templates_retained": 0,
+        "error_templates_total": 204,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "tameru_1_4_product": {
+        "sessions": 12,
+        "failed_turns": 0,
+        "overflow_rejections": 0,
+        "summary_calls": 9,
+        "mean_simulated_cost_char_equivalents": 1802723.3125,
+        "gold_retained": 189,
+        "gold_total": 240,
+        "error_templates_retained": 204,
+        "error_templates_total": 204,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "paired_comparison": {
+        "cells": 12,
+        "mean_relative_simulated_cost_change_pct": -21.864847280349085,
+        "aggregate_simulated_cost_change_pct": -22.085823492823685,
+        "cells_with_higher_plugin_cost": 0,
+        "cells_with_lower_plugin_gold_retention": 0
+      }
+    },
+    "refactor": {
+      "stock_defaults": {
+        "sessions": 12,
+        "failed_turns": 9,
+        "overflow_rejections": 9,
+        "summary_calls": 20,
+        "mean_simulated_cost_char_equivalents": 1841501.5291666668,
+        "gold_retained": 157,
+        "gold_total": 204,
+        "error_templates_retained": 36,
+        "error_templates_total": 108,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "tameru_1_4_product": {
+        "sessions": 12,
+        "failed_turns": 0,
+        "overflow_rejections": 0,
+        "summary_calls": 5,
+        "mean_simulated_cost_char_equivalents": 1751781.4583333333,
+        "gold_retained": 180,
+        "gold_total": 204,
+        "error_templates_retained": 108,
+        "error_templates_total": 108,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "paired_comparison": {
+        "cells": 12,
+        "mean_relative_simulated_cost_change_pct": -4.03900063751986,
+        "aggregate_simulated_cost_change_pct": -4.872114924277826,
+        "cells_with_higher_plugin_cost": 2,
+        "cells_with_lower_plugin_gold_retention": 0
+      }
+    },
+    "smallrows": {
+      "stock_defaults": {
+        "sessions": 12,
+        "failed_turns": 0,
+        "overflow_rejections": 0,
+        "summary_calls": 20,
+        "mean_simulated_cost_char_equivalents": 2017007.1208333333,
+        "gold_retained": 146,
+        "gold_total": 216,
+        "error_templates_retained": 288,
+        "error_templates_total": 456,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "tameru_1_4_product": {
+        "sessions": 12,
+        "failed_turns": 0,
+        "overflow_rejections": 0,
+        "summary_calls": 22,
+        "mean_simulated_cost_char_equivalents": 2047855.975,
+        "gold_retained": 150,
+        "gold_total": 216,
+        "error_templates_retained": 342,
+        "error_templates_total": 456,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "paired_comparison": {
+        "cells": 12,
+        "mean_relative_simulated_cost_change_pct": 2.29329719694054,
+        "aggregate_simulated_cost_change_pct": 1.5294370479922659,
+        "cells_with_higher_plugin_cost": 6,
+        "cells_with_lower_plugin_gold_retention": 0
+      }
+    },
+    "i18n": {
+      "stock_defaults": {
+        "sessions": 12,
+        "failed_turns": 34,
+        "overflow_rejections": 34,
+        "summary_calls": 14,
+        "mean_simulated_cost_char_equivalents": 1052369.0416666667,
+        "gold_retained": 156,
+        "gold_total": 180,
+        "error_templates_retained": 158,
+        "error_templates_total": 204,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "tameru_1_4_product": {
+        "sessions": 12,
+        "failed_turns": 0,
+        "overflow_rejections": 0,
+        "summary_calls": 8,
+        "mean_simulated_cost_char_equivalents": 1061819.0916666666,
+        "gold_retained": 170,
+        "gold_total": 180,
+        "error_templates_retained": 202,
+        "error_templates_total": 204,
+        "pairing_violations": 0,
+        "rewrites_outside_commits": 0,
+        "unparsed_summary_prompts": 0
+      },
+      "paired_comparison": {
+        "cells": 12,
+        "mean_relative_simulated_cost_change_pct": 7.358221140480505,
+        "aggregate_simulated_cost_change_pct": 0.8979787152455287,
+        "cells_with_higher_plugin_cost": 2,
+        "cells_with_lower_plugin_gold_retention": 0
+      }
+    }
+  }
+}

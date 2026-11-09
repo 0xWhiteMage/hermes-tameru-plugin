@@ -14,6 +14,8 @@ Import-safe: stdlib only, nothing happens at import time.
 from __future__ import annotations
 
 import json
+import os
+import tempfile
 import threading
 from collections.abc import Iterator
 from contextlib import contextmanager
@@ -24,6 +26,27 @@ from typing import Any
 MAX_LABEL_CHARS = 64
 MAX_LABEL_VALUES = 64
 OVERFLOW_LABEL = "_other"
+LOG_MAX_BYTES = 5 * 1024 * 1024    # one live file plus one rotated ``.1`` file
+
+
+def safe_log_path(raw: str) -> Path | None:
+    """Where the log may be written, or None. Only under ``$HERMES_HOME`` (or the system temp folder); network
+    shares (UNC), device paths, NUL bytes and anything that resolves elsewhere are refused."""
+    try:
+        text = str(raw).strip()
+        if not text or "\0" in text or text.startswith(("\\\\", "//")):
+            return None
+        path = Path(text).expanduser().resolve()
+        roots = [Path(os.environ.get("HERMES_HOME", "").strip() or "~/.hermes").expanduser(), Path(tempfile.gettempdir())]
+        for root in roots:
+            try:
+                path.relative_to(root.resolve())
+                return path
+            except ValueError:
+                continue
+    except (OSError, ValueError, RuntimeError):
+        pass
+    return None
 
 # Calls recorded while a ``hold`` is open in this context: ``(telemetry, method name, args, kwargs)``.
 _HELD: ContextVar[list | None] = ContextVar("tameru_telemetry_held", default=None)
@@ -32,7 +55,19 @@ _HELD: ContextVar[list | None] = ContextVar("tameru_telemetry_held", default=Non
 class Held:
     """The outcome of a ``Telemetry.hold`` block: set ``keep`` to apply what the block recorded."""
 
-    keep = False
+    def __init__(self) -> None:
+        self.keep = False
+        self._calls: list = []
+
+    def apply(self) -> None:
+        calls, self._calls = self._calls, []
+        outer = _HELD.get()
+        if outer is not None:
+            outer.extend(calls)
+        else:
+            for owner, name, args, kwargs in calls:
+                getattr(owner, name)(*args, **kwargs)
+
 
 
 class Telemetry:
@@ -61,19 +96,14 @@ class Telemetry:
         never held. Blocks may nest; the outer one decides.
         """
         held = Held()
-        outer = _HELD.get()
-        calls: list = []
+        calls = held._calls
         token = _HELD.set(calls)
         try:
             yield held
         finally:
             _HELD.reset(token)
             if held.keep:
-                if outer is not None:
-                    outer.extend(calls)
-                else:
-                    for owner, name, args, kwargs in calls:
-                        getattr(owner, name)(*args, **kwargs)
+                held.apply()
 
     def _held(self, name: str, *args: Any, **kwargs: Any) -> bool:
         """Park the call when a ``hold`` is open in this context."""
@@ -144,9 +174,16 @@ class Telemetry:
             return
         try:
             line = json.dumps(record, sort_keys=True, ensure_ascii=False, default=str)
-            path = Path(self._log_path).expanduser()
+            path = safe_log_path(self._log_path)
+            if path is None:
+                return
             with self._log_lock:
                 path.parent.mkdir(parents=True, exist_ok=True)
+                try:
+                    if path.stat().st_size > LOG_MAX_BYTES:    # keep one rotated file, so the log cannot grow forever
+                        os.replace(path, path.with_name(path.name + ".1"))
+                except OSError:
+                    pass
                 with path.open("a", encoding="utf-8") as log:
                     log.write(line + "\n")
         except Exception:  # a log problem must never disturb a prune pass

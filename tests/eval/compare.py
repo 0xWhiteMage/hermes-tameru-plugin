@@ -46,24 +46,35 @@ def _bootstrap() -> None:
 def rows(result: dict) -> list[tuple[str, str]]:
     m = result["metrics"]
     gold = m["gold"]
+    unavailable = "unavailable (closing request not sent)"
+
+    def number(value, spec=""):
+        return "unavailable" if value is None else format(value, spec)
+
     cats = " ".join(f"{c[:3]}={v['retained']}/{v['total']}" for c, v in gold["by_category"].items())
     return [
+        ("measurement protocol", str(result["meta"].get("protocol_version", 1))),
         ("requests", str(m["requests"])),
         ("input chars (total)", f"{m['input_chars_total']:,}"),
-        ("cost, cache-priced (char-eq)", f"{m['cost_cache_priced']:,.0f}"),
-        ("cost / uncached", f"{m['cost_ratio_vs_uncached']:.3f}"),
+        ("main input cost (char-eq)", f"{m['cost_cache_priced']:,.0f}"),
+        ("auxiliary input cost (char-eq)", number(m.get("cost_auxiliary_input"), ",.0f")),
+        ("total simulated input cost (char-eq)", number(m.get("total_simulated_input_cost"), ",.0f")),
+        ("main cost / uncached", number(m["cost_ratio_vs_uncached"], ".3f")),
         ("compress calls / changed list / shrank", f"{m['compress_calls']} / {m['compactions']} / {m['compactions_shrinking']}"),
         ("summary LLM calls", str(m["summary_llm_calls"])),
         ("overflow errors / failed turns", f"{m['overflow_errors']} / {m['failed_turns']}" if "overflow_errors" in m else "n/a"),
         ("max request / window", f"{m['max_request_window_ratio']:.2f}" if "max_request_window_ratio" in m else "n/a"),
         ("prune commits (rows)", f"{m['prune_commits']} ({m['prune_rows_demoted']})"),
         ("prefix invalidated (chars)", f"{m['prefix_invalidated_chars']:,}"),
-        ("gold retained", f"{gold['retained']}/{gold['total']}  [{cats}]"),
-        ("error fingerprints", f"{m['error_fingerprints']['retained']}/{m['error_fingerprints']['total']}"),
-        ("re-fetch opportunities", f"{m['refetch']['refetch_opportunities']} calls ({m['refetch']['missing_needed_facts']} facts)"),
+        ("gold retained", unavailable if gold.get("observed") is False else f"{gold['retained']}/{gold['total']}  [{cats}]"),
+        ("error fingerprints", unavailable if m["error_fingerprints"].get("observed") is False else
+         f"{m['error_fingerprints']['retained']}/{m['error_fingerprints']['total']}"),
+        ("re-fetch opportunities", unavailable if m["refetch"].get("observed") is False else
+         f"{m['refetch']['refetch_opportunities']} calls ({m['refetch']['missing_needed_facts']} facts)"),
         ("pairing violations", str(m["pairing"]["violations"])),
-        ("rows rewritten between commits", str(m["byte_stability"]["rewrites_outside_commits"]) if "byte_stability" in m else "n/a"),
-        ("input chars (final request)", f"{m['input_chars_final']:,}"),
+        ("history rewrites outside replay commits", str(m["byte_stability"]["rewrites_outside_commits"]) if "byte_stability" in m else "n/a"),
+        ("caller input mutations", str(m.get("byte_stability", {}).get("input_mutations", "unrecorded"))),
+        ("input chars (final request)", number(m["input_chars_final"], ",")),
         ("engine seconds", f"{result['timing']['engine_seconds']:.2f}"),
     ]
 

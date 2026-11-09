@@ -1,0 +1,2 @@
+# Frozen validation captures include byte hashes; retain their original newlines.
+/docs/replay-*/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol

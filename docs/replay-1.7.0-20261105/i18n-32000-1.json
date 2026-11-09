@@ -1,0 +1,802 @@
+{
+  "scenario": "i18n",
+  "window": 32000,
+  "seed": 1,
+  "results": {
+    "stock_defaults": {
+      "meta": {
+        "engine": "ContextCompressor",
+        "engine_name": "compressor",
+        "seed": 1,
+        "turns": 32,
+        "hermes_pin": "a0a49926f44c231f3456faffeaa4b1cc8ee4274c",
+        "hermes_source_dirty": false,
+        "realistic": true,
+        "seconds_per_request": 20.0,
+        "scenario": "i18n"
+      },
+      "metrics": {
+        "turns": 32,
+        "requests": 31,
+        "context_length": 32000,
+        "threshold_tokens": 27200,
+        "input_chars_total": 1555844,
+        "input_chars_max": 85615,
+        "input_chars_final": 85615,
+        "cost_cache_priced": 385554.5,
+        "cost_uncached": 1555844.0,
+        "cost_ratio_vs_uncached": 0.247811,
+        "cached_chars_total": 1355870,
+        "compress_calls": 5,
+        "compactions": 2,
+        "compactions_shrinking": 2,
+        "summary_llm_calls": 2,
+        "summary_unparsed_prompts": 0,
+        "summary_prompt_chars": 18378,
+        "prune_calls": 13,
+        "prune_commits": 0,
+        "prune_rows_demoted": 0,
+        "prefix_invalidated_chars": 114359,
+        "prefix_break_events": 2,
+        "messages_final": 92,
+        "overflow_errors": 17,
+        "overflow_compactions": 0,
+        "failed_turns": 17,
+        "failed_turn_reasons": [
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff",
+          "deferred:structural_backoff"
+        ],
+        "requests_over_window": 0,
+        "max_request_window_ratio": 0.9893,
+        "max_attempted_window_ratio": 2.0276,
+        "gold": {
+          "total": 15,
+          "retained": 12,
+          "retention": 0.8,
+          "by_category": {
+            "recall": {
+              "total": 7,
+              "retained": 4,
+              "retention": 0.5714,
+              "missing": [
+                "R2",
+                "R3",
+                "R4"
+              ]
+            },
+            "artifact": {
+              "total": 3,
+              "retained": 3,
+              "retention": 1.0,
+              "missing": []
+            },
+            "continuation": {
+              "total": 2,
+              "retained": 2,
+              "retention": 1.0,
+              "missing": []
+            },
+            "decision": {
+              "total": 3,
+              "retained": 3,
+              "retention": 1.0,
+              "missing": []
+            }
+          }
+        },
+        "error_fingerprints": {
+          "total": 17,
+          "retained": 15,
+          "retention": 0.8824
+        },
+        "refetch": {
+          "needed_facts": 12,
+          "missing_needed_facts": 3,
+          "refetch_rate": 0.25,
+          "missing_ids": [
+            "R2",
+            "R3",
+            "R4"
+          ],
+          "refetch_opportunities": 3
+        },
+        "pairing": {
+          "requests_checked": 31,
+          "violations": 0,
+          "details": []
+        },
+        "byte_stability": {
+          "requests_checked": 31,
+          "rewrites_outside_commits": 0,
+          "details": []
+        }
+      },
+      "series": {
+        "request_chars": [
+          3165,
+          24939,
+          25104,
+          44457,
+          44579,
+          7948,
+          8070,
+          30278,
+          30405,
+          44713,
+          44878,
+          45092,
+          64438,
+          64609,
+          65815,
+          65969,
+          74813,
+          75003,
+          75895,
+          28814,
+          28995,
+          38791,
+          38918,
+          53350,
+          53507,
+          68195,
+          68352,
+          82781,
+          82938,
+          85418,
+          85615
+        ],
+        "cached_chars": [
+          0,
+          3165,
+          24939,
+          25104,
+          44457,
+          2875,
+          7948,
+          8070,
+          30278,
+          30405,
+          44713,
+          44878,
+          45092,
+          64438,
+          64609,
+          65815,
+          65969,
+          74813,
+          75003,
+          3240,
+          28814,
+          28995,
+          38791,
+          38918,
+          53350,
+          53507,
+          68195,
+          68352,
+          82781,
+          82938,
+          85418
+        ],
+        "invalidated_chars": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          41704,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          72655,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "events": [
+          {
+            "request": 5,
+            "kind": "compress",
+            "messages_before": 12,
+            "messages_after": 10,
+            "chars_before": 63905,
+            "chars_after": 7938
+          },
+          {
+            "request": 19,
+            "kind": "compress",
+            "messages_before": 38,
+            "messages_after": 14,
+            "chars_before": 84700,
+            "chars_after": 28800
+          },
+          {
+            "request": 27,
+            "kind": "compress_noop"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:220"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:200"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:160"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:140"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:100"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:60"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:20"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "compress_noop"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:300"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:260"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:220"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:180"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:140"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:100"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:60"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:20"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "compress_noop"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:300"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          },
+          {
+            "request": 31,
+            "kind": "overflow_blocked",
+            "reason": "structural_backoff:280"
+          },
+          {
+            "request": 31,
+            "kind": "turn_failed",
+            "reason": "deferred:structural_backoff"
+          }
+        ]
+      },
+      "timing": {
+        "engine_seconds": 0.023,
+        "by_op": {
+          "should_compress": 0.0,
+          "compress": 0.023,
+          "prune": 0.0
+        }
+      }
+    },
+    "tameru_1_4_product": {
+      "meta": {
+        "engine": "TameruContextEngine",
+        "engine_name": "tameru",
+        "seed": 1,
+        "turns": 32,
+        "hermes_pin": "a0a49926f44c231f3456faffeaa4b1cc8ee4274c",
+        "hermes_source_dirty": false,
+        "realistic": true,
+        "seconds_per_request": 20.0,
+        "scenario": "i18n"
+      },
+      "metrics": {
+        "turns": 32,
+        "requests": 59,
+        "context_length": 32000,
+        "threshold_tokens": 27200,
+        "input_chars_total": 2406710,
+        "input_chars_max": 58843,
+        "input_chars_final": 51551,
+        "cost_cache_priced": 617308.65,
+        "cost_uncached": 2406710.0,
+        "cost_ratio_vs_uncached": 0.256495,
+        "cached_chars_total": 2079199,
+        "compress_calls": 2,
+        "compactions": 2,
+        "compactions_shrinking": 2,
+        "summary_llm_calls": 2,
+        "summary_unparsed_prompts": 0,
+        "summary_prompt_chars": 20698,
+        "prune_calls": 25,
+        "prune_commits": 7,
+        "prune_rows_demoted": 11,
+        "prefix_invalidated_chars": 275960,
+        "prefix_break_events": 9,
+        "messages_final": 102,
+        "overflow_errors": 0,
+        "overflow_compactions": 0,
+        "failed_turns": 0,
+        "failed_turn_reasons": [],
+        "requests_over_window": 0,
+        "max_request_window_ratio": 0.6944,
+        "max_attempted_window_ratio": 0.6944,
+        "gold": {
+          "total": 15,
+          "retained": 14,
+          "retention": 0.9333,
+          "by_category": {
+            "recall": {
+              "total": 7,
+              "retained": 6,
+              "retention": 0.8571,
+              "missing": [
+                "R4"
+              ]
+            },
+            "artifact": {
+              "total": 3,
+              "retained": 3,
+              "retention": 1.0,
+              "missing": []
+            },
+            "continuation": {
+              "total": 2,
+              "retained": 2,
+              "retention": 1.0,
+              "missing": []
+            },
+            "decision": {
+              "total": 3,
+              "retained": 3,
+              "retention": 1.0,
+              "missing": []
+            }
+          }
+        },
+        "error_fingerprints": {
+          "total": 17,
+          "retained": 17,
+          "retention": 1.0
+        },
+        "refetch": {
+          "needed_facts": 12,
+          "missing_needed_facts": 1,
+          "refetch_rate": 0.0833,
+          "missing_ids": [
+            "R4"
+          ],
+          "refetch_opportunities": 1
+        },
+        "pairing": {
+          "requests_checked": 59,
+          "violations": 0,
+          "details": []
+        },
+        "byte_stability": {
+          "requests_checked": 59,
+          "rewrites_outside_commits": 0,
+          "details": []
+        }
+      },
+      "series": {
+        "request_chars": [
+          3165,
+          24939,
+          25104,
+          44457,
+          44579,
+          11013,
+          11135,
+          33343,
+          33470,
+          47778,
+          47943,
+          48157,
+          32622,
+          32793,
+          33999,
+          34153,
+          42997,
+          43187,
+          44079,
+          34150,
+          34331,
+          44127,
+          44254,
+          58686,
+          58843,
+          30603,
+          30760,
+          31049,
+          31206,
+          33686,
+          33883,
+          40761,
+          40896,
+          41468,
+          41746,
+          41852,
+          51681,
+          51808,
+          36375,
+          36524,
+          49535,
+          49662,
+          49873,
+          51079,
+          51182,
+          41894,
+          42019,
+          51951,
+          52083,
+          38744,
+          38865,
+          48927,
+          49060,
+          49988,
+          50126,
+          50750,
+          50856,
+          50963,
+          51551
+        ],
+        "cached_chars": [
+          0,
+          3165,
+          24939,
+          25104,
+          44457,
+          2875,
+          11013,
+          11135,
+          33343,
+          33470,
+          47778,
+          47943,
+          11386,
+          32622,
+          32793,
+          33999,
+          34153,
+          42997,
+          43187,
+          13555,
+          34150,
+          34331,
+          44127,
+          44254,
+          58686,
+          3240,
+          30603,
+          16171,
+          31049,
+          31206,
+          33686,
+          16876,
+          40761,
+          40896,
+          41468,
+          41746,
+          41852,
+          51681,
+          21729,
+          36375,
+          36524,
+          49535,
+          49662,
+          49873,
+          51079,
+          25236,
+          41894,
+          42019,
+          51951,
+          28346,
+          38744,
+          38865,
+          48927,
+          49060,
+          49988,
+          50126,
+          50750,
+          50856,
+          50963
+        ],
+        "invalidated_chars": [
+          0,
+          0,
+          0,
+          0,
+          0,
+          41704,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          36771,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          30524,
+          0,
+          0,
+          0,
+          0,
+          0,
+          55603,
+          0,
+          14589,
+          0,
+          0,
+          0,
+          17007,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          30079,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          25946,
+          0,
+          0,
+          0,
+          23737,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0,
+          0
+        ],
+        "events": [
+          {
+            "request": 5,
+            "kind": "compress",
+            "messages_before": 12,
+            "messages_after": 10,
+            "chars_before": 63905,
+            "chars_after": 11003
+          },
+          {
+            "request": 12,
+            "kind": "prune",
+            "rows": 2,
+            "chars_before": 67479,
+            "chars_after": 32598
+          },
+          {
+            "request": 19,
+            "kind": "prune",
+            "rows": 1,
+            "chars_before": 52884,
+            "chars_after": 34112
+          },
+          {
+            "request": 25,
+            "kind": "compress",
+            "messages_before": 50,
+            "messages_after": 36,
+            "chars_before": 73481,
+            "chars_after": 30567
+          },
+          {
+            "request": 27,
+            "kind": "prune",
+            "rows": 1,
+            "chars_before": 45149,
+            "chars_after": 31009
+          },
+          {
+            "request": 31,
+            "kind": "prune",
+            "rows": 1,
+            "chars_before": 53146,
+            "chars_after": 40713
+          },
+          {
+            "request": 38,
+            "kind": "prune",
+            "rows": 2,
+            "chars_before": 63141,
+            "chars_after": 36313
+          },
+          {
+            "request": 45,
+            "kind": "prune",
+            "rows": 2,
+            "chars_before": 64909,
+            "chars_after": 41818
+          },
+          {
+            "request": 49,
+            "kind": "prune",
+            "rows": 2,
+            "chars_before": 60846,
+            "chars_after": 38660
+          }
+        ]
+      },
+      "timing": {
+        "engine_seconds": 1.0,
+        "by_op": {
+          "should_compress": 0.0,
+          "compress": 0.296,
+          "prune": 0.704
+        }
+      }
+    }
+  }
+}

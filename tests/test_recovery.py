@@ -26,6 +26,8 @@ from hermes_tameru_plugin.recovery import (
     session_lookup_factory,
 )
 from hermes_tameru_plugin.render import RenderStats, header_only, make_ref
+from engine_support import Chat, make_engine, use_archive_commit
+from hermes_tameru_plugin.config import TameruSettings
 
 REF = "ab12cd34"
 SECRET = "gh" + "p_" + "A1b2C3d4E5" * 3          # shaped like a GitHub token, built at runtime
@@ -49,7 +51,7 @@ def test_put_and_get_round_trip_with_tool_and_meta():
     assert store.put(REF, "hello", tool="terminal", meta={"exit_code": 1})
     assert store.get(REF) == "hello"
     assert store.entry(REF) == StoredOriginal("hello", "terminal", {"exit_code": 1})
-    assert REF in store and "feedface" not in store and len(store) == 1 and store.total_chars == 5
+    assert REF in store and "feedface" not in store and len(store) == 1 and store.total_chars == 28
     assert store.get("feedface") is None and store.entry("feedface") is None
 
 
@@ -59,6 +61,9 @@ def test_the_meta_dict_is_copied_in():
     store.put(REF, "x", meta=meta)
     meta["exit_code"] = 0
     assert store.entry(REF).meta == {"exit_code": 1}
+    with pytest.raises(TypeError):      # stored metadata is immutable after storage
+        store.entry(REF).meta["exit_code"] = 0
+    assert store.entry(REF).meta["exit_code"] == 1
 
 
 def test_putting_a_ref_again_replaces_it_and_recounts_the_chars():
@@ -318,17 +323,30 @@ def test_a_miss_points_at_session_search():
 
 def test_a_store_miss_falls_back_to_the_session_lookup_and_caches_the_hit():
     store = OriginalStore(5, 10_000)
+    ref16 = REF + "01234567"
     seen: list[str] = []
 
     def lookup(ref: str):
         seen.append(ref)
-        return TEXT if ref == REF else None
+        return TEXT if ref == ref16 else None
 
-    first = json.loads(expand(store, {"ref": REF, "end_line": 2}, session_lookup=lookup))
-    second = json.loads(expand(store, {"ref": REF, "start_line": 9}, session_lookup=lookup))
+    first = json.loads(expand(store, {"ref": ref16, "end_line": 2}, session_lookup=lookup))
+    second = json.loads(expand(store, {"ref": ref16, "start_line": 9}, session_lookup=lookup))
     assert first["content"] == "line 1\nline 2\n" and second["content"] == "line 9\nline 10"
-    assert seen == [REF], "the second expand was served from the store"
-    assert store.get(REF) == TEXT
+    assert seen == [ref16], "the second expand was served from the store"
+    assert store.get(ref16) == TEXT
+    seen8: list[str] = []
+
+    def lookup8(ref: str):
+        seen8.append(ref)
+        return TEXT if ref == "deadbeef" else None
+
+    dead = "deadbeef"
+    one = json.loads(expand(store, {"ref": dead, "end_line": 2}, session_lookup=lookup8))
+    two = json.loads(expand(store, {"ref": dead, "end_line": 2}, session_lookup=lookup8))
+    assert seen8 == [dead, dead], "an opaque callback's 8-hex result is never cached"
+    assert one["content"] == two["content"] == "line 1\nline 2\n"
+    assert not store.matches(dead)
     missing = json.loads(expand(store, {"ref": "00000000"}, session_lookup=lookup))
     assert "error" in missing and "hint" in missing
 
@@ -348,11 +366,13 @@ def test_a_failing_lookup_is_a_miss():
     assert "not found" in out["error"]
 
 
-def test_an_archived_original_with_a_secret_is_returned_but_not_cached():
+def test_an_archived_original_with_a_secret_is_refused_and_never_cached():
+    """1.7.1: the session archive is Hermes' own transcript and may hold a credential; Tameru never shows it."""
     store = OriginalStore(5, 10_000)
     text = f"token {SECRET}\nline 2"
     out = json.loads(expand(store, {"ref": REF}, session_lookup=lambda ref: text))
-    assert out["content"] == text
+    assert "content" not in out and "credential" in out["error"]
+    assert SECRET not in json.dumps(out)
     assert REF not in store, "the store never keeps a probable secret"
 
 
@@ -396,7 +416,7 @@ def test_bad_regexes_give_an_error():
 
 def test_expand_never_raises():
     class Broken:
-        def get(self, ref):
+        def entry(self, ref):
             raise RuntimeError("boom")
 
     out = json.loads(expand(Broken(), {"ref": REF}))
@@ -478,7 +498,9 @@ def test_tameru_rendered_rows_are_not_originals():
     rows = [db_row(rendered), db_row(legacy, msg_uid="m-2", call_uid="t-2")]
     lookup = session_lookup_factory(FakeDB(rows), "s", make_ref)
     assert lookup(ref) is None, "a render is not the text its ref names"
-    assert lookup(make_ref(live(legacy, call_uid="t-2", msg_uid="m-2"), legacy)) is None
+    # the legacy marker row resolves by its own ref now (raw copied/legacy rows are
+    # indexable); it still never supplies a foreign original.
+    assert lookup(make_ref(live(legacy, call_uid="t-2", msg_uid="m-2"), legacy)) == legacy
     rows.append(db_row(original))
     assert session_lookup_factory(FakeDB(rows), "s", make_ref)(ref) == original
 
@@ -506,8 +528,8 @@ def test_the_scan_is_read_once_per_lookup_callable():
     assert db.calls == [], "nothing is read before the first lookup"
     assert lookup(ref) == text and lookup(ref) == text and lookup("00000000") is None
     assert lookup("00000000") is None
-    assert db.calls == [("sess-1", True, {"include_ancestors": True})], (
-        "one read, with the compaction-archived rows and the compression lineage included"
+    assert db.calls == [("sess-1", True, {"include_inactive": True, "include_ancestors": True})], (
+        "one read, with the compaction-archived and superseded rows and the compression lineage included"
     )
 
 
@@ -635,3 +657,382 @@ def test_a_reopened_session_db_still_resolves_the_ref(tmp_path):
         assert session_lookup_factory(reopened, "sess-1", make_ref)(ref) == original
     finally:
         reopened.close()
+
+
+def test_repeated_reference_preserves_untrusted_provenance():
+    from hermes_tameru_plugin.hermes_compat import wrapped_intact
+
+    store = OriginalStore(4, 1000)
+    for tool in ("terminal", "web_extract", "terminal"):
+        assert store.put(REF, "original source evidence", tool=tool)
+    assert len(store) == 1
+    assert store.total_chars == 35   # 24 text + 11 kept "web_extract" tool name, no metadata
+    answer = expand(store, {"ref": REF})
+    assert wrapped_intact(answer)
+    assert "original source evidence" in answer
+
+
+def test_eviction_after_lookup_keeps_the_original_trust_label():
+    from hermes_tameru_plugin.hermes_compat import wrapped_intact
+
+    class EvictAfterEntry(OriginalStore):
+        def entry(self, ref):
+            result = super().entry(ref)
+            self.clear()
+            return result
+
+    store = EvictAfterEntry(4, 1000)
+    assert store.put(REF, "original source evidence", tool="web_extract")
+    answer = expand(store, {"ref": REF})
+    assert wrapped_intact(answer)
+    assert "original source evidence" in answer
+    assert len(store) == 0
+
+
+def test_metadata_credentials_are_refused_without_replacing_or_evicting():
+    store = OriginalStore(1, 1000)
+    assert store.put(REF, 'clean', tool='terminal', meta={'exit_code': 1})
+    before = store.peek(REF)
+    secret_meta = {'error': '-----BEGIN RSA PRIVATE KEY-----\nSYNTHETIC TEST FIXTURE'}
+    assert store.put(REF, 'replacement', meta=secret_meta) is False
+    assert store.put('bbbbbbbb', 'replacement', meta=secret_meta) is False
+    assert store.peek(REF) == before and len(store) == 1
+
+
+def test_metadata_counts_toward_the_cache_budget_and_refusals_preserve_entries():
+    store = OriginalStore(2, 100)
+    assert store.put(REF, 'a' * 30, tool='terminal', meta={'exit_code': 1})
+    assert store.total_chars == 53  # 30 body + 8 tool + 15 compact JSON
+    assert store.put('bbbbbbbb', 'b' * 30, tool='terminal', meta={'exit_code': 1})
+    assert store.peek(REF) is None and len(store) == 1 and store.total_chars == 53
+    assert store.put('bbbbbbbb', 'replacement', meta={'error': 'x' * 10000}) is False
+    assert store.peek('bbbbbbbb').text == 'b' * 30 and store.total_chars == 53
+
+
+
+@pytest.mark.real_hermes
+class TestDeferredExternalProvenance:
+    """A tool_call-bridged external result stays wrapped in Tameru rows and is
+    never scanned into the ledger without its untrusted-data wrapper."""
+
+    @pytest.mark.parametrize("underlying", ["mcp_example", "browser_extract"])
+    def test_deferred_external_row_is_wrapped_and_not_scanned(self, underlying):
+        from agent.tool_dispatch_helpers import make_tool_result_message
+        from hermes_tameru_plugin.hermes_compat import wrapped_intact
+        from hermes_tameru_plugin.render import parse_header
+        settings = TameruSettings(
+            store_max_entries=1, small_window_threshold_tokens=0, policy_mode="legacy",
+            retained_extract_budget_chars=1, retained_extract_budget_ratio=0,
+            retained_error_budget_chars=8000)
+        engine = make_engine(settings)
+        chat = Chat("Investigate the failed job")
+        indices = []
+        for tag in ("alpha_sentinel", "beta_sentinel"):
+            idx = chat.tool("tool_call", {"calls": [{"name": underlying, "arguments": {}}]}, "")
+            cid = chat.messages[idx]["tool_call_id"]
+            chat.messages[idx] = make_tool_result_message(
+                underlying, "ERROR " + tag + "\n" + ("ordinary detail\n" * 400), cid)
+            indices.append(idx)
+        messages = chat.finish()
+        before = copy.deepcopy(messages)
+        pruned, count = engine.prune_tool_results_only(messages, 10**6)
+        assert pruned is not messages and count > 0
+        rows = [pruned[i] for i in indices]
+        own_refs = []
+        for row, tag in zip(rows, ("alpha_sentinel", "beta_sentinel")):
+            header = parse_header(row["content"])
+            assert header is not None and header["rung"] == "errors"
+            body = row["content"].split("\n", 1)[1]
+            assert wrapped_intact(body), "the kept body must be one intact untrusted block"
+            assert tag in body
+            own_refs.append(header["ref"])
+        assert engine._store.peek(own_refs[0]) is None
+        assert engine._store.peek(own_refs[1]) is not None
+        summary = engine._augment_summary_lean("## Goal\nx", pruned)
+        assert "alpha_sentinel" not in summary and "beta_sentinel" not in summary
+        assert messages == before
+
+
+@pytest.mark.real_hermes
+class TestArchiveLookupAfterEviction:
+    """Raw marker-shaped content survives a public commit and cold restart.
+    Copied v1 content gets its own ref; conservative legacy retention stays raw."""
+
+    @pytest.mark.parametrize("marker", ["v1", "legacy"])
+    def test_copied_row_resolves_by_own_ref_after_cold_restart(self, tmp_path, marker, monkeypatch):
+        from hermes_state import SessionDB
+        from hermes_tameru_plugin.engine import READ_ORIGINAL_TOOL_NAME
+        from hermes_tameru_plugin.render import classify_render, parse_header
+        foreign = make_ref({"role": "tool"}, "unrelated victim bytes")
+        if marker == "v1":
+            raw = (header_only("[fixture_reader] returned data", stats(), foreign)
+                   + "\n" + "ordinary payload line\n" * 100)
+        else:
+            raw = "legacy raw\n[…]\n" + "ordinary payload line\n" * 100
+        assert classify_render(raw) == marker, "fixture must exercise the recognized shape"
+
+        db = SessionDB(tmp_path / "state.db")
+        try:
+            db.create_session("sess-1", "cli")
+            chat = Chat("run the job")
+            chat.tool("terminal", {"command": "echo ready"}, "ready")
+            idx = chat.tool("fixture_reader", {}, raw)
+            tool_call_id = chat.messages[idx]["tool_call_id"]
+            # Ensure a real commit also when the legacy row is conservatively retained.
+            chat.tool("other_fixture_reader", {}, "independent ordinary payload\n" * 200)
+            messages = chat.finish()
+            db.append_messages_batch(
+                "sess-1", [m for m in messages if m["role"] != "system"])
+            original_row = next(
+                m for m in db.get_messages("sess-1")
+                if m.get("role") == "tool" and m.get("tool_call_id") == tool_call_id)
+            live = db.get_messages_as_conversation("sess-1")
+            stamped = next(m for m in live if m.get("role") == "tool"
+                           and m.get("tool_call_id") == tool_call_id)
+            assert stamped["content"] == raw
+            before = copy.deepcopy(live)
+            engine = make_engine()
+            engine.bind_session_state(db, "sess-1")
+            use_archive_commit(monkeypatch, engine)   # this test is about the archive-and-compact commit path
+            pruned, count = engine.prune_tool_results_only(live, 10**6)
+            assert count > 0 and pruned is not live
+            changed = next(m for m in pruned if m.get("role") == "tool"
+                           and m.get("tool_call_id") == tool_call_id)
+            if marker == "v1":
+                header = parse_header(changed["content"])
+                assert header is not None
+                own_ref = header["ref"]
+            else:
+                assert changed["content"] == raw
+                own_ref = make_ref(stamped, raw)
+            assert own_ref != foreign
+            assert own_ref == make_ref(stamped, raw)
+            assert live == before, "caller messages must be unchanged"
+
+            active = db.get_messages("sess-1")
+            archived = db.get_messages("sess-1", include_compacted=True)
+            assert original_row["id"] not in {row["id"] for row in active}
+            if marker == "v1":
+                assert any(row["id"] == original_row["id"] and row["content"] == raw for row in archived)
+            # Verbatim carried rows have new active copies; Hermes rewinds their old
+            # duplicates rather than exposing them repeatedly as archived search hits.
+            assert any(row.get("tool_call_id") == tool_call_id
+                       and row["content"] == changed["content"] for row in active)
+            engine._store.clear()
+        finally:
+            db.close()
+        db2 = SessionDB(tmp_path / "state.db")
+        try:
+            fresh = make_engine()
+            fresh.bind_session_state(db2, "sess-1")
+            out = json.loads(fresh.handle_tool_call(READ_ORIGINAL_TOOL_NAME, {"ref": own_ref}))
+            assert out["content"] == raw
+            assert out["truncated"] is False
+            foreign_out = json.loads(
+                fresh.handle_tool_call(READ_ORIGINAL_TOOL_NAME, {"ref": foreign}))
+            assert "error" in foreign_out
+        finally:
+            db2.close()
+
+
+@pytest.mark.real_hermes
+class TestStaleReadRejection:
+    """An in-flight expand/inspect from the OLD lifecycle is rejected after a
+    lifecycle transition; the detached store never populates the new owner."""
+
+    @pytest.mark.parametrize("tool_name", [pytest.param(None, id="expand"), pytest.param("read", id="read_original")])
+    @pytest.mark.parametrize(
+        "transition", ["rebind", "same_id_db", "reset", "end",
+                       "rotation_other_db", "detach_db"])
+    def test_in_flight_read_is_rejected_across_transitions(self, session_db, tmp_path,
+                                                         tool_name, transition):
+        import json as _json
+        import threading
+        from concurrent.futures import ThreadPoolExecutor
+        from hermes_state import SessionDB
+        from hermes_tameru_plugin.engine import EXPAND_TOOL_NAME, READ_ORIGINAL_TOOL_NAME
+        name = READ_ORIGINAL_TOOL_NAME if tool_name == "read" else EXPAND_TOOL_NAME
+        engine = make_engine()
+        engine.bind_session_state(session_db, "sess-1")
+        raw = "seed original\n" + "payload line\n" * 20
+        tool_row = _flush_a_tool_turn(session_db, raw)
+        ref = make_ref(tool_row, raw)
+        old_store = engine._store
+        entered = threading.Event()
+        release = threading.Event()
+        real_get = session_db.get_messages
+
+        def paused(*a, **k):
+            rows = real_get(*a, **k)
+            entered.set()
+            assert release.wait(10), "reader was not released"
+            return rows
+
+        session_db.get_messages = paused
+        db2 = None
+        executor = ThreadPoolExecutor(max_workers=1)
+        try:
+            future = executor.submit(engine.handle_tool_call, name, {"ref": ref})
+            assert entered.wait(10), "reader never reached the archive lookup"
+            if transition == "rebind":
+                db2 = SessionDB(tmp_path / "other.db")
+                db2.create_session("sess-2", "cli")
+                engine.bind_session_state(db2, "sess-2")
+            elif transition == "same_id_db":
+                db2 = SessionDB(tmp_path / "other.db")
+                db2.create_session("sess-1", "cli")
+                engine.bind_session_state(db2, "sess-1")
+            elif transition == "rotation_other_db":
+                db2 = SessionDB(tmp_path / "other.db")
+                db2.create_session("sess-2", "cli")
+                engine.on_session_start("sess-2", session_db=db2,
+                                        boundary_reason="compression",
+                                        old_session_id="sess-1")
+            elif transition == "detach_db":
+                engine.bind_session_state(None, "sess-1")
+            elif transition == "reset":
+                engine.on_session_reset()
+            else:
+                engine.on_session_end("sess-1", [])
+            release.set()
+            payload = future.result(timeout=10)
+            data = _json.loads(payload)
+            assert "error" in data and "seed original" not in _json.dumps(data)
+            assert old_store.peek(ref) is not None and old_store.peek(ref).text == raw
+            assert engine._store is not old_store
+            assert engine._store.peek(ref) is None
+            if transition in ("rebind", "same_id_db", "rotation_other_db", "detach_db"):
+                still = engine.inspect_original(ref)
+                assert "error" in still
+        finally:
+            release.set()
+            session_db.get_messages = real_get
+            executor.shutdown(wait=True)
+            if db2 is not None:
+                db2.close()
+
+
+_COLL_A_ROW = {"role": "tool", "tool_call_uid": "collision-23370", "content": "original 23370"}
+_COLL_B_ROW = {"role": "tool", "tool_call_uid": "collision-72461", "content": "original 72461"}
+_COLL_A_REF = "9e316455acbd223e"
+_COLL_B_REF = "9e316455d084ce1d"
+_COLL_PREFIX = "9e316455"
+
+
+def test_collision_fixture_preconditions():
+    from hermes_tameru_plugin.recovery import _identity_views
+    assert make_ref(_identity_views(_COLL_A_ROW)[0], _COLL_A_ROW["content"]) == _COLL_A_REF
+    assert make_ref(_identity_views(_COLL_B_ROW)[0], _COLL_B_ROW["content"]) == _COLL_B_REF
+    assert _COLL_A_REF != _COLL_B_REF and _COLL_A_REF[:8] == _COLL_B_REF[:8] == _COLL_PREFIX
+
+
+@pytest.mark.parametrize("mode", ["short archive", "full archive", "memory B with archive A",
+                                  "memory A with archive B", "cold store both archived"])
+def test_an_ambiguous_8_ref_is_refused_and_never_cached(mode):
+    from hermes_tameru_plugin.recovery import lookup_original
+    store = OriginalStore(5, 10_000)
+    if mode == "short archive":
+        sole = session_lookup_factory(FakeDB([_COLL_A_ROW]), "s", make_ref)
+        warmed = json.loads(expand(store, {"ref": _COLL_PREFIX}, session_lookup=sole))
+        assert warmed["content"] == _COLL_A_ROW["content"], "a sole short hit still resolves"
+        assert _COLL_PREFIX not in store.matches(_COLL_PREFIX) and store.peek(_COLL_A_REF) is not None
+        lk = session_lookup_factory(FakeDB([_COLL_A_ROW, _COLL_B_ROW]), "s", make_ref)
+    elif mode == "full archive":
+        lk = session_lookup_factory(FakeDB([_COLL_A_ROW, _COLL_B_ROW]), "s", make_ref)
+        assert lk(_COLL_A_REF) == _COLL_A_ROW["content"]
+        expand(store, {"ref": _COLL_A_REF}, session_lookup=lk)
+    elif mode == "memory B with archive A":
+        store.put(_COLL_B_REF, _COLL_B_ROW["content"])
+        lk = session_lookup_factory(FakeDB([_COLL_A_ROW]), "s", make_ref)
+    elif mode == "memory A with archive B":
+        store.put(_COLL_A_REF, _COLL_A_ROW["content"])
+        lk = session_lookup_factory(FakeDB([_COLL_B_ROW]), "s", make_ref)
+    else:
+        lk = session_lookup_factory(FakeDB([_COLL_A_ROW, _COLL_B_ROW]), "s", make_ref)
+    out = json.loads(expand(store, {"ref": _COLL_PREFIX}, session_lookup=lk))
+    assert "error" in out
+    assert _COLL_A_ROW["content"] not in json.dumps(out)
+    assert _COLL_B_ROW["content"] not in json.dumps(out)
+    assert _COLL_PREFIX not in store.matches(_COLL_PREFIX)
+    entry, _ = lookup_original(store, _COLL_PREFIX, lk, cache=False)
+    assert entry is None
+    # the memory/archive union always holds both originals; each exact 16-hex ref wins
+    for ref, row in ((_COLL_A_REF, _COLL_A_ROW), (_COLL_B_REF, _COLL_B_ROW)):
+        got = json.loads(expand(store, {"ref": ref}, session_lookup=lk))
+        assert got.get("content") == row["content"]
+
+
+def test_primary_ambiguity_does_not_fall_through_to_a_unique_fallback():
+    rows = [
+        ({"role": "tool", "tool_call_uid": "pa", "content": "text A"}, "text A"),
+        ({"role": "tool", "tool_call_uid": "pb", "content": "text B"}, "text B"),
+        ({"role": "tool", "message_uid": "mc", "tool_call_uid": "pc",
+          "content": "text C"}, "text C"),
+    ]
+    keys = {"pa": _COLL_A_REF, "pb": _COLL_B_REF, "pc": "f0f0f0f0f0f0f0f0",
+            "mc": _COLL_PREFIX + "cccccccc"}
+    lookup = session_lookup_factory(
+        FakeDB([r for r, _ in rows]), "s",
+        lambda view, content: keys.get(view.get("_tool_call_uid") or view.get("message_uid"),
+                                       "0" * 16))
+    assert lookup(_COLL_PREFIX) is None
+    assert set(lookup.candidates(_COLL_PREFIX)) == {
+        _COLL_A_REF, _COLL_B_REF, _COLL_PREFIX + "cccccccc"}
+
+
+def test_an_exact_8_key_cannot_shadow_competing_16_keys():
+    store = OriginalStore(5, 10_000)
+    store.put(_COLL_PREFIX, _COLL_A_ROW["content"])
+    store.put(_COLL_B_REF, _COLL_B_ROW["content"])
+    assert set(store.matches(_COLL_PREFIX)) == {_COLL_PREFIX, _COLL_B_REF}
+    assert store.peek(_COLL_PREFIX) is None, "the 8 alias cannot pick one of two candidates"
+    out = json.loads(expand(store, {"ref": _COLL_PREFIX}))
+    assert "error" in out and _COLL_A_ROW["content"] not in json.dumps(out)
+    assert json.loads(expand(store, {"ref": _COLL_B_REF}))["content"] == _COLL_B_ROW["content"]
+
+
+def test_project_factory_hashes_raw_but_returns_inner():
+    inner = "payload text " * 40
+    raw = json.dumps({"output": inner, "exit_code": 0})
+    row = {"role": "tool", "tool_call_uid": "p1", "content": raw}
+    from hermes_tameru_plugin.recovery import _identity_views
+    raw_ref = make_ref(_identity_views(row)[0], raw)
+    lk = session_lookup_factory(
+        FakeDB([row]), "s", make_ref,
+        project=lambda text: json.loads(text)["output"])
+    assert lk(raw_ref) == inner
+    assert lk.candidates(raw_ref[:8]) == {raw_ref: inner}
+
+
+def test_archived_reads_ask_for_superseded_rows_and_fall_back_for_older_hermes():
+    """Newer Hermes dedupes include_compacted reads to the live row, so the originals need include_inactive."""
+    from hermes_tameru_plugin.recovery import _archived_messages
+    calls = []
+
+    class Newest:
+        def get_messages(self, sid, **kwargs):
+            calls.append(kwargs)
+            return ["rows"]
+
+    assert _archived_messages(Newest(), "s") == ["rows"]
+    assert calls == [dict(include_inactive=True, include_compacted=True, include_ancestors=True)]
+
+    calls.clear()
+
+    class NoInactive:
+        def get_messages(self, sid, include_compacted=False, include_ancestors=False):
+            calls.append((include_compacted, include_ancestors))
+            return ["older"]
+
+    assert _archived_messages(NoInactive(), "s") == ["older"]
+    assert calls == [(True, True)]
+
+    calls.clear()
+
+    class Oldest:
+        def get_messages(self, sid, include_compacted=False):
+            calls.append(include_compacted)
+            return ["oldest"]
+
+    assert _archived_messages(Oldest(), "s") == ["oldest"]
+    assert calls == [True]

@@ -2,27 +2,32 @@
 from __future__ import annotations
 
 import json
+import copy
 import random
 import sys
 import time
 import types
+from contextlib import nullcontext
 
 import pytest
 from fixtures import hermes_payloads as hp
 from replay import (
     OVERFLOW_RETRY_PAUSE_SECONDS,
+    TOOLS_OVERHEAD_CHARS,
     FakeSummarizer,
     VirtualClock,
     _common_prefix_len,
     _Session,
     _wire,
+    _play,
+    _result,
     error_fingerprint,
     error_fingerprints,
     pairing_violations,
     simulated_clock,
     visible_text,
 )
-from scenario import CATEGORIES, N_TURNS, build_scenario
+from scenario import CATEGORIES, N_TURNS, GoldFact, Scenario, Turn, build_scenario
 
 
 def rng(seed=1):
@@ -246,7 +251,8 @@ def test_cache_cost_model_prefix_read_and_write():
     rewritten = [msgs[0], {"role": "user", "content": "u" * 100}, msgs[2]]
     sess.request(rewritten)
     third = sess.request_chars[2]
-    shared = len(_wire(msgs[0])) + 1 + _common_prefix_len(_wire(msgs[1]), _wire(rewritten[1]))
+    shared = (TOOLS_OVERHEAD_CHARS + 1 + len(_wire(msgs[0])) + 1
+              + _common_prefix_len(_wire(msgs[1]), _wire(rewritten[1])))
     assert sess.cached_chars[2] == shared
     assert sess.invalidated_chars[2] == second - shared
     assert sess.prefix_breaks == 1
@@ -423,6 +429,212 @@ def test_byte_stability_check_flags_rewrites_only_outside_commits():
     assert sess.rewrites == []                      # same bytes: stable
     sess._check_stability([{**row, "content": "z"}], committed=False)
     assert len(sess.rewrites) == 1 and "a" in sess.rewrites[0]
+
+
+@pytest.mark.parametrize("change", [
+    lambda rows: rows.pop(),
+    lambda rows: rows.reverse(),
+    lambda rows: rows[1].update(content="changed instruction"),
+    lambda rows: rows[2]["tool_calls"][0]["function"].update(arguments='{"changed": true}'),
+    lambda rows: rows[-1].update(_api_content=[{"type": "image_url", "image_url": {"url": "changed"}}]),
+])
+def test_stability_includes_removed_rows_arguments_and_sidecars(change):
+    assistant, tool = _tool_pair("a")
+    rows = [{"role": "system", "content": "fixed"}, {"role": "user", "content": "task"}, assistant, tool]
+    sess = _Session(_InertEngine(), None, estimate=_chars4)
+    sess._check_stability(rows, committed=False)
+    change(rows)
+    sess._check_stability(rows, committed=False)
+    assert len(sess.rewrites) == 1
+
+
+@pytest.mark.parametrize("operation", ["compress", "prune"])
+def test_returning_a_new_candidate_does_not_hide_input_mutation(operation):
+    class Mutating(_SpyEngine):
+        def compress(self, messages, current_tokens=None):
+            messages[1]["content"] = "silently changed caller input"
+            return list(messages)
+
+        def prune_tool_results_only(self, messages, current_tokens=None):
+            messages[-2]["tool_calls"][0]["function"]["arguments"] = '{"changed": true}'
+            return list(messages), 1
+
+    engine = Mutating()
+    engine.compress_next = operation == "compress"
+    assistant, tool = _tool_pair("a")
+    rows = [{"role": "system", "content": "fixed"}, {"role": "user", "content": "task"}, assistant, tool]
+    sess = _Session(engine, None, estimate=_chars4)
+    sess.request(rows)
+    assert sess.compactions + sess.prune_commits == 1
+    assert sess.input_mutations == [f"slot 1: {operation}"]
+
+
+def test_usage_callback_cannot_mutate_a_retained_input_reference():
+    rows = [{"role": "user", "content": "unchanged input"}]
+
+    class MutatingUsage(_InertEngine):
+        def update_from_response(self, usage):
+            rows[0]["content"] = "changed after request serialization"
+
+    sess = _Session(MutatingUsage(), None, estimate=_chars4)
+    sess.request(rows)
+    assert sess.last_request == [{"role": "user", "content": "unchanged input"}]
+    assert sess.input_mutations == ["slot 1: request callback"]
+
+
+def test_sent_request_witness_is_not_an_alias_of_future_history():
+    assistant, tool = _tool_pair("a")
+    rows = [{"role": "system", "content": "fixed"}, {"role": "user", "content": "task"}, assistant, tool]
+    expected = copy.deepcopy(rows)
+    sess = _Session(_InertEngine(), None, estimate=_chars4)
+    sess.request(rows)
+    rows[2]["tool_calls"][0]["function"]["arguments"] = '{"later": true}'
+    rows.append({"role": "assistant", "content": "never sent yet"})
+    assert sess.last_request == expected
+
+
+def test_engine_schema_inputs_are_priced_and_frozen_once():
+    class ExtraTool(_InertEngine):
+        def __init__(self):
+            self.calls = 0
+            self.schemas = [{"type": "function", "function": {"name": "read_original", "description": "inspect"}}]
+
+        def get_tool_schemas(self):
+            self.calls += 1
+            return self.schemas
+
+    rows = [{"role": "system", "content": "fixed"}, {"role": "user", "content": "task"}]
+    engine = ExtraTool()
+    extra_json = json.dumps(engine.schemas, ensure_ascii=False, sort_keys=True)
+    base = _Session(_InertEngine(), None, estimate=_chars4)
+    extra = _Session(engine, None, estimate=_chars4)
+    base.request(rows)
+    extra.request(rows)
+    assert extra.request_chars[0] - base.request_chars[0] == len(extra_json)
+    assert extra.cost_x100 - base.cost_x100 == 125 * len(extra_json)
+    assert extra.last_usage["prompt_tokens"] - base.last_usage["prompt_tokens"] == (len(extra_json) + 3) // 4
+    engine.schemas[0]["function"]["description"] = "must not alter this conversation"
+    extra.request(rows)
+    assert engine.calls == 1
+    assert extra.cached_chars[-1] == extra.request_chars[0]
+    assert extra.invalidated_chars[-1] == 0
+
+
+@pytest.mark.parametrize("window,successful", [(3100, 1), (1, 0)])
+def test_failed_closing_probe_has_no_substitute_quality_observation(monkeypatch, window, successful):
+    import replay
+
+    class CannotShrink(_InertEngine):
+        def compress(self, messages, current_tokens=None):
+            return messages
+
+    # This script never requests a summary; isolate only the external-LLM patch setup.
+    monkeypatch.setattr(replay, "patched_summary_llm", lambda _: nullcontext())
+    script = Scenario(
+        turns=[Turn("small request", (), "GOLD-ONLY-IN-UNSENT-FINAL")],
+        gold=[GoldFact("final", "recall", "GOLD-ONLY-IN-UNSENT-FINAL", 1, "assistant", True)],
+        error_lines=[], log_turn=1, final_question="too large " * 200, system_prompt="fixed",
+    )
+    sess = _Session(CannotShrink(), script, estimate=_chars4, realistic=True, context_length=window)
+    summarizer, final = _play(sess, script, 0)
+    assert final is None
+    assert len(sess.request_chars) == successful
+    assert "GOLD-ONLY-IN-UNSENT-FINAL" not in visible_text(sess.last_request)
+    result = _result(sess, summarizer, final, script, sess.engine, 2, 0, window, "unit", True, 20, True)
+    metrics = result["metrics"]
+    assert metrics["closing_probe"] == {
+        "sent": False, "slot": 2, "sent_request_number": None, "failure_reason": "compression_exhausted",
+    }
+    assert result["final_request"] is None and metrics["messages_final"] is None
+    for key in ("gold", "error_fingerprints", "refetch"):
+        assert metrics[key]["observed"] is False
+    assert metrics["gold"]["retained"] is None and metrics["gold"]["retained_ids"] is None
+    from compare import rows as comparison_rows
+    displayed = dict(comparison_rows(result))
+    assert displayed["gold retained"] == "unavailable (closing request not sent)"
+    assert displayed["input chars (final request)"] == "unavailable"
+    if not successful:
+        assert metrics["input_chars_max"] == 0 and metrics["cost_ratio_vs_uncached"] is None
+        assert metrics["total_simulated_input_cost"] == 0
+
+
+def test_equal_retention_counts_keep_distinct_fact_identities_and_auxiliary_costs():
+    script = Scenario(
+        turns=[], gold=[
+            GoldFact("a", "recall", "ORDER-A7", 1, "tool", True, "call-a"),
+            GoldFact("b", "recall", "ORDER-B9", 1, "tool", True, "call-b"),
+        ], error_lines=[], log_turn=1, final_question="which order?", system_prompt="fixed",
+    )
+    outcomes = []
+    for needle in ("ORDER-A7", "ORDER-B9"):
+        rows = [{"role": "user", "content": needle}]
+        sess = _Session(_InertEngine(), script, estimate=_chars4)
+        sess.request(rows)
+        sess.closing_request_slot = sess.closing_request_number = 1
+        summarizer = FakeSummarizer()
+        prompt = _fresh_prompt(["[USER]: retain the order evidence"])
+        auxiliary = [{"role": "user", "content": prompt}]
+        summarizer(messages=auxiliary)
+        result = _result(sess, summarizer, rows, script, sess.engine, 1, 0, 64000, "unit", True, 20, True)
+        metrics = result["metrics"]
+        auxiliary_chars = len(json.dumps(auxiliary[0], sort_keys=True, ensure_ascii=False)) + 1
+        assert metrics["cost_auxiliary_input"] == auxiliary_chars
+        assert metrics["total_simulated_input_cost"] == metrics["cost_cache_priced"] + auxiliary_chars
+        assert auxiliary_chars > summarizer.prompt_chars
+        outcomes.append(metrics["gold"])
+    assert outcomes[0]["retained"] == outcomes[1]["retained"] == 1
+    assert outcomes[0]["retained_ids"] == ["a"]
+    assert outcomes[1]["retained_ids"] == ["b"]
+
+
+def test_capture_aggregation_uses_total_cost_and_fact_identity_without_hiding_missing_probes():
+    from release_matrix import ENGINES, summarize
+
+    stock = {
+        "closing_probe": {"sent": True}, "failed_turns": 0, "overflow_errors": 0,
+        "summary_llm_calls": 1, "summary_unparsed_prompts": 0,
+        "cost_cache_priced": 100, "cost_auxiliary_input": 100, "total_simulated_input_cost": 200,
+        "gold": {"retained": 1, "total": 2, "retained_ids": ["a"]},
+        "error_fingerprints": {"retained": 1, "total": 1, "retained_ids": ["error-a"]},
+        "pairing": {"violations": 0},
+        "byte_stability": {"rewrites_outside_commits": 0, "input_mutations": 0},
+    }
+    plugin = copy.deepcopy(stock)
+    plugin.update(cost_cache_priced=110, cost_auxiliary_input=10, total_simulated_input_cost=120)
+    plugin["gold"]["retained_ids"] = ["b"]
+    cell = {
+        "scenario": "unit", "window": 32000, "seed": 0,
+        "results": {
+            name: {"meta": {"protocol_version": 2}, "metrics": metrics}
+            for name, metrics in zip(ENGINES, (stock, plugin))
+        },
+    }
+    report = summarize([cell])
+    paired = report["paired_comparison"]
+    assert report[ENGINES[0]]["mean_simulated_cost_char_equivalents"] == 200
+    assert report[ENGINES[1]]["mean_simulated_cost_char_equivalents"] == 120
+    assert paired["mean_relative_simulated_cost_change_pct"] == pytest.approx(-40)
+    assert paired["cells_with_higher_plugin_cost"] == 0
+    assert paired["cells_with_lower_plugin_gold_retention"] == 0
+    assert paired["cells_with_lost_fact_ids"] == 1
+    assert paired["identity_losses_in_observed_pairs"][0]["lost_fact_ids"] == ["a"]
+
+    plugin["closing_probe"]["sent"] = False
+    plugin["gold"].update(retained=None, retained_ids=None)
+    plugin["error_fingerprints"].update(retained=None, retained_ids=None)
+    report = summarize([cell])
+    assert report[ENGINES[1]]["closing_probes_unsent"] == 1
+    assert report[ENGINES[1]]["gold_retained_observed"] is None
+    assert report["paired_comparison"]["literal_probe_comparison_complete"] is False
+    assert report["paired_comparison"]["cells_with_lost_fact_ids"] is None
+
+    stock["total_simulated_input_cost"] = 0
+    report = summarize([cell])
+    assert report["paired_comparison"]["positive_baseline_cost_in_every_cell"] is False
+    assert report["paired_comparison"]["mean_relative_simulated_cost_change_pct"] is None
+    cell["results"][ENGINES[0]]["meta"]["protocol_version"] = 1
+    with pytest.raises(ValueError, match="historical results stay unchanged"):
+        summarize([cell])
 
 
 # ---- the simulated clock ------------------------------------------------------------------------------

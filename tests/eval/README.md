@@ -8,12 +8,22 @@ them.
 Everything is generated from a seed, no network is used, and the same (engine, seed) always produces
 byte-identical metrics.
 
+**Current measurement protocol: 2.** Historical tables later in this document
+describe protocol 1 and are not new acceptance evidence. Protocol 2 prices
+serialized summary inputs and a stable schema prefix, freezes sent requests,
+marks unsuccessful closing probes unavailable, records retained identities,
+and checks caller-input mutation plus the whole historical message prefix.
+New golden captures belong in `baselines/protocol-2/`; the old captures remain
+unchanged. Migration and new candidate comparisons are pending.
+
 ## Run it
 
 Real Hermes is required (the harness drives the real `ContextCompressor` and its real seams):
 
 ```bash
-HERMES_REPO_ROOT=/path/to/hermes-agent python -m pytest -q tests/eval        # tests
+export HERMES_REPO_ROOT=/path/to/hermes-agent
+bash "$HERMES_REPO_ROOT/scripts/run_tests.sh" "$PWD/tests/eval" -- \
+  -c "$PWD/pyproject.toml" --hermes-repo-root "$HERMES_REPO_ROOT" -q
 HERMES_REPO_ROOT=/path/to/hermes-agent python tests/eval/compare.py          # side-by-side table
 HERMES_REPO_ROOT=/path/to/hermes-agent python tests/eval/compare.py --json
 ```
@@ -26,7 +36,9 @@ extraction (the metric `engine seconds`), which the determinism test pays twice.
 Regenerate the saved baselines after an intended change (Hermes bump, scenario or metric change):
 
 ```bash
-TAMERU_WRITE_BASELINES=1 HERMES_REPO_ROOT=... python -m pytest -q tests/eval
+TAMERU_WRITE_BASELINES=1 bash "$HERMES_REPO_ROOT/scripts/run_tests.sh" \
+  "$PWD/tests/eval/test_session_replay.py" -- -c "$PWD/pyproject.toml" \
+  --hermes-repo-root "$HERMES_REPO_ROOT" -q
 ```
 
 `baselines/stock.json` is compared **exactly** by `test_stock_matches_saved_baseline`. `baselines/tameru_1_3.json`
@@ -105,7 +117,10 @@ is wall clock and is stored in the baselines for information only.
 |---|---|
 | `requests` | model requests sent (one per tool round plus one final per user turn) |
 | `input_chars_total` / `_max` / `_final` | sum / largest / last of the per-request input size |
-| `cost_cache_priced` | simulated prefix-cache price in character-equivalents, below |
+| `cost_cache_priced` | main-channel simulated prefix-cache price, including the schema proxy |
+| `cost_auxiliary_input` | serialized auxiliary messages, priced at an assumed uncached 1x |
+| `total_simulated_input_cost` | main plus auxiliary input cost; not provider billing |
+| `closing_probe` | whether the closing question was sent, its script slot and one-based sent-request number |
 | `cost_uncached`, `cost_ratio_vs_uncached` | everything at 1.0x, and the ratio of the two |
 | `cached_chars_total` | characters served from the simulated cache (sum of per-request common prefixes) |
 | `compress_calls`, `compactions`, `compactions_shrinking` | calls to `engine.compress`; those that returned a different list (Hermes treats that as a compaction); and those whose list has fewer messages than the input. An engine that calls the summarizer and then returns its pruned input (1.3.0 does when it distrusts the summary) counts under `compactions` but not `compactions_shrinking` |
@@ -116,7 +131,7 @@ is wall clock and is stored in the baselines for information only.
 | `error_fingerprints` | how many of the large log's error fingerprints still have an exemplar line in the final request |
 | `refetch` | `needed_facts`: facts the final question depends on; `missing_needed_facts` / `refetch_rate`: those absent from the final request; `refetch_opportunities`: distinct tool calls the agent would have to re-run to recover them |
 | `pairing` | tool-call/result integrity violations over every request (unanswered call, orphan or duplicate result, a result that does not directly follow the assistant message that made the call, leading tool message) |
-| `byte_stability` | tool rows whose bytes changed in a request that committed nothing (Hermes rewrites history only inside a prune or compaction commit; anything else breaks the prompt cache for nothing); must be 0 |
+| `byte_stability` | whole-prefix rewrites outside declared replay commits and mutations of caller input even during a commit; both must be 0 |
 | `timing.engine_seconds` | wall time inside `should_compress` / `compress` / `prune_tool_results_only` |
 
 **Cache price.** Each request is compared with the previous one as serialized JSON, message by message; the
@@ -124,6 +139,12 @@ longest common prefix (in characters) is *cached* and costs **0.10x**; everythin
 and costs **1.25x**. The first request, which shares nothing, pays 1.25x on everything. There is no TTL and no
 breakpoint model; the point is to make prefix-breaking rewrites (every prune or compaction) visible in the
 price. `cost_cache_priced` is accumulated in integer centi-characters, so it is exact.
+Protocol 2 prepends a stable schema proxy: 12000 characters for the existing
+assumed 3000-token baseline overhead, plus serialized engine-declared schemas.
+Added schema tokens use an explicit four-character estimate. These are declared
+schema shapes and assumptions, not measured provider request bytes. An unchanged
+conversation still pays for extra recovery schemas; the no-rewrite checks now
+require that any extra cost is exactly that schema term.
 
 **Gold facts** are literal strings (17 in total: 6 recall, 4 artifact, 3 continuation, 4 decision) planted at a
 known place: a user message, an assistant message, or deep inside a tool result. Retention is checked against
@@ -165,9 +186,11 @@ only for comparison) fixes two unfaithful spots of the first harness:
   once, the model is not called again for the rest of that turn, but the scripted assistant/tool rows are still appended
   (every engine ends with the same conversation content) and the next user turn tries again with a fresh budget. Failed
   requests are never billed, so compare `cost` together with `failed_turns`; where the failed turns differ the fair
-  figure is the cost per answered turn, `cost_cache_priced / (turns - failed_turns)` (`test_small_window_replay.cost_per_answered_turn`;
-  per request billed is `cost / requests`). If the closing question fails, gold and error
-  retention are measured on the last request that was sent.
+  diagnostic is cost per completed scripted turn, `total_simulated_input_cost / (turns - failed_turns)`.
+  It does not measure answer correctness or replace the complete-matrix acceptance
+  statistic in `docs/GAUNTLET-1.7.0.md`. If the closing question fails, protocol 2
+  records gold, error and refetch observations as unavailable. An earlier request
+  cannot substitute for it.
 
 New metrics: `overflow_errors`, `overflow_compactions`, `failed_turns` (+ `failed_turn_reasons`), `requests_over_window`
 (sent above the window: always 0 in the realistic harness), `max_request_window_ratio` (largest request sent / window) and

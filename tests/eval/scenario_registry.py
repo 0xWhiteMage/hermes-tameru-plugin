@@ -11,6 +11,7 @@ import scenario as _original
 from scenario import N_TURNS
 from scenario_kit import ScenarioSpec
 from scenarios_extra import EXTRA_SPECS
+from scenarios_holdout import HOLDOUT_SPECS
 from scenarios_refactor import REFACTOR_SPEC
 from scenarios_rows import I18N_SPEC, SMALLROWS_SPEC
 
@@ -40,5 +41,5 @@ register_scenario(ScenarioSpec(
     DEFAULT_SCENARIO, _original.build_scenario, N_TURNS, 4,
     "30 turns, one incident story: source reads, a patch and re-reads, test runs, CI and log dumps, a CJK log",
 ))
-for _spec in (*EXTRA_SPECS, REFACTOR_SPEC, SMALLROWS_SPEC, I18N_SPEC):
+for _spec in (*EXTRA_SPECS, REFACTOR_SPEC, SMALLROWS_SPEC, I18N_SPEC, *HOLDOUT_SPECS):
     register_scenario(_spec)

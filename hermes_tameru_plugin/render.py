@@ -153,9 +153,13 @@ def make_ref(msg: dict, original: str) -> str:
     ``uid`` is the first non-empty of ``_tool_call_uid``, ``message_uid``, ``tool_call_id`` (Hermes
     keeps the first two across restarts and session-db round trips), else "".
     """
+    return make_ref_from_digest(msg, hashlib.sha256(original.encode("utf-8", "surrogatepass")).hexdigest())
+
+
+def make_ref_from_digest(msg: dict, original_digest: str) -> str:
+    """``make_ref`` for an original whose sha256 hex digest is already known."""
     uid = next((str(msg[key]) for key in _UID_KEYS if msg.get(key)), "")
-    digest = hashlib.sha256(original.encode("utf-8", "surrogatepass")).hexdigest()
-    return hashlib.sha256(f"{uid}|{digest}".encode()).hexdigest()[:REF_CHARS]
+    return hashlib.sha256(f"{uid}|{original_digest}".encode()).hexdigest()[:REF_CHARS]
 
 
 def _lines(text: str) -> list[str]:
@@ -237,7 +241,7 @@ def build_header(
 _PARENT_TOOL_RE = re.compile(r"\s*\[([^\]\s]+)\]")
 
 
-def guard_untrusted_body(parent_line: str, body: str) -> str:
+def guard_untrusted_body(parent_line: str, body: str, *, external: bool = False) -> str:
     """``body`` inside Hermes' untrusted-data block when the row is a web, browser or MCP result.
 
     Hermes wraps those results as data, and stock Hermes drops their text altogether when it prunes them. A body
@@ -246,20 +250,22 @@ def guard_untrusted_body(parent_line: str, body: str) -> str:
     with the delimiter tokens already inside it defanged. The tool is the ``[name]`` Hermes opens its summary with.
     """
     found = _PARENT_TOOL_RE.match(parent_line) if isinstance(parent_line, str) else None
-    if found is None or not body or not is_untrusted_tool(found.group(1)) or wrapped_intact(body):
+    source = found.group(1) if found else 'external'
+    if not body or wrapped_intact(body) or not (external or is_untrusted_tool(source)):
         return body
-    return wrap_untrusted(found.group(1), body)
+    return wrap_untrusted(source, body)
 
 
 def render(
     parent_line: str, stats: RenderStats, ref: str, *, meta_line: str = "", body: str = "",
+    external: bool = False,
 ) -> str:
     """Header, then the optional meta line and body, each on its own line.
 
     The body of a web, browser or MCP result stays inside Hermes' untrusted-data block (``guard_untrusted_body``).
     """
     out = build_header(parent_line, stats, ref)
-    body = guard_untrusted_body(parent_line, body)
+    body = guard_untrusted_body(parent_line, body, external=external)
     if meta_line:
         out += "\n" + meta_line
     if body:

@@ -127,9 +127,11 @@ def test_emit_appends_one_json_line_per_record(tmp_path):
 
 
 def test_emit_without_a_path_writes_nothing(tmp_path, monkeypatch):
-    monkeypatch.chdir(tmp_path)
+    cwd = tmp_path / "telemetry-cwd"   # a verified-empty cwd: autouse fixtures may own tmp_path
+    cwd.mkdir()
+    monkeypatch.chdir(cwd)
     Telemetry().emit({"pass": 1})
-    assert list(tmp_path.iterdir()) == []
+    assert list(cwd.iterdir()) == []
 
 
 def test_emit_never_raises(tmp_path):
@@ -213,6 +215,26 @@ def test_a_hold_that_raises_drops_its_counts_and_time_is_never_held():
     assert t.snapshot()["time"]["calls"] == 1
 
 
+def test_prepared_telemetry_can_be_published_later_only_once(tmp_path):
+    log = tmp_path / "deferred.jsonl"
+    telemetry = Telemetry(str(log))
+    with telemetry.hold() as prepared:
+        telemetry.count("render", rung="extract")
+        telemetry.add_chars(100, 10)
+        telemetry.emit({"event": "render"})
+    assert telemetry.snapshot()["events"] == {}
+    assert telemetry.snapshot()["chars"]["before"] == 0
+    assert not log.exists()
+    prepared.apply()
+    committed = telemetry.snapshot()
+    assert committed["events"]["render"]["count"] == 1
+    assert committed["chars"]["saved"] == 90
+    assert len(log.read_text().splitlines()) == 1
+    prepared.apply()
+    assert telemetry.snapshot() == committed
+    assert len(log.read_text().splitlines()) == 1
+
+
 def test_an_inner_hold_defers_to_the_outer_one():
     t = Telemetry()
     with t.hold() as outer:
@@ -227,3 +249,24 @@ def test_an_inner_hold_defers_to_the_outer_one():
             inner.keep = True
         outer.keep = True
     assert t.snapshot()["events"]["a"]["count"] == 1
+
+
+def test_the_log_path_is_confined_and_network_or_device_paths_are_refused(tmp_path, monkeypatch):
+    from hermes_tameru_plugin.telemetry import safe_log_path
+    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
+    assert safe_log_path(str(tmp_path / "home" / "t.jsonl")) is not None
+    assert safe_log_path(str(tmp_path / "elsewhere.jsonl")) is not None   # the system temp folder is allowed
+    for bad in ("", "\\\\server\\share\\t.jsonl", "//server/share/t.jsonl", "bad\x00name",
+                "C:\\Windows\\System32\\t.jsonl", "/etc/t.jsonl"):
+        assert safe_log_path(bad) is None, bad
+
+
+def test_the_log_rotates_once_it_is_large(tmp_path, monkeypatch):
+    from hermes_tameru_plugin import telemetry
+    monkeypatch.setattr(telemetry, "LOG_MAX_BYTES", 200)
+    log = tmp_path / "t.jsonl"
+    t = Telemetry(str(log))
+    for index in range(20):
+        t.emit({"event": "x", "n": index, "pad": "p" * 30})
+    assert log.exists() and log.with_name("t.jsonl.1").exists()
+    assert not log.with_name("t.jsonl.2").exists()

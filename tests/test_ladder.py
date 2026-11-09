@@ -123,6 +123,7 @@ def test_supersession_can_be_switched_off():
     ("memory", {"action": "read"}, "m" * 3000),
     ("todo", {}, "t" * 3000),
     ("tameru_expand", {"ref": "deadbeef"}, "e" * 3000),
+    ("tameru_read_original", {"ref": "deadbeef"}, "e" * 3000),
 ])
 def test_exempt_tools_take_hermes_line(name, args, content):
     engine, msgs, idx = _one("q", name, args, content)

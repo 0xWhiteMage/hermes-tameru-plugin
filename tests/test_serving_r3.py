@@ -42,6 +42,11 @@ def _page(n: int = 300) -> str:
     )
 
 
+def _control() -> str:
+    line = "2025-03-14T02:13:03.278Z ERROR build failed: ModuleNotFoundError: No module named 'foo' (code 7)"
+    return "\n".join([line] * 3)
+
+
 def _wrapped(tool: str, content: str) -> str:
     return wrap_untrusted(tool, content)
 
@@ -142,13 +147,15 @@ def test_the_ledger_skips_error_lines_of_untrusted_tools(tool: str) -> None:
     turns = [_calls(tool), {"role": "tool", "tool_call_id": "c1", "content": content}]
     assert "SYSTEM OVERRIDE" not in build_ledger(turns)
     terminal = [_calls("terminal"), {"role": "tool", "tool_call_id": "c1", "content": _page()}]
-    assert "SYSTEM OVERRIDE" in build_ledger(terminal)
+    assert "SYSTEM OVERRIDE" not in build_ledger(terminal), "an order-shaped line is dropped even from a command's output"
+    control = [_calls("terminal"), {"role": "tool", "tool_call_id": "c1", "content": _control()}]
+    assert "ModuleNotFoundError" in build_ledger(control), "a plain error line from a command is still quoted"
 
 
 def test_the_ledger_skips_a_stored_original_that_is_wrapped() -> None:
     wrapped = _wrapped("web_extract", _page())
     assert "SYSTEM OVERRIDE" not in build_ledger([], extra_originals=[wrapped])
-    assert "SYSTEM OVERRIDE" in build_ledger([], extra_originals=[_page()])
+    assert "ModuleNotFoundError" in build_ledger([], extra_originals=[_control()])
 
 
 # ---- tameru_expand hands untrusted originals back as untrusted data ---------------------------------
