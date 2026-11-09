@@ -83,6 +83,7 @@ from .engine_host import HostSettingsMixin
 from .engine_usage import UsageMixin
 from .host_tuning import HostTuning
 from .pins import PinState, merge_pins
+from .quiet import swallowed
 
 REREAD_GAP = 5          # a ref's re-read counts as a signal at most once per this many turns (a forced loop of re-reads cannot widen the tail)
 from .manifest import ManifestState, build_note, written_files
@@ -469,7 +470,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
                 if raised is not None:
                     self._config_threshold_percent = raised
             except Exception:
-                pass
+                swallowed(self, "update_model_threshold")
         super().update_model(*call.args[1:], **call.kwargs)
         if supplied_reserve is not None:
             self.__dict__["_tameru_native_max_tokens"] = (
@@ -495,7 +496,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
                     self._settings, getattr(self, "threshold_tokens", 0),
                 )
             except Exception:
-                pass
+                swallowed(self, "prune_tokens")
 
     def _retained_budget(self) -> int:
         """The retained-extract budget now: the configured floor, or the window-scaled value when larger.

@@ -16,6 +16,9 @@ All notable changes to this project are documented here. The format follows
   Cost of the two changes, measured: oncall retains fewer gold facts than before (12 of 20 at 64K, was 17; 9 at 32K, was 13) but still more than Hermes as shipped (8 and 4),
   and costs less; the default scenario at 32K retains more (11, was 8). Every retention gate against stock passes.
 
+### Fixed
+- Two more ignored errors in `update_model` (threshold lookup, prune size) are counted in the telemetry like the others instead of vanishing.
+
 ### Testing
 - The cost matrix takes `TAMERU_COST_SEEDS=0,1,2`; results and the live Desktop check with Haiku are in `docs/COST-TUNING-2026-11-10.md`.
 - `tests/eval/test_cost_matrix.py` (set `TAMERU_COST_MATRIX=out.json`; `TAMERU_COST_SCENARIOS`, `TAMERU_COST_WINDOWS` and `TAMERU_COST_ARMS` narrow it) measures every scenario, window and arm.

@@ -210,3 +210,16 @@ def test_the_tool_schema_keeps_its_contract_and_stays_small():
     assert "1-based" in props["start_line"]["description"] and "inclusive" in props["end_line"]["description"]
     assert "16" in props["ref"]["description"]
     assert len(__import__("json").dumps(schema)) <= 1400          # sent with every request: a budget, not a target
+
+
+def test_update_model_counts_a_failing_threshold_lookup_instead_of_hiding_it(monkeypatch):
+    import hermes_tameru_plugin.engine as engine_module
+    engine = make_engine()
+
+    def broken(*args, **kwargs):
+        raise RuntimeError("config unreadable")
+
+    monkeypatch.setattr(engine_module, "read_hermes_config", broken)
+    engine.update_model("model-x", 200_000, "", "", "anthropic")          # never raises into the chat turn
+    where = engine._telemetry.snapshot()["events"]["error"]["labels"]["where"]
+    assert where.get("update_model_threshold") == 1
