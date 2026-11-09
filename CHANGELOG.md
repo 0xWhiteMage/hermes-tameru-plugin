@@ -17,6 +17,7 @@ All notable changes to this project are documented here. The format follows
   and costs less; the default scenario at 32K retains more (11, was 8). Every retention gate against stock passes.
 
 ### Testing
+- The cost matrix takes `TAMERU_COST_SEEDS=0,1,2`; results and the live Desktop check with Haiku are in `docs/COST-TUNING-2026-11-10.md`.
 - `tests/eval/test_cost_matrix.py` (set `TAMERU_COST_MATRIX=out.json`; `TAMERU_COST_SCENARIOS`, `TAMERU_COST_WINDOWS` and `TAMERU_COST_ARMS` narrow it) measures every scenario, window and arm.
 - Baselines re-recorded; three strict known-loss entries (refactor and i18n at 32K, i18n at 48K) and the default-session cost xfail removed because they now pass.
 
