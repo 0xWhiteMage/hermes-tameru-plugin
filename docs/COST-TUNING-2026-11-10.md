@@ -226,3 +226,47 @@ short messages were sent (a few cents). What was seen:
   line). With `MSYS_NO_PATHCONV=1` the commands arrive intact.
 
 Still not measured live: Hermes' token estimate against billed tokens, cache writes after an idle gap longer than the cache lifetime, and the real system prompt size.
+
+## The realistic range: 64K to 200K windows, the measured 40,000-character tool block, six structural seeds, four arms (792 runs)
+
+Everything above used the replay's old 12,000-character tool block and windows down to 32K. Hermes refuses windows under 64K and its real block is about 40,000
+characters, so this is the table that describes a setup a user can run. Effective cost against stock (facts lost and read back priced), 95% interval over six
+structural seeds per cell; "hidden tool" is the `tameru_lazy` arm (`lazy_tool: on`).
+
+| 33 cells (11 shapes x 3 windows) | Product | Product + hidden tool | Legacy |
+|---|---:|---:|---:|
+| Cheaper than stock | 12 | 12 | 7 |
+| Dearer than stock | 19 | 3 | 20 |
+| Interval includes zero | 2 | 18 | 6 |
+| Mean at 64K | -0.1% | -0.9% | +1.7% |
+| Mean at 128K | -7.1% | -8.0% | -5.2% |
+| Mean at 200K | -6.8% | -7.8% | -2.6% |
+
+(With the tool hidden the five never-compacting shapes are exactly +0.0% in every seed, so their interval has zero width and includes zero: "unclear", not a loss.)
+
+Per shape, mean against stock at 64K / 128K / 200K (product | hidden tool | legacy):
+
+| Shape | 64K | 128K | 200K |
+|---|---|---|---|
+| never-compacting (dense, longform, ...) | +2.4 / +1.9 \| 0.0 \| +2.4 / +1.9 | same | same |
+| default | -4.0 \| -3.6 \| +3.0 | -15.0 \| -14.8 \| -10.4 | -14.0 \| -13.9 \| -5.1 |
+| oncall | -5.9 \| -5.2 \| +1.2 | -17.5 \| -16.9 \| -11.4 | -14.6 \| -14.2 \| -13.1 |
+| refactor | **+10.3 \| +11.0 \| +6.6** | -20.7 \| -20.2 \| -19.0 | -18.1 \| -17.8 \| +0.5 |
+| smallrows | +3.9 \| +3.8 \| +2.9 | +1.8 \| +1.5 \| +1.1 | +0.5 \| 0.0 \| +0.5 |
+| i18n | -3.3 \| -3.2 \| -4.0 | -16.2 \| -16.1 \| -9.9 | -17.5 \| -17.5 \| -2.5 |
+| bursty | -13.0 \| -12.8 \| -2.2 | -22.0 \| -21.9 \| -18.9 | -22.7 \| -22.6 \| -19.7 |
+
+Needed facts, all runs: stock 2,592 kept / 468 lost (52 cannot be re-run); product and hidden tool 2,790 kept, 89 recoverable, 181 lost (10); legacy 2,763 / 64 / 233 (27).
+
+- **The hidden tool is worth turning on in this range.** It removes the idle cost entirely and improves the mean by about 0.8 to 1.0 points at every window; the three remaining
+  losses are the same as without it. Its one cost, a single prefix rewrite when the tool first appears, is smaller than the saving in every window here. It stays off by default
+  until it has run live on a provider that carries the Anthropic cache marker.
+- **At the 64K floor Tameru roughly breaks even** (mean -0.1%, or -0.9% with the hidden tool) and wins clearly only from 128K. It loses on `refactor` (+10% to +11%) and on small
+  rows (+4%), and legacy does no better on `refactor` (+6.6%).
+- **Why `refactor` at 64K loses:** with the large tool block the window leaves little room, and the adaptive policy prunes seven times (seven cache rewrites) to avoid the two
+  compactions that stock makes (seed 0: stock 2 compactions and 2 prefix breaks; product 0 compactions, 7 prunes and 7 breaks; legacy 2 compactions, 1 prune; costs 1.83M,
+  2.09M, 1.97M).
+- **Parameter tuning does not fix it.** Sweeping the minimum reclaim share (0.35 to 0.70) and the regrowth gap (0.15 to 0.45) on the six compacting shapes at 64K and 128K,
+  three structural seeds: the shipped values (0.35 and 0.15) have the best mean at both windows (-1.9% and -14.8%); the settings that shrink `refactor` 64K to +6.4% cost 23
+  facts and move the mean to -0.6% and -8.6%. **Rejected.** A fix needs a policy that weighs, before each prune, the cache rewrite it causes against the compaction Hermes would do
+  anyway (the plan's phase 5), not another threshold.

@@ -29,34 +29,31 @@ what, where a change belongs, and how releases flow between them: [docs/REPOSITO
 
 ## At a glance
 
-Everything below comes from a **replay**: scripted agent sessions run against real Hermes imports with a simulated clock, prefix-cache
-pricing and a deliberately lossy fake summarizer. It does not measure live-agent task success or real provider bills (the live evidence is a
-handful of manual checks with Claude Haiku on Hermes Desktop, listed in [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md)).
-Hermes commit `2bd378ed` (v0.23), 11 session shapes, five context windows from 32K to 200K, six seeds.
+Everything below comes from a **replay**: scripted agent sessions run against real Hermes imports with a simulated clock, prefix-cache pricing, Hermes' real tool block
+(about 40,000 characters, measured), six varied sessions per cell and a deliberately lossy fake summarizer. It does not measure live-agent task success or real provider bills
+(the live evidence is a handful of manual checks with Claude Haiku on Hermes Desktop, in [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md)).
+Hermes commit `2bd378ed` (v0.23), 11 session shapes. Hermes refuses models with under 64K of context, so the windows are 64K, 128K and 200K.
 
-**Cost against Hermes as shipped** (mean over the 11 shapes; negative is cheaper). The second row also prices what an arm loses: a fact it
-dropped costs a re-run of the tool, a fact it only holds behind a `tameru_read_original` call costs that call.
+**Cost against Hermes as shipped** (mean over the 11 shapes; negative is cheaper). A fact an arm dropped is priced as a re-run of the tool, a fact it holds behind a
+`tameru_read_original` call as that call.
 
-| | 32K | 48K | 64K | 128K | 200K |
-|---|---:|---:|---:|---:|---:|
-| Input cost | -7.4% | -2.7% | -0.8% | -5.7% | -4.0% |
-| Input cost, with lost and recoverable facts priced | -8.4% | -5.0% | -2.4% | -7.3% | -4.3% |
+| | 64K | 128K | 200K |
+|---|---:|---:|---:|
+| Tameru | -0.1% | -7.1% | -6.8% |
+| Tameru with `lazy_tool: on` (off by default) | -0.9% | -8.0% | -7.8% |
 
-Needed facts across all cells: Hermes keeps 1,345 and loses 355 (91 cannot be re-run); Tameru keeps 1,511, can read back 48 more, and loses 141 (30).
+Needed facts across all runs: Hermes keeps 2,592 and loses 468 (52 cannot be re-run); Tameru keeps 2,790, can read back 89 more, and loses 181 (10).
 
 **When Tameru costs more.** Be aware of these before turning it on:
 
-- **A session that never reaches a compaction costs a little more** (+3.2% to +5.1% in the replay's five such shapes, which assumes Hermes' tool block is 12,000
-  characters; Hermes' real block is about 40,000 with a bare profile, which brings it to about +2%, and less with more tools). The cause is the
-  one tool, `tameru_read_original`, listed on every request. `expand_tool: false` removes it, and with it the ability to read an original back.
-- **Windows under 64K are stress tests.** Hermes refuses models with less than 64,000 tokens of context, so the 32K and 48K columns above show what a very small window
-  would do, not a setup you can run. The real range starts at 64K.
-- **Many small results cost more on small windows.** With results of 800 to 3,000 characters the plugin costs about +10% at 32K, +4% to +6% at 48K and +1% to +4% at 64K
-  (it still loses fewer needed facts than Hermes). There is no loss at 128K and above beyond the tool above.
-- **Averages hide a split.** Across 55 shape-and-window cells with six varied sessions each, Tameru is cheaper in 24, dearer in 29 (the five shapes that never compact,
-  and small rows), and undecided in 2. It wins where sessions compact.
-- **Per-turn note and self-tuning are not free.** With the note running, the replay costs 0.2% to 1.0% more on average and up to 6.8% in one cell; self-tuning
-  has not been shown to help (switching it off is slightly cheaper at 32K to 64K).
+- **At the 64K floor it roughly breaks even.** It wins clearly from 128K. In a session that keeps adding results to a 64K window (`refactor`-like work) it costs about 10% more than
+  Hermes, because it prunes seven times where Hermes compacts twice; legacy mode costs about 7% more there.
+- **A session that never reaches a compaction costs about 2% more** (+1.9% to +2.4% with Hermes' real tool block, more with a smaller one), the price of the one tool,
+  `tameru_read_original`, listed on every request. `lazy_tool: on` removes it (exactly +0.0% in the replay); `expand_tool: false` removes the tool itself, and with it the
+  ability to read an original back.
+- **Many small results cost a little more** (800 to 3,000 characters each): +3.9% at 64K, +1.8% at 128K, +0.5% at 200K.
+- **Per-turn note and self-tuning are not free.** With the note running, the replay costs 0.2% to 1.0% more on average and up to 6.8% in one cell; self-tuning has not been shown to help.
+- **Averages hide a split.** Per shape and window, with six varied sessions each, Tameru is cheaper in 12 of 33 cells and dearer in 19 (with `lazy_tool` on: 3), and undecided in 2.
 - On a model Hermes compacts on the provider's servers (OpenAI Responses, some routes), `/tameru` says so: that summary has no pins or Artifact Trail.
 - At a 200K window the plugin prunes before Hermes would compact and keeps two or three fewer facts than Hermes in three shapes; the tool reads them back.
 
