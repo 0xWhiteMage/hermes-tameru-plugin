@@ -221,10 +221,11 @@ class AdaptiveMixin:
         adjustment = self._policy.tuner.signal(name, count)
         if adjustment is not None:
             self._event("adjust", signal=name, changed=list(adjustment.changed), reason=adjustment.reason)
-            from . import learned
             from .session_tuner import save                 # late: sibling imports this module's package
             save(self)
-            learned.record(self._policy.tuner.offsets())
+            if self._settings.learned_priors:
+                from . import learned
+                learned.record(self._policy.tuner.offsets())
 
     def observe_host_compaction(self, *, session_id: str = "", kind: str = "", reason: str = "",
                                 before_tokens=None, after_tokens=None, **_ignored) -> bool:
@@ -354,7 +355,7 @@ class AdaptiveMixin:
                     planning = self._planning_input(messages, current_tokens, body_tokens=body)
                     scope.policy_plans = () if self._policy.paused else plans(
                         self._policy.controls, planning, self._tuning())
-                    if self._policy.tuner.tick() and self._settings.autotune:
+                    if self._policy.tuner.tick() and self._settings.autotune and self._settings.learned_priors:
                         from . import learned                     # calm time eases what earlier chats taught
                         learned.relax()
                     self._policy.checks_since_commit += 1

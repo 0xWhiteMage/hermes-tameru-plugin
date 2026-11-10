@@ -172,6 +172,7 @@ def test_saved_numbers_round_trip_and_are_clamped_on_load():
 
 # ---- the engine --------------------------------------------------------------------------------------------
 def _engine(db=None, **settings):
+    settings.setdefault("adaptive_host", True)           # off by default; these tests are about the feature
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **settings))
     engine.bind_session_state(session_db=db or _MetaDB(), session_id="s1")
     _ = engine.context_length          # real Hermes applies its small-window floor when the window is first read
@@ -205,7 +206,7 @@ def test_tameru_prunes_from_the_configured_threshold_not_the_tuned_one():
 
 def test_revisiting_an_old_output_widens_the_engines_protected_tail():
     from test_edits import _shortened
-    engine, out, idx, ref, original = _shortened()
+    engine, out, idx, ref, original = _shortened(adaptive_host=True)
     engine.threshold_tokens = 10_000_000                                  # room, so the Restore is accepted
     base_n = engine.protect_last_n
     for _ in range(4):                                                    # revisits on several turns

@@ -78,7 +78,8 @@ def bind_tuner(engine, *, rotation: bool = False) -> None:
         if rotation:
             _write(db, sid, _record(state))
             return
-        if getattr(engine._settings, "autotune", False) and state.tuner.pristine():
+        if (getattr(engine._settings, "autotune", False) and getattr(engine._settings, "learned_priors", False)
+                and state.tuner.pristine()):
             from . import learned                            # a new chat starts from what earlier chats learned
             prior = learned.seed()
             if prior is not None:

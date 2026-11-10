@@ -20,6 +20,7 @@ def _no_daily_cap(monkeypatch):
 
 
 def _engine(sid="s1", db=None, **settings):
+    settings.setdefault("learned_priors", True)         # off by default; these tests are about the feature
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **settings))
     engine.bind_session_state(session_db=db or _MetaDB(), session_id=sid)
     return engine

@@ -29,7 +29,7 @@ from .policy import ACTIVATIONS, POLICY_MODES, PREFERENCES, RECENT_PROTECTIONS
 PLUGIN_ID = "tameru"
 ENV_PREFIX = "TAMERU_HERMES_"
 SHORT_ENV_PREFIX = "TAMERU_"
-_SHORT_ENV_SWITCHES = frozenset({"edits", "manifest", "autotune", "adaptive_host", "pins"})   # also settable without HERMES_; the long name wins
+_SHORT_ENV_SWITCHES = frozenset({"edits", "manifest", "autotune", "adaptive_host", "pins", "learned_priors"})   # also settable without HERMES_; the long name wins
 RISK_LEVELS = ("low", "medium", "high")
 PRUNE_TAILS = ("tokens", "count")
 
@@ -44,7 +44,8 @@ class TameruSettings:
     enabled: bool = True                       # kill switch -> pure stock ContextCompressor behaviour
     policy_mode: str = "adaptive"             # adaptive | fixed (matched comparison) | legacy
     autotune: bool = True                     # adaptive mode retunes itself from live session signals
-    adaptive_host: bool = True                # adapt Hermes' summary threshold and protected tail per chat, within bounds (TAMERU_ADAPTIVE_HOST=off)
+    adaptive_host: bool = False               # off by default: adapt Hermes' summary threshold and protected tail per chat, within bounds. Measured no gain above 32K (TAMERU_ADAPTIVE_HOST=on to try it)
+    learned_priors: bool = False              # off by default: let a new chat start from what earlier chats taught the self-tuner (TAMERU_LEARNED_PRIORS=on)
     pins: bool = True                         # keep the lines you pin word for word in every Hermes summary (TAMERU_PINS=off)
     edits: bool = True                        # Keep and Restore: put a shortened output back in front of the model (TAMERU_EDITS=off turns it off)
     manifest: bool = True                     # tell the model, once per change, how many results are shortened (TAMERU_MANIFEST=0 turns it off)
@@ -226,6 +227,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "edits": _parse_bool,
     "pins": _parse_bool,
     "adaptive_host": _parse_bool,
+    "learned_priors": _parse_bool,
     "preference": _choice(PREFERENCES),
     "activation": _choice(ACTIVATIONS),
     "recent_protection": _choice(RECENT_PROTECTIONS),
