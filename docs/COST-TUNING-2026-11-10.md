@@ -294,3 +294,20 @@ It repairs `refactor` and breaks the shapes where the proactive prune is what wi
 `refactor` from `default` is not the window but how much each prune reclaims against the cache it rewrites (a compaction reclaims most of the prompt for one rewrite; a prune reclaims about a
 quarter for one rewrite, so seven of them cost more than two compactions). The rule that would get both right is per prune: weigh its reclaim against its rewrite and against the
 compaction Hermes will do anyway, over the requests expected before that compaction. That is not built; it is the open item behind the 64K `refactor` loss.
+
+### Also rejected: a per-prune horizon rule (reclaim against the rewrite it causes, over the requests before Hermes would compact anyway)
+
+Built and measured (three structural seeds, measured tool block, six compacting shapes), then removed. A prune rewrites everything after its first changed row (`suffix`, at the write price over the read
+price, premium 1.15) and saves `reclaim` tokens per later request at the read price (0.10); since a compaction would replace the old rows anyway, the saving counts only for
+`(compaction threshold - prompt now) / growth per request` requests. The rule demanded `reclaim >= 1.15 * suffix / (0.10 * requests_left)` on top of the existing share rule.
+
+| Mean against stock | 64K | 128K | 200K |
+|---|---:|---:|---:|
+| Product (shipped) | -1.9% | -14.8% | -14.9% |
+| With the horizon rule | -0.4% | -4.9% | -9.6% |
+
+It improved `refactor` at 64K (+9.1% to +5.7%) and gave up much more elsewhere (at 128K: default -14.4% to -1.3%, oncall -17.5% to +0.9%, i18n -14.2% to -3.9%, bursty -21.5% to -7.0%).
+The model undervalues pruning: it counts only the tokens saved per request, not that a prune can postpone or avoid a compaction altogether, which saves the summarizer call and the large
+rewrite that go with it. A rule that is right has to price the compaction it avoids, which depends on how long the session runs, something a replay with a fixed script and a live
+chat do not share. **Open item, unsolved:** the 64K `refactor` loss (+10%) and the small-rows cost remain. Four levers have now been measured and rejected for it: thresholds, a small-window
+switch, a trail budget, and this rule.
