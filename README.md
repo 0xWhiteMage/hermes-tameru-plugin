@@ -48,8 +48,10 @@ Needed facts across all cells: Hermes keeps 1,345 and loses 355 (91 cannot be re
 
 - **A session that never reaches a compaction costs 3% to 5% more** (+3.2% to +5.1% in the five such shapes, at every window). The cause is the
   one tool, `tameru_read_original`, listed on every request. `expand_tool: false` removes it, and with it the ability to read an original back.
-- **Many small results cost more on small windows.** With results of 800 to 3,000 characters the plugin costs +10.5% at 32K, +4.0% at 48K and +1.4% at 64K
+- **Many small results cost more on small windows.** With results of 800 to 3,000 characters the plugin costs about +10% at 32K, +4% to +6% at 48K and +1% to +4% at 64K
   (it still loses fewer needed facts than Hermes). There is no loss at 128K and above beyond the tool above.
+- **Averages hide a split.** Across 55 shape-and-window cells with six varied sessions each, Tameru is cheaper in 24, dearer in 29 (the five shapes that never compact,
+  and small rows), and undecided in 2. It wins where sessions compact.
 - **Per-turn note and self-tuning are not free.** With the note running, the replay costs 0.2% to 1.0% more on average and up to 6.8% in one cell; self-tuning
   has not been shown to help (switching it off is slightly cheaper at 32K to 64K).
 - On a model Hermes compacts on the provider's servers (OpenAI Responses, some routes), `/tameru` says so: that summary has no pins or Artifact Trail.

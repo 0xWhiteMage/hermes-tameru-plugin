@@ -159,3 +159,27 @@ Product against stock, effective cost, mean: crude -8.4% / -5.0% / -2.4% / -7.3%
 355 losses, and 55 of the 91 it could not re-run, but the product still keeps 117 more needed facts and loses about 56% fewer. The three 200K cells where
 the product keeps fewer facts than stock (default, i18n, refactor) are the same under both: five facts, four of them readable back. A real model is a third
 case this does not cover; the live checks are the only evidence about one.
+
+## Structural seeds: six different sessions per cell (`protocol3.structural_variant`)
+
+A scenario's seed changes filler text, not the shape of the work, so the earlier six seeds were close to one session six times (gold facts are
+identical across seeds in 238 of 264 cells). `structural_variant(script, seed)` makes each seed a different session with the same facts: every
+`terminal` output gets its own size factor in [0.6, 1.4] and its filler lines are thinned or repeated accordingly, while every planted fact, every
+error line and the first and last three lines of each output stay. Seed 0 is the script as built. 990 runs: 11 scenarios x 5 windows x 6 structural
+seeds x stock, product, legacy; effective cost, 95% confidence interval over the six seeds (t distribution) per scenario-and-window cell.
+
+| Product against stock, 55 cells | Cells |
+|---|---:|
+| Cheaper, interval below zero | 24 |
+| More expensive, interval above zero | 29 |
+| Interval includes zero | 2 (`refactor` 48K: -1.7% +/- 4.7; `smallrows` 128K: +0.3% +/- 0.5) |
+
+- **The 24 wins are all in the six shapes that compact**; they span every window (5 at 32K, 4 at 48K, 5 at 64K, 128K and 200K).
+- **The 29 losses are the five shapes that never compact, at every window** (dense +5.1%, rereads +5.0%, diagnostics +4.6%, mixedlang +4.2%, longform +3.2%, each with
+  an interval of 0.0: it is the tool schema, a constant), **and `smallrows`**, which varies and is worse than the single script showed:
+  +10.2% +/- 2.0 at 32K, +5.7% +/- 2.4 at 48K, +3.7% +/- 1.2 at 64K, +0.3% +/- 0.5 at 128K, +0.5% at 200K.
+- **The mean hides this split.** Mean effective cost against stock over all cell-seeds: -6.8% +/- 6.2 at 32K, -4.0% +/- 4.0 at 48K, -2.0% +/- 2.4 at 64K (the
+  interval includes zero), -6.8% +/- 3.9 at 128K, -4.6% +/- 3.2 at 200K. These intervals treat the 66 cell-seeds as independent, which they are not (scenarios share builders),
+  so they are optimistic; the per-cell table above is the honest one.
+- **Needed facts, all 990 runs:** stock 4,047 kept / 1,053 lost (267 cannot be re-run); product 4,509 kept, 136 recoverable, 455 lost (94); legacy 4,505 / 80 / 515 (102).
+  The retention lead holds under variation.
