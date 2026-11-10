@@ -381,3 +381,20 @@ Cost does not depend on the summarizer (it is set by cache behaviour and by how 
 product is ahead in 15 of 18 cells (for example refactor 64K 39 / 48, bursty 3 / 12, i18n 64K 27 / 36, default 128K 18 / 30), tied in three (oncall 64K 33 / 33, refactor 200K, smallrows 200K), and behind in one:
 **default at 200K, stock 33 against product 30**, the early-prune loss already recorded (three facts the product pruned before any compaction was needed, not readable back). So the retention lead survives a
 summarizer the author did not write, except in that one known cell.
+
+## Live A/B on Haiku 4.5 (Desktop, 2026-11-10)
+
+One scripted task: sixteen terminal commands, each printing about 25,000 characters, then a list of each output's first token.
+Cost is Hermes' own `estimated_cost_usd` for the session (state.db), so it includes the cache read and write rates.
+
+| Arm | Sessions | Cost per session | Notes |
+|---|---|---|---|
+| Tameru on (`lazy_tool` on) | 2 (34 messages each) | $0.2094, $0.2094 | 10 results shortened, 62K tokens freed, recovery tool hidden 12 requests then listed 6 |
+| Stock (`enabled: false`) | 3 (34 messages each) | $0.2512, $0.2502, $0.2692 | no Tameru headers in any message |
+
+Mean $0.2094 against $0.2569: **18.5% cheaper with Tameru** on this task. Read it with care: n = 2 against 3 on one task shape built to
+produce large outputs (the case Tameru is for), one model, one cache-warm session each. It says the direction matches the replay for
+this shape; it does not say what a typical chat saves. Three more stock sessions took a shorter path (19 messages, the model batched
+commands, $0.078 to $0.103) and are left out because the task was not the same. An earlier "paused" arm was invalid (`/tameru pause`
+did not stop the cleanup; that chat still freed 62K tokens), so it is counted as a Tameru-on session.
+
