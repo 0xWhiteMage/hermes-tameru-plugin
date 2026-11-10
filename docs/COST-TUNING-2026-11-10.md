@@ -79,3 +79,38 @@ Run with `TAMERU_COST_SEEDS=0,1,2,3,4,5` over `stock_defaults`, `plain_masking`,
 - **The per-turn note costs 0.2-1.0% on average and up to 6.8% in one cell** (it is stored in the user message, so every later request carries it), and at 32K/48K the as-shipped arm keeps 6 and 12 fewer gold facts than the product arm across all cells. The note was unpriced before.
 - **Autotune off is cheaper at 32K/48K/64K and keeps more facts** (+11, +5, +4 across cells), so self-tuning is not shown to help.
 - Raw rows: `phase0-matrix.json` (kept outside the repository; regenerate with the command in `tests/eval/test_cost_matrix.py`).
+
+## Effective cost: pricing the facts an arm lost and the read-backs it offers (`tests/eval/protocol3.py`)
+
+The saved baselines count a needed fact as kept only if its text is in the final request, and charge nothing for a fact an arm
+lost or for the tool call that gets one back. `protocol3.measure` leaves them alone and measures one run a second way. A needed
+fact is **kept** (in the request), **recoverable** (not in the request, but a `tameru_read_original` call on a ref that is in the request
+returns it, which the measurement really performs) or **lost**. A recoverable fact costs a read-back and a lost fact planted by a tool
+costs a re-run of that call, both priced as 1.25 x the returned characters plus 300 characters of call overhead, once, uncached. That is
+a model of the extra turn, not a measurement: it ignores output tokens, latency and whether the model would actually make the call.
+A lost fact the user or assistant said cannot be re-run and is counted separately, not priced.
+
+330 runs: 11 scenarios x 32K/48K/64K/128K/200K x seeds 0-1 x stock, product, legacy.
+
+| Needed facts, all cells | Kept | Recoverable | Lost | of which cannot be re-run |
+|---|---:|---:|---:|---:|
+| Stock Hermes | 1,345 | 0 | 355 | 91 |
+| Product (adaptive) | 1,511 | 48 | 141 | 30 |
+| Legacy | 1,516 | 26 | 158 | 29 |
+
+| Mean cost against stock | 32K | 48K | 64K | 128K | 200K |
+|---|---:|---:|---:|---:|---:|
+| Product, as measured so far | -7.5% | -2.7% | -0.8% | -5.8% | -4.0% |
+| Product, effective | -8.4% | -5.0% | -2.4% | -7.3% | -4.3% |
+| Legacy, as measured so far | -8.2% | -2.8% | 0.0% | -4.1% | +0.1% |
+| Legacy, effective | -9.1% | -4.3% | -0.9% | -5.8% | -0.6% |
+
+- **The 200K fact losses are not real costs.** Where the product keeps fewer facts than stock at 200K: `i18n` and `refactor` are two recoverable
+  facts each (effective cost -15.9% and -8.9%, the same as the measured -16.0% and -9.0%); `default` loses one tool-planted fact (effective -14.5%,
+  measured -17.9%). The recovery tool is worth what it costs there.
+- **Pricing the losses widens the product's lead at every window.** Stock loses 2.5 times as many needed facts.
+- **What stays above stock, even priced:** the five scenarios that never compact (+3.2% to +5.1% at every window: the tool schema) and `smallrows`
+  (effective +10.5% at 32K, +4.0% at 48K, +1.4% at 64K; it loses 12 facts against stock's 13 at 32K and 48K, so the loss is real cost, not a measuring gap).
+  Legacy no longer beats the product anywhere once priced, except 32K by 0.7 points.
+- **Not yet in this table:** the per-turn note, idle gaps and a cache lifetime (the replay now accepts `cache_ttl_s` and `idle_seconds`, off by default),
+  a realistic stock tool block, and a second summarizer. Those are the rest of the second protocol.
