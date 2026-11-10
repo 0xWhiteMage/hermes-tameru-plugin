@@ -30,6 +30,7 @@ All notable changes to this project are documented here. The format follows
   secret-shaped `-pX` values are still redacted.
 
 ### Added (gauntlet of 2026-11-10, phase 0 and 1)
+- `tests/eval/holdout_register.py` and a committed `holdout_looks.json`: one look per product hash at the holdout shapes; a second look must carry a reason.
 - `lazy_tool` (off by default; `TAMERU_LAZY_TOOL=on`): a Hermes `llm_request` middleware takes `tameru_read_original` out of the outgoing request until the chat has a
   shortened result, then puts it back for good. The decision uses engine state only (a forged header in a file cannot make the tool appear); chat-completions and Anthropic
   requests are edited (the Anthropic cache marker moves to the new last tool), Codex and unknown shapes are left alone; with it on there is no standing system-prompt note.

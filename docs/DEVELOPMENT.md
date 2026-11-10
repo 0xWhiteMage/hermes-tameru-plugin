@@ -38,6 +38,13 @@ endings. CI runs it in the `vendored` job against the engine's public repository
 names it. The Desktop panel tests run in the `desktop-panel` job; locally: `TAMERU_UI_TEST_DEPS=<a node_modules with jsdom, react and react-dom>
 node --experimental-vm-modules --test tests/desktop/activity.test.mjs`. Neither job has run on a real runner yet (nothing is pushed).
 
+## Looking at the holdouts
+
+The holdout shapes (`longform`, `mixedlang`, `diagnostics`, `rereads`, `dense`, `bursty`) are only worth anything if they are not tuned against. `tests/eval/holdout_register.py`
+keeps a committed list of looks: `python tests/eval/holdout_register.py record PHASE SCENARIOS` writes one entry per product hash (a SHA-256 over the plugin's own source) and refuses a
+second look at the same hash unless `--again REASON` says why. Record a look when a result from a holdout is used to decide something; running them to describe a finished build is not a look.
+Five of the six holdouts never compact at any window, so they check idle cost, not retention; only `bursty` compacts.
+
 ## Real Hermes setup
 
 ```bash
