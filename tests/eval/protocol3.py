@@ -175,7 +175,27 @@ def _read_back(engine: Any, refs: list[str], needle: str) -> int | None:
     return None
 
 
-def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: str = "crude", structural: bool = False) -> dict:
+# Idle profiles: the pause before each user turn after the first, with the cache lifetime that makes it matter.
+#   none         today's replay: no pauses, the cache never expires
+#   interactive  45 s of think time before every turn: the cache (5 minutes) outlives every pause
+#   mixed        10 minutes before every third turn, 45 s otherwise: now and then the cache is gone
+#   slow         10 minutes before every turn: the cache is gone at every user turn
+IDLE_PROFILES = {
+    "interactive": lambda turn: 45.0,
+    "mixed": lambda turn: 600.0 if turn % 3 == 0 else 45.0,
+    "slow": lambda turn: 600.0,
+}
+CACHE_TTL_SECONDS = 300.0
+
+
+def idle_options(profile: str) -> dict:
+    if profile == "none":
+        return {}
+    return {"cache_ttl_s": CACHE_TTL_SECONDS, "idle_seconds": IDLE_PROFILES[profile]}
+
+
+def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: str = "crude", structural: bool = False,
+            idle: str = "none") -> dict:
     """One replay of ``arm`` on ``scenario`` at ``window``, with the needed facts sorted and priced."""
     made: list[Any] = []
 
@@ -185,7 +205,8 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
 
     result = replay.run_session(factory, scenario=scenario, context_length=window, seed=seed, keep_final_request=True,
                                 summarizer_factory=ExtractiveSummarizer if summarizer == "extractive" else None,
-                                script_transform=structural_variant if structural else None)
+                                script_transform=structural_variant if structural else None,
+                                **idle_options(idle))
     metrics = result["metrics"]
     final = result.get("final_request") or []
     spec = registry.get_spec(scenario)
@@ -216,7 +237,7 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
     answered = max(1, metrics["turns"] - metrics["failed_turns"])
     base = metrics["total_simulated_input_cost"]
     return {
-        "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer, "structural": structural,
+        "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer, "structural": structural, "idle": idle,
         "base": round(base / answered, 1), "effective": round((base + extra) / answered, 1),
         "needed": len(kept) + len(recoverable) + len(lost),
         "kept": len(kept), "recoverable": len(recoverable), "lost": len(lost), "lost_unrecoverable": len(unrecoverable),

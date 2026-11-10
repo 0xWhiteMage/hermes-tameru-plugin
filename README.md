@@ -52,6 +52,7 @@ Needed facts across all runs: Hermes keeps 2,592 and loses 468 (52 cannot be re-
   `tameru_read_original`, listed on every request. `lazy_tool: on` removes it (exactly +0.0% in the replay); `expand_tool: false` removes the tool itself, and with it the
   ability to read an original back.
 - **Many small results cost a little more** (800 to 3,000 characters each): +3.9% at 64K, +1.8% at 128K, +0.5% at 200K.
+- **The numbers above assume the prompt cache never expires.** In interactive use it often does (a pause of several minutes), and that favours Tameru: with a ten-minute pause before every third message the mean at 128K is about -19% instead of -15%, and `refactor` at 64K costs +5% instead of +9%. An agent that works without pauses sees the table as printed.
 - **Per-turn note and self-tuning are not free.** With the note running, the replay costs 0.2% to 1.0% more on average and up to 6.8% in one cell; self-tuning has not been shown to help.
 - **Averages hide a split.** Per shape and window, with six varied sessions each, Tameru is cheaper in 12 of 33 cells and dearer in 19 (with `lazy_tool` on: 3), and undecided in 2.
 - On a model Hermes compacts on the provider's servers (OpenAI Responses, some routes), `/tameru` says so: that summary has no pins or Artifact Trail.

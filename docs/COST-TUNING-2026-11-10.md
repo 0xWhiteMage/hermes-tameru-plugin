@@ -311,3 +311,20 @@ The model undervalues pruning: it counts only the tokens saved per request, not 
 rewrite that go with it. A rule that is right has to price the compaction it avoids, which depends on how long the session runs, something a replay with a fixed script and a live
 chat do not share. **Open item, unsolved:** the 64K `refactor` loss (+10%) and the small-rows cost remain. Four levers have now been measured and rejected for it: thresholds, a small-window
 switch, a trail budget, and this rule.
+
+## Idle gaps: the cache does not live forever (`protocol3.measure(..., idle=...)`, 5-minute cache lifetime)
+
+Every table above assumes the prompt cache never expires, so a prune always costs a rewrite. In interactive use the gap between messages often outlasts it (live: 100% hit two minutes
+after a turn, 0% after 28). A request after the cache has expired writes the whole prompt for any engine, and Tameru's prompt is smaller. Product against stock, effective cost, mean of
+the six compacting shapes (measured tool block, three structural seeds), by idle profile:
+
+| Idle profile | 64K | 128K | 200K |
+|---|---:|---:|---:|
+| none (as before): the cache never expires | -1.9% | -14.8% | -14.9% |
+| interactive: 45 s before every message (the cache outlives it) | -1.9% | -14.8% | -14.9% |
+| mixed: 10 minutes before every third message, 45 s otherwise | -2.7% | -19.5% | -20.0% |
+| slow: 10 minutes before every message | -4.2% | -21.1% | -21.1% |
+
+`refactor` at 64K, the worst cell: +9.1% (none), +4.9% (mixed), +0.8% (slow). Short pauses change nothing; long ones help, because stock pays the full write of its larger prompt each time. So the
+replay without idle gaps understates Tameru for a person who steps away, and overstates it for an unattended agent that works in one go. Both are reported; the real mix is unknown (the live
+logs would show it: the gap between a turn's end and the next message).
