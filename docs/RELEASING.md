@@ -22,8 +22,9 @@ Batch changes and release them together: every release costs exactly one catalog
 1. Re-vendor (see [DEVELOPMENT.md](DEVELOPMENT.md#vendoring-the-engine)), update `VENDORED_FROM`, and check:
    `python scripts/sync_to_harness.py <plugin>/hermes_tameru_plugin/tameru --manifest ../plugin.yaml --check`
    from the engine repo reports no drift.
-2. The plugin version must equal the vendored `ENGINE_VERSION` (`tests/test_packaging.py` enforces it):
-   `pyproject.toml` and `hermes_tameru_plugin/plugin.yaml` (the sync stamps the manifest).
+2. The plugin and the engine are versioned separately: `tests/test_packaging.py` checks only that `ENGINE_VERSION` is well formed and that
+   `pyproject.toml` and `hermes_tameru_plugin/plugin.yaml` agree with each other. `/tameru stats` shows both, so record the engine version
+   in the release notes.
 3. Run both test modes (stub in a venv **without** Hermes installed; real Hermes at the CI pin and at Hermes
    `main`), `ruff check .`, the replay (`tests/eval`, including `--old-harness` comparisons if the harness changed)
    and review every baseline diff.
