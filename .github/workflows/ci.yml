@@ -10,10 +10,9 @@ on:
 permissions:
   contents: read
 
-env:
-  # Hermes Agent revision the plugin is verified against. Bump deliberately, together with
-  # tests/test_seam_contract.py if a seam moved.
-  HERMES_PINNED_SHA: a0a49926f44c231f3456faffeaa4b1cc8ee4274c
+# The Hermes Agent revision the plugin is verified against lives in the HERMES_PIN file at the repository root: it is the
+# commit the saved replay baselines were recorded on (tests/test_hermes_pin.py checks that). Bump it deliberately,
+# together with the baselines and tests/test_seam_contract.py if a seam moved.
 
 jobs:
   # Stub-mode unit tests: tests/hermes_stub stands in for Hermes' ``agent`` package.
@@ -38,10 +37,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: pin
+        run: echo "sha=$(tr -d '[:space:]' < HERMES_PIN)" >> "$GITHUB_OUTPUT"
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           repository: NousResearch/hermes-agent
-          ref: ${{ env.HERMES_PINNED_SHA }}
+          ref: ${{ steps.pin.outputs.sha }}
           path: hermes-agent
       - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
         with:
