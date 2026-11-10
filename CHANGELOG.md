@@ -27,6 +27,10 @@ All notable changes to this project are documented here. The format follows
   secret-shaped `-pX` values are still redacted.
 
 ### Added (gauntlet of 2026-11-10, phase 0 and 1)
+- `scripts/check_vendored.py` and `tests/test_vendored_engine.py` check the vendored engine against the engine repository at `VENDORED_FROM`; CI gets
+  a `vendored` job and a `desktop-panel` job (not yet run on a real runner).
+- Replay: `tests/eval/protocol3.py` prices a run's lost facts and read-backs (effective cost) and offers a second, extractive summarizer; the replay
+  accepts an optional cache lifetime and idle gaps (`cache_ttl_s`, `idle_seconds`). All off by default; the saved baselines are unchanged.
 - `scripts/rollback.ps1 -Ref <commit>` and `scripts/rollback.sh`: roll back to any commit, find the Hermes folder, keep the panel backup
   outside `desktop-plugins/`. v1.6.0 cannot serve chats started under 1.9 (their saved prompt names `tameru_read_original`).
 - `HERMES_PIN` is the one Hermes commit for CI and the saved baselines (a test checks them against each other).

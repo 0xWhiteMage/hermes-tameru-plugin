@@ -76,6 +76,36 @@ jobs:
         env:
           HERMES_REPO_ROOT: ${{ github.workspace }}/hermes-agent
 
+  # The vendored engine must be the engine repository's source at the commit hermes_tameru_plugin/tameru/__init__.py records.
+  vendored:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - id: vendored
+        run: echo "sha=$(grep -oP '^VENDORED_FROM = "\K[0-9a-f]{40}' hermes_tameru_plugin/tameru/__init__.py)" >> "$GITHUB_OUTPUT"
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          repository: 0xWhiteMage/tameru-compaction-system
+          ref: ${{ steps.vendored.outputs.sha }}
+          path: engine
+          fetch-depth: 0
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5
+        with:
+          python-version: "3.12"
+      - run: python scripts/check_vendored.py engine
+
+  # The Desktop panel (plain JavaScript run in jsdom with React) has its own tests. The runner's Node runs them; the three
+  # packages they load are installed next to the job, at the versions the tests were written against.
+  desktop-panel:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - run: node --version
+      - run: npm install --prefix "$RUNNER_TEMP/uideps" jsdom@29.1.1 react@19.3.0 react-dom@19.3.0
+      - run: node --experimental-vm-modules --test tests/desktop/activity.test.mjs
+        env:
+          TAMERU_UI_TEST_DEPS: ${{ runner.temp }}/uideps/node_modules
+
   lint:
     runs-on: ubuntu-latest
     steps:

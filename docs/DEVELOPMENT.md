@@ -30,6 +30,14 @@ Markers: `real_hermes` (skipped without `HERMES_REPO_ROOT`), `stub_only` (skippe
 `-m "not perf"`). `tests/test_seam_contract.py` checks the private Hermes names the plugin hooks; if it fails
 after a Hermes bump, a seam moved.
 
+## Checking the vendored engine
+
+`python scripts/check_vendored.py PATH_TO_ENGINE_CLONE` (or `TAMERU_ENGINE_REPO=... python -m pytest tests/test_vendored_engine.py`) compares
+every module of `hermes_tameru_plugin/tameru/` with the engine repository's `src/tameru` at the commit `VENDORED_FROM` records, ignoring line
+endings. CI runs it in the `vendored` job against the engine's public repository, so the engine commit must be pushed before the plugin that
+names it. The Desktop panel tests run in the `desktop-panel` job; locally: `TAMERU_UI_TEST_DEPS=<a node_modules with jsdom, react and react-dom>
+node --experimental-vm-modules --test tests/desktop/activity.test.mjs`. Neither job has run on a real runner yet (nothing is pushed).
+
 ## Real Hermes setup
 
 ```bash
