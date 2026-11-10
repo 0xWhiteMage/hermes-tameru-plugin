@@ -1,2 +1,4 @@
 # Frozen validation captures include byte hashes; retain their original newlines.
 /docs/replay-*/*.json -text whitespace=blank-at-eol,blank-at-eof,space-before-tab,cr-at-eol
+# Shell scripts must keep LF line endings on every checkout, or bash cannot run them.
+*.sh text eol=lf
