@@ -2,7 +2,7 @@ import * as sdk from '@hermes/plugin-sdk'
 import { cloneElement, createElement as h, Fragment, isValidElement, useEffect, useId, useRef, useState } from 'react'
 
 const host = sdk.host
-const PANEL_BUILD = 4     // must equal progress.PANEL_BUILD in the backend; a mismatch means Desktop or the plugin is stale
+const PANEL_BUILD = 5     // must equal progress.PANEL_BUILD in the backend; a mismatch means Desktop or the plugin is stale
 const epoch = () => typeof sdk.gatewayActivationEpoch === 'function' ? sdk.gatewayActivationEpoch() : 0
 const muted = { color: 'var(--ui-text-tertiary)' }
 const number = value => Number.isFinite(value) ? value.toLocaleString() : '—'
@@ -650,7 +650,7 @@ function TameruProgress() {
   const fillPct = Number.isFinite(gauge.fill_pct) ? gauge.fill_pct
     : Number.isFinite(used) && Number.isFinite(capacity) && capacity > 0 ? Math.round((100 * used) / capacity) : null
   const savedPct = progress?.savings?.saved_pct
-  const savedLabel = saved > 0 ? (Number.isFinite(savedPct) ? (savedPct >= 1 ? `Saved ~${savedPct}%` : 'Saved <1%') : `Saved ${fmtTokens(saved)}`) : ''
+  const savedLabel = saved > 0 ? (Number.isFinite(savedPct) ? (savedPct >= 1 ? `Freed ~${savedPct}%` : 'Freed <1%') : `Freed ${fmtTokens(saved)}`) : ''
   const headNote = !sessionId ? 'Open a chat' : (!connectionId || !profile) ? 'Not connected yet'
     : !progress ? (/No live Tameru context/.test(loadError) ? 'Starts with your next message' : loadError ? 'Unavailable' : 'Loading…')
       : compacting ? 'Compacting…' : stateKey === 'paused' ? 'Paused · no changes' : ''
@@ -821,7 +821,7 @@ function TameruProgress() {
           h('span', { className: 'tameru-meter' },
             progress ? h(Gauge, { gauge, used }) : h('span', { className: 'tameru-track' }),
             h('span', { className: 'tameru-figure' }, fillPct === null ? '—' : `${fillPct}% full`))),
-        savedLabel && h(Tip, { title: 'Saved', text: `Tameru has freed about ${fmtTokens(saved)} tokens in this chat.` }, h('span', { className: 'tameru-saved' }, savedLabel)),
+        savedLabel && h(Tip, { title: 'Freed', text: `Tameru shortened old outputs, freeing about ${fmtTokens(saved)} tokens of context in this chat. This is the text removed, not what the chat costs: rewriting the cached prompt can cost more than it saves.` }, h('span', { className: 'tameru-saved' }, savedLabel)),
         tuner && h(Tip, { title: tuner.paused ? 'Resume' : 'Pause', text: tuner.paused ? 'Let Tameru change this chat again.' : 'Tameru stops changing this chat until you resume.' },
           h('button', { type: 'button', className: 'tameru-iconbtn', disabled: saving || !canEdit,
             'aria-label': tuner.paused ? 'Resume Tameru' : 'Pause Tameru',

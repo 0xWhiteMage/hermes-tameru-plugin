@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 SCHEMA = 3
-PANEL_BUILD = 4      # the Desktop panel (desktop/plugin.js) carries the same number; a mismatch means one side is stale
+PANEL_BUILD = 5      # the Desktop panel (desktop/plugin.js) carries the same number; a mismatch means one side is stale
 _TIMELINE = 20
 
 # last_check reason -> plain sentence. Anything unknown falls back to "Watching."
@@ -177,10 +177,10 @@ def render_text(snapshot: dict, *, ascii_only: bool = False, timeline: int = 5, 
              + (f" of {fmt_tokens(gauge.get('limit') or gauge.get('window'))}" if (gauge.get('limit') or gauge.get('window')) else "")]
     if marks:
         lines.append("         " + " - ".join(marks))
-    saved = (f"{fmt_tokens(savings['tokens'])} tokens saved - {savings['shortened']} outputs shortened - "
+    saved = (f"{fmt_tokens(savings['tokens'])} tokens of context freed - {savings['shortened']} outputs shortened - "
              f"{savings['originals']} originals available" if savings["commits"] or savings["shortened"]
              else "Nothing shortened yet")
-    lines.append(f"Saved    {saved}")
+    lines.append(f"Freed    {saved}")
     lines.append(f"Status   {snapshot['diagnosis']['text']}")
     if tuner["adjustments"]:
         lines.append(f"Tuning   {tuner['adjustments'][-1]['reason']}")

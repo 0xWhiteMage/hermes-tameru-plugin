@@ -286,4 +286,4 @@ def test_the_status_footer_counts_held_back_secrets_and_refused_commands_without
     doctor = engine.activity_snapshot()["progress"]["doctor"]
     assert doctor["panel_build"] >= 3 and doctor["refused_commands"] == 2 and doctor["secret_refusals"] >= 1
     text = registry.command("", session_id="s1")
-    assert "Health:" in text and "refused commands" in text and "held-back secrets" in text
+    assert "Health (since the gateway started, all chats):" in text and "refused commands" in text and "held-back secrets" in text

@@ -565,7 +565,8 @@ def _progress_text(result: dict) -> str:
                                                                        ("errors_ignored", "errors ignored"))
                     if doctor.get(key)]
         if counters:
-            footer.append("Health: " + ", ".join(counters))
+            # Most of these are counted once per process (every chat the gateway runs), not per chat: say so.
+            footer.append("Health (since the gateway started, all chats): " + ", ".join(counters))
     return prefix + text + "\n".join(["", *footer])
 
 

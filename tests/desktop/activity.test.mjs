@@ -205,7 +205,7 @@ test('the header shows live numbers from the first poll, with an accessible mete
   assert.deepEqual([...leanSelect(dom).options].map(o => o.textContent), ['Save space', 'Balanced', 'Preserve detail'])
   assert.equal(tagline(dom), '', 'an idle chat shows no sentence in the header')
   assert.equal(figure(dom), '4% full')
-  assert.equal(doc(dom).querySelector('.tameru-saved').textContent, 'Saved 18K')
+  assert.equal(doc(dom).querySelector('.tameru-saved').textContent, 'Freed 18K')
   const meter = doc(dom).querySelector('[role="meter"]')
   assert.equal(meter.getAttribute('aria-valuenow'), '41000')
   assert.equal(meter.getAttribute('aria-valuemax'), '1000000')
@@ -1121,7 +1121,7 @@ test('a panel and a backend from different builds say so in the status line', as
   assert.equal(line.textContent, 'Out of date: reload Desktop')
   assert.equal(line.getAttribute('role'), 'alert')
   const matching = makeSdk()
-  const ok = snapshotPayload('sid'); ok.progress.doctor = { version: '1.9.0', panel_build: 4 }
+  const ok = snapshotPayload('sid'); ok.progress.doctor = { version: '1.9.0', panel_build: 5 }
   const again = await boot(matching.sdk, matching.calls, ok)
   assert.doesNotMatch(doc(again.dom).querySelector('.tameru-statusline').textContent, /Out of date/)
 })
