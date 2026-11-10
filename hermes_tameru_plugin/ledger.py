@@ -107,7 +107,8 @@ _LABEL_CHARS = 120
 # Credentials typed into a command line that the general secret screen has no shape for: ``-pPASS``, ``-u user:pw``,
 # ``PGPASSWORD=...``, ``*_TOKEN=...``, an ``Authorization:`` header, a ``--password`` flag.
 _INLINE_CREDENTIAL_RE = re.compile(
-    r"(?:^|\s)-p(?!\d{1,5}(?:\s|$))\S{4,}"                 # -pSECRET, but not a port such as -p2222
+    r"\b(?:mysql|mysqldump|mysqladmin|mariadb)\w*\b[^\n|;&]*?\s-p\S{4,}"      # the MySQL family: -pANYTHING is the password
+    r"|(?:^|\s)-p(?!\d{1,5}(?:\s|$))(?=\S*(?-i:[\dA-Z!-/:-@\[-`{-~]))\S{4,}"  # elsewhere -pSecret1 (a digit, capital or symbol), not -p2222, -print, -prune, -pedantic
     r"|(?:^|\s)-u\s*[^\s:@]+:\S{3,}"
     r"|\b\w*(?:PASS(?:WORD|WD)?|SECRET|TOKEN|API_?KEY|PRIVATE_?KEY)\s*=\s*\S{3,}"      # GITHUB_TOKEN=..., not MAX_TOKENS=4096
     r"|\bauthorization\s*:"

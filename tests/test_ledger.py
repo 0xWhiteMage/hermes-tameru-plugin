@@ -609,6 +609,8 @@ def test_text_read_from_a_repo_file_is_never_scanned_for_errors(trail, payloads)
     "curl -u admin:Hunter2Hunter2 https://api.example/x",
     "curl -H 'Authorization: Bearer abcdef0123456789' https://api.example/x",
     "export DB_PASSWORD=Hunter2Hunter2 && run",
+    "mysql -u root -pHunter2Hunter2 appdb", "mysqldump -pletmeinplease appdb", "mariadb -h db -pSecretword1",
+    "sshpass -pHunter2Hunter2 ssh host", "7z a -pHunter2Hunter2 out.7z src",
 ])
 def test_inline_credentials_in_a_command_are_redacted(trail, command):
     text = trail(("terminal", {"command": command}, run("")))
@@ -673,6 +675,8 @@ def test_failing_entries_are_the_last_to_be_left_out_when_the_room_runs_short(tr
 @pytest.mark.parametrize("command", [
     "ssh -p2222 deploy@host", "psql -p5432 appdb", "npm run build --token-limit 5", "MAX_TOKENS=4096 python run.py",
     "docker run -p 8080:80 nginx", "pytest -p no:cacheprovider tests/",
+    "find . -name '*.py' -print", "find src -type d -prune -o -print", "gcc -pedantic -Wall main.c", "cp -pr src dst",
+    "mkdir -p build/output", "grep -rn -printf x .", "git log --pretty=oneline",
 ])
 def test_ordinary_commands_are_not_mistaken_for_credentials(trail, command):
     assert command in trail(("terminal", {"command": command}, run("")))
