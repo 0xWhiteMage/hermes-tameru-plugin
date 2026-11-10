@@ -20,6 +20,9 @@ All notable changes to this project are documented here. The format follows
   build 5 (reload Desktop after updating). The Health line says its counts span all chats since the gateway started.
 
 ### Fixed (gauntlet of 2026-11-10, phase 1)
+- The vendored engine's credential screen no longer runs its two long patterns over every log (a bare `:` stood in for the `.pgpass` record pattern's
+  literal, and every timestamp has one). A 3.3 MB log scans in 0.10 s instead of 3.1 s; a 16x log case compresses in 2.9 s instead of 5.8 s. Same answers
+  (engine `9f1f1c4`, with tests for `.pgpass` records and a colon-heavy fuzz).
 - The `-p` credential pattern no longer hides `find ... -print`, `-prune`, `gcc -pedantic` or `cp -pr`; `mysql -pSECRET` and other
   secret-shaped `-pX` values are still redacted.
 
