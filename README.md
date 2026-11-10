@@ -52,6 +52,7 @@ Needed facts across all cells: Hermes keeps 1,345 and loses 355 (91 cannot be re
   (it still loses fewer needed facts than Hermes). There is no loss at 128K and above beyond the tool above.
 - **Per-turn note and self-tuning are not free.** With the note running, the replay costs 0.2% to 1.0% more on average and up to 6.8% in one cell; self-tuning
   has not been shown to help (switching it off is slightly cheaper at 32K to 64K).
+- On a model Hermes compacts on the provider's servers (OpenAI Responses, some routes), `/tameru` says so: that summary has no pins or Artifact Trail.
 - At a 200K window the plugin prunes before Hermes would compact and keeps two or three fewer facts than Hermes in three shapes; the tool reads them back.
 
 [Protocol and raw results](docs/COST-TUNING-2026-11-10.md); the older 1.7.0 replay is kept in [docs/REPORT-1.7.0.md](docs/REPORT-1.7.0.md).

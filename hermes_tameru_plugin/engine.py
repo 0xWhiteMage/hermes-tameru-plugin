@@ -68,6 +68,7 @@ from .hermes_compat import (
     is_untrusted_tool,
     marker_artifact_re,
     message_budget_tokens,
+    native_compaction_active,
     probe_seams,
     refused_summary,
     session_db_usable,
@@ -848,6 +849,8 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
                               "errors_ignored": self._telemetry.snapshot()["events"].get("error", {}).get("count", 0),
                               "refused_commands": getattr(self._activity_registry, "refused_verbs", 0),
                               "archive": archive_available,
+                              "native_compaction": native_compaction_active(
+                                  getattr(self, "model", None), getattr(self, "provider", None), getattr(self, "base_url", None)),
                               "active": bool(self._settings.enabled and self._seams.demote)}
         return {"schema": SCHEMA, "progress": progress,
                 "session_id": getattr(self, "_session_id", "") or "", "items": items,

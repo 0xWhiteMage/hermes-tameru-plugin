@@ -562,6 +562,9 @@ def _progress_text(result: dict) -> str:
         footer.append(f"Tameru {doctor['version']} - self-tuning {'on' if doctor['autotune'] else 'off'} - "
                       f"originals archive {'ready' if doctor['archive'] else 'not available'} - "
                       f"cleanup {'active' if doctor['active'] else 'inactive'}")
+        if doctor.get("native_compaction"):
+            footer.append("Note: Hermes lets the provider compact this model on its own servers. That summary does not include your pins or the "
+                          "Artifact Trail, and the server compacts before Tameru's own trigger; the recovery tool still reads originals back.")
         counters = [f"{doctor.get(key, 0)} {label}" for key, label in (("secret_refusals", "held-back secrets"),
                                                                        ("refused_commands", "refused commands"),
                                                                        ("ledger_lines_dropped", "order-like error lines left out"),

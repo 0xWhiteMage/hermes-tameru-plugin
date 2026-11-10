@@ -27,6 +27,8 @@ All notable changes to this project are documented here. The format follows
   secret-shaped `-pX` values are still redacted.
 
 ### Added (gauntlet of 2026-11-10, phase 0 and 1)
+- `/tameru` says when Hermes lets the provider compact the model on its own servers (OpenAI Responses on supported routes): that summary does not
+  carry pins or the Artifact Trail, and the server compacts before Tameru's trigger. Detection only; Tameru does not change its behaviour there.
 - `/tameru help` (every verb in one line), `/tameru stats` (numbers for this chat: context freed, outputs shortened, cache use of the last reply) and
   `/tameru reset` (lists what it would clear, then `reset confirm` puts this chat's self-tuning, bias, pause and Hermes-setting offsets back to neutral;
   pins and Keeps stay). `help` and `stats` work in shared chats; `reset` needs the Desktop app, CLI or TUI.

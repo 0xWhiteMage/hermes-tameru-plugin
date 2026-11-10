@@ -79,3 +79,30 @@ def test_reset_rejects_unknown_arguments_and_json_confirm():
     engine = _live()
     assert "Use /tameru reset" in _cmd(engine, "reset now")
     assert "Refresh context details" in json.loads(_cmd(engine, "--json reset confirm"))["error"]
+
+
+def test_a_model_hermes_compacts_on_the_providers_servers_gets_a_note_in_the_default_view(monkeypatch):
+    from hermes_tameru_plugin import engine as engine_module
+    engine = _live()
+    assert "compact this model on its own servers" not in _cmd(engine, "")
+    monkeypatch.setattr(engine_module, "native_compaction_active", lambda *a, **k: True)
+    out = _cmd(engine, "")
+    assert "compact this model on its own servers" in out and "pins" in out
+
+
+def test_native_compaction_is_false_when_the_hermes_module_is_missing_or_raises(monkeypatch):
+    from hermes_tameru_plugin import hermes_compat
+    monkeypatch.setattr(hermes_compat, "_hermes", lambda module, attr: None)
+    assert hermes_compat.native_compaction_active("gpt-5.6", "openai") is False
+
+    def boom(*a, **k):
+        raise RuntimeError("x")
+    monkeypatch.setattr(hermes_compat, "_hermes", lambda module, attr: boom)
+    assert hermes_compat.native_compaction_active("gpt-5.6", "openai") is False
+
+
+@pytest.mark.real_hermes
+def test_the_real_hermes_function_says_yes_for_a_supported_route_and_no_for_others():
+    from hermes_tameru_plugin.hermes_compat import native_compaction_active
+    assert native_compaction_active("gpt-5.6", "openai", "https://api.openai.com/v1") is True
+    assert native_compaction_active("claude-haiku-4-5", "anthropic", "https://api.anthropic.com") is False

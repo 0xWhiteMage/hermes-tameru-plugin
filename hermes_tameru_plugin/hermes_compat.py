@@ -214,6 +214,20 @@ def _prefer(module: str, attr: str, fallback: Callable[..., Any]) -> Callable[..
     return found if callable(found) else fallback
 
 
+# ---- server-side compaction --------------------------------------------------------------------
+def native_compaction_active(model: Any = None, provider: Any = None, base_url: Any = None) -> bool:
+    """True when Hermes lets the provider compact this model's context on its own servers (``agent/native_compaction.py``:
+    OpenAI Responses on supported routes). That summary is made by the provider, so Tameru's pins and Artifact Trail are not
+    in it. False when the module is missing or anything fails: not knowing is not a reason to say it is on."""
+    found = _hermes("agent.native_compaction", "is_native_compaction_model")
+    if not callable(found):
+        return False
+    try:
+        return bool(found(model, provider=provider, base_url=base_url))
+    except Exception:
+        return False
+
+
 # ---- compression marker ----------------------------------------------------------------------
 def _local_elision_marker(omitted: int, total: int) -> str:
     """Local mirror of ``agent.compression_marker._elision_marker``."""
