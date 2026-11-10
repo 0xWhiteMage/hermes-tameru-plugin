@@ -65,6 +65,14 @@ class HostSettingsMixin:
             else:
                 self.threshold_tokens = int(window * percent)
 
+    def reset_host_settings(self) -> None:
+        """Put the configured summary threshold and protected tail back at once and forget what was learned for this chat."""
+        with self._activity.lifecycle_lock:
+            base, base_n, _room = self._host_anchor()
+            self._host.reset()
+            self._apply_host(base, base_n)
+            self._host_saved = None
+
     def adapt_host_settings(self) -> None:
         """Once per turn: move the effective summary threshold and protected tail a small, bounded step. Never raises."""
         try:

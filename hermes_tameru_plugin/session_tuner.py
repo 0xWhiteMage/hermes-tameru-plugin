@@ -68,6 +68,28 @@ def set_posture(engine, *, session_id: str, lifecycle_id: str, bias=None, paused
         return status
 
 
+def reset_chat(engine, *, session_id: str, lifecycle_id: str) -> dict:
+    """Put this chat's self-tuning, bias, pause and Hermes-setting offsets back to neutral (the user's ``/tameru reset``)."""
+    with engine._activity.lifecycle_lock:
+        owner = _binding(engine)
+        state, db, sid, life = owner
+        if not sid or sid != session_id or life != lifecycle_id:
+            raise PolicyError("The active session changed. Open context details again.")
+        state.tuner.reset()
+        state.paused = False
+        engine._event("posture", change="reset", bias=0.0, paused=False)
+        persisted = _write(db, sid, _record(state)) if _current(engine, owner) else False
+    try:
+        host = getattr(engine, "_host", None)
+        if host is not None and (host.offset or host.scale != 1.0):
+            engine.reset_host_settings()                      # its own lock; the configured values come back
+    except Exception:
+        engine._telemetry.count("error", where="reset_host")
+    status = engine.get_policy_status()
+    status["persisted"] = persisted
+    return status
+
+
 def bind_tuner(engine, *, rotation: bool = False) -> None:
     """Read the owning chat's saved tuner, or carry the current one across a host-compression rotation."""
     owner = _binding(engine)

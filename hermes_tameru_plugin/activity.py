@@ -9,6 +9,7 @@ import threading
 import uuid
 import weakref
 from collections import OrderedDict
+from .info_commands import help_command, reset_command, stats_command
 from .policy_commands import HELP, PolicyError, policy_command, policy_lines
 from .edit_commands import edit_command
 from .pin_commands import pin_command
@@ -43,7 +44,7 @@ MESSAGING_PLATFORMS = frozenset({
     "imessage", "irc", "twitter", "weixin", "qq", "rocketchat", "zulip", "twilio", "googlechat",
 })
 GATED_VERBS = frozenset({"view", "show", "policy", "bias", "pause", "resume", "keep", "unkeep", "restore", "cancel",
-                         "pin", "unpin", "pins"})
+                         "pin", "unpin", "pins", "reset"})
 SURFACE_REFUSAL = "This command works in the Desktop app, CLI or TUI, not in a shared chat."
 
 
@@ -487,7 +488,8 @@ class SessionRegistry:
                         "pause": _posture("pause"), "resume": _posture("resume"),
                         "keep": _edit("keep"), "unkeep": _edit("unkeep"), "restore": _edit("restore"),
                         "cancel": _edit("cancel"),
-                        "pin": _pin("pin"), "unpin": _pin("unpin"), "pins": _pin("pins")}
+                        "pin": _pin("pin"), "unpin": _pin("unpin"), "pins": _pin("pins"),
+                        "help": help_command, "stats": stats_command, "reset": reset_command}
             verb = parts[0] if parts and parts[0] in handlers else ""
             if verb in GATED_VERBS and not is_interactive_surface(context.get("platform"), context.get("source")):
                 self.refused_verbs = getattr(self, "refused_verbs", 0) + 1
@@ -516,6 +518,8 @@ class SessionRegistry:
             return (f"Original output · {trust}\nViewing does not change the agent's context.\n"
                     f"Characters {result['offset'] + 1 if result['total_chars'] else 0}–{result['end_offset']} of {result['total_chars']}\n\n"
                     + text + next_note)
+        if result["kind"] in ("help", "stats", "reset"):
+            return result["text"]
         if result["kind"] == "ask":
             return (f"{result['text']}\n\nCopy this into your next message so the agent re-reads it. Nothing was sent.")
         if result["kind"] == "policy":
@@ -553,7 +557,7 @@ def _progress_text(result: dict) -> str:
                   else f"Saved. Tameru is {tuner['posture']} (bias {tuner['bias']:+}).\n\n")
     text = render_text(progress, ascii_only=_ascii_only())
     doctor = progress.get("doctor")
-    footer = ["", "More: /tameru changes - /tameru view REF - /tameru bias save|balanced|detail - /tameru pause"]
+    footer = ["", "More: /tameru help - /tameru changes - /tameru view REF - /tameru bias save|balanced|detail - /tameru pause - /tameru stats"]
     if doctor:
         footer.append(f"Tameru {doctor['version']} - self-tuning {'on' if doctor['autotune'] else 'off'} - "
                       f"originals archive {'ready' if doctor['archive'] else 'not available'} - "

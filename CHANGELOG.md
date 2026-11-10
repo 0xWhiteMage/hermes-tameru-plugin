@@ -27,6 +27,9 @@ All notable changes to this project are documented here. The format follows
   secret-shaped `-pX` values are still redacted.
 
 ### Added (gauntlet of 2026-11-10, phase 0 and 1)
+- `/tameru help` (every verb in one line), `/tameru stats` (numbers for this chat: context freed, outputs shortened, cache use of the last reply) and
+  `/tameru reset` (lists what it would clear, then `reset confirm` puts this chat's self-tuning, bias, pause and Hermes-setting offsets back to neutral;
+  pins and Keeps stay). `help` and `stats` work in shared chats; `reset` needs the Desktop app, CLI or TUI.
 - `scripts/check_vendored.py` and `tests/test_vendored_engine.py` check the vendored engine against the engine repository at `VENDORED_FROM`; CI gets
   a `vendored` job and a `desktop-panel` job (not yet run on a real runner).
 - Replay: `tests/eval/protocol3.py` prices a run's lost facts and read-backs (effective cost) and offers a second, extractive summarizer; the replay

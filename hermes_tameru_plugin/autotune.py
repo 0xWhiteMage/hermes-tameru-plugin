@@ -109,6 +109,16 @@ class Tuner:
         self.seeded = True
         return True
 
+    def reset(self) -> None:
+        """Back to a neutral tuner: no offsets, no history, no seed, bias 0 (the user's ``/tameru reset``)."""
+        self._bias = 0.0
+        self._offsets = [1.0] * 5
+        self._tick = 0
+        self._last_applied = {}
+        self._last_signal_tick = 0
+        self.seeded = False
+        self.history.clear()
+
     def tuning(self) -> Tuning:
         base = _base(self._bias)
         values = [_clamp(b * o, bounds) for b, o, bounds in zip(base, self._offsets, _BOUNDS)]

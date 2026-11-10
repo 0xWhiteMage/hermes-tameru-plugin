@@ -12,7 +12,7 @@ _LABELS = {
 }
 _SHORTHAND = {'save-space':'save_space','balanced':'balanced','preserve-detail':'preserve_detail'}
 HELP = ('Use /tameru, /tameru changes, /tameru show REF [character offset], /tameru ask REF [START-END | term], /tameru bias save|balanced|detail, '
-        '/tameru pause, /tameru resume, /tameru pin TEXT, /tameru pins, or the older /tameru policy [key=value ...].')
+        '/tameru pause, /tameru resume, /tameru pin TEXT, /tameru pins, /tameru stats, /tameru reset, /tameru help, or the older /tameru policy [key=value ...].')
 
 
 def _parse(parts):
