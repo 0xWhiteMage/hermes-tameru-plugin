@@ -328,3 +328,14 @@ the six compacting shapes (measured tool block, three structural seeds), by idle
 `refactor` at 64K, the worst cell: +9.1% (none), +4.9% (mixed), +0.8% (slow). Short pauses change nothing; long ones help, because stock pays the full write of its larger prompt each time. So the
 replay without idle gaps understates Tameru for a person who steps away, and overstates it for an unattended agent that works in one go. Both are reported; the real mix is unknown (the live
 logs would show it: the gap between a turn's end and the next message).
+
+### Cache-cold pruning cannot be done from the plugin (built, measured, removed)
+
+The idle-gap result suggests pruning when the cache is already cold, since the next request rewrites the whole prompt anyway and a prune then adds nothing. A rule for it was built (a plugin
+clock the replay can drive, the time of the last reply, a waived reclaim-share rule and a lower activation level when the gap exceeds the cache lifetime) and measured under the "none",
+"mixed" and "slow" idle profiles at 64K, 128K and 200K: **identical to the digit to the shipped product in all 27 cells**, because the rule never ran at a cold moment. A spy on the check showed why: it was
+only ever asked 59 times per session, every time about 20 seconds after the previous reply. Hermes calls the proactive prune only after tool results inside a turn
+(`agent/turn_preflight.py`, `compress_after_tool_results`), never at the start of a turn, and the start of a turn after a pause is the cold moment. By the time a prune hook runs in that turn, the
+first request has already written the cache. The only turn-start work a plugin can do is compaction itself (`should_compress` / `compress`), which Hermes treats as a real compaction with its summary.
+So this needs a change in Hermes: a hook that offers the engine the history at the start of a turn, before the request is built (already on the list of upstream requests). The code was removed; the
+idle profiles stay in `protocol3` and the finding above stands.
