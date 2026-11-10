@@ -32,7 +32,7 @@ what, where a change belongs, and how releases flow between them: [docs/REPOSITO
 Everything below comes from a **replay**: scripted agent sessions run against real Hermes imports with a simulated clock, prefix-cache pricing, Hermes' real tool block
 (about 40,000 characters, measured), six varied sessions per cell and a deliberately lossy fake summarizer. It does not measure live-agent task success or real provider bills
 (the live evidence is a handful of manual checks with Claude Haiku on Hermes Desktop, in [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md)).
-Hermes commit `2bd378ed` (v0.23), 11 session shapes. Hermes refuses models with under 64K of context, so the windows are 64K, 128K and 200K.
+Hermes commit `3b421578` (v0.23.1), 11 session shapes. Hermes refuses models with under 64K of context, so the windows are 64K, 128K and 200K.
 
 **Cost against Hermes as shipped** (mean over the 11 shapes; negative is cheaper). A fact an arm dropped is priced as a re-run of the tool, a fact it holds behind a
 `tameru_read_original` call as that call.

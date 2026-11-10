@@ -7,7 +7,7 @@
   "engine_name": "tameru",
   "seed": 0,
   "turns": 40,
-  "hermes_pin": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "hermes_pin": "3b421578588243f920886e6fe79a6faa87ea026e",
   "hermes_source_dirty": false,
   "realistic": true,
   "seconds_per_request": 20.0,
@@ -552,12 +552,12 @@
   ]
  },
  "timing": {
-  "engine_seconds": 2.224,
+  "engine_seconds": 1.752,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 1.084,
-   "prune": 1.129,
-   "select_context": 0.008,
+   "compress": 0.936,
+   "prune": 0.804,
+   "select_context": 0.009,
    "on_turn_complete": 0.003
   }
  }

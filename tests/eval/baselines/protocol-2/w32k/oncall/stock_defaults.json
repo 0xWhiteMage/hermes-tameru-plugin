@@ -7,7 +7,7 @@
   "engine_name": "compressor",
   "seed": 0,
   "turns": 40,
-  "hermes_pin": "2bd378ed1b8d6bf2192cb26e0a55ff3091e6bd19",
+  "hermes_pin": "3b421578588243f920886e6fe79a6faa87ea026e",
   "hermes_source_dirty": false,
   "realistic": true,
   "seconds_per_request": 20.0,
@@ -498,10 +498,10 @@
   ]
  },
  "timing": {
-  "engine_seconds": 0.097,
+  "engine_seconds": 0.307,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 0.097,
+   "compress": 0.306,
    "prune": 0.0
   }
  }
