@@ -362,3 +362,22 @@ holdouts, recorded in `tests/eval/holdout_looks.json`**.
 - **Where nothing compacts the product costs its idle price** (+0.6% to +2.1%) and the hidden tool removes it (0.0%).
 - **Legacy generalizes worse**: it costs +8.8% on `mixedlang` at 128K (grown) where the product is -2.1%.
 - `structural_variant` now also varies numbered `read_file` results (it varied only `terminal` results when the structural-seed tables above were made); those tables were not re-run.
+
+## A summarizer written by someone else (`summarizer_independent.py`)
+
+Both earlier stand-ins for the summary call were written by the harness author, who also wrote the product. `IndependentSummarizer` was written by a separate agent from a description of the
+interface and of what a careful summary keeps, without access to `protocol3.py`; the author read the file before running it. It keeps user turns nearly whole (900 characters), assistant turns and calls
+(450), and for tool results the first line, the last line and every line carrying an error, a number, a path, a version, a hash or an exit code, collapsing repeated log lines; carried entries stay at 900
+characters; it cuts the oldest entries first at 12,000 characters. It is a stronger summarizer than the crude one: stock Hermes keeps more facts under it (default 64K: 18 against about 12).
+
+Product against stock, six compacting shapes, measured tool block, three structural seeds, effective cost:
+
+| Mean against stock | 64K | 128K | 200K |
+|---|---:|---:|---:|
+| Crude summarizer | -3.17% | -15.31% | -15.56% |
+| Independent summarizer | -3.19% | -15.33% | -15.55% |
+
+Cost does not depend on the summarizer (it is set by cache behaviour and by how often a compaction happens). Needed facts, per cell, stock kept against product kept plus readable back (three seeds): the
+product is ahead in 15 of 18 cells (for example refactor 64K 39 / 48, bursty 3 / 12, i18n 64K 27 / 36, default 128K 18 / 30), tied in three (oncall 64K 33 / 33, refactor 200K, smallrows 200K), and behind in one:
+**default at 200K, stock 33 against product 30**, the early-prune loss already recorded (three facts the product pruned before any compaction was needed, not readable back). So the retention lead survives a
+summarizer the author did not write, except in that one known cell.

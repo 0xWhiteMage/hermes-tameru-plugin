@@ -206,6 +206,17 @@ IDLE_PROFILES = {
 CACHE_TTL_SECONDS = 300.0
 
 
+def _summarizer_factory(name: str):
+    """``crude`` (the replay's own), ``extractive`` (written by the harness author) or ``independent`` (written by a separate agent
+    from the interface description alone, ``summarizer_independent.py``)."""
+    if name == "extractive":
+        return ExtractiveSummarizer
+    if name == "independent":
+        from summarizer_independent import IndependentSummarizer
+        return IndependentSummarizer
+    return None
+
+
 def _transform(structural: bool, grow: float):
     if not structural and grow == 1.0:
         return None
@@ -228,7 +239,7 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
         return made[-1]
 
     result = replay.run_session(factory, scenario=scenario, context_length=window, seed=seed, keep_final_request=True,
-                                summarizer_factory=ExtractiveSummarizer if summarizer == "extractive" else None,
+                                summarizer_factory=_summarizer_factory(summarizer),
                                 script_transform=_transform(structural, grow), **idle_options(idle))
     metrics = result["metrics"]
     final = result.get("final_request") or []
