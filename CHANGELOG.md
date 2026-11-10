@@ -14,6 +14,16 @@ All notable changes to this project are documented here. The format follows
   by policy code (a test checks that). `/tameru reset stats` shows what it holds; `/tameru reset stats confirm` deletes it.
   `TAMERU_STATS_LEDGER=on`.
 
+### Deprecated (gauntlet of 2026-11-10, phase 7; nothing is removed yet)
+These have no measured benefit on the replay and stay available for one more release. Deletion waits for the live A/B (phase 8):
+`adaptive_host`, `learned_priors`, `policy_mode: fixed` (a comparison aid, not a product mode), the `activation` and
+`recent_protection` knobs (the `preference` setting stays), and the per-turn manifest note unless a live comparison shows it
+raises read-backs. `policy_mode: legacy` stays as a frozen fallback with no further tuning.
+
+### Changed
+- **The plugin and the engine are versioned separately.** The test that forced them to match is now a format check; `/tameru stats`
+  shows both (`Tameru 1.9.0 (engine 1.9.0)`), and the doctor output carries `engine_version`.
+
 ### Fixed
 - **`lazy_tool` now finds the recovery tool on the Anthropic subscription route,** where Hermes sends every tool name with an
   `mcp__` prefix. Seen live on Desktop (Haiku 4.5): before the fix the tool was in the request and never matched; after it, a fresh

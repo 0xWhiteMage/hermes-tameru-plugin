@@ -120,12 +120,14 @@ def test_plugin_registers_a_context_engine():
     assert engine.name == "tameru" and isinstance(engine, hermes_tameru_plugin.ExtractiveContextEngine)
 
 
-def test_vendored_engine_is_pinned_to_a_commit_and_matches_the_package_version(pyproject):
+def test_vendored_engine_is_pinned_to_a_commit_and_has_its_own_version(pyproject):
     from hermes_tameru_plugin.tameru import VENDORED_FROM
     from hermes_tameru_plugin.tameru.compress_context import ENGINE_VERSION
 
     assert re.fullmatch(r"[0-9a-f]{40}", VENDORED_FROM), VENDORED_FROM
-    assert ENGINE_VERSION == pyproject["project"]["version"]
+    # The plugin and the engine are versioned separately (the plugin can release without an engine change and the other way
+    # round); the engine version is recorded in the doctor output and in the saved-record digests, not tied to the plugin's.
+    assert re.fullmatch(r"\d+\.\d+\.\d+((a|b|rc)\d+)?", ENGINE_VERSION), ENGINE_VERSION
 
 
 def test_the_desktop_panel_and_the_backend_agree_on_their_build_number():

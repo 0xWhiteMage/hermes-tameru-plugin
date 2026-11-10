@@ -70,7 +70,7 @@ def stats_text(snapshot: dict, usage: dict) -> str:
     if lazy:
         lines.append("  Recovery tool        " + ", ".join(f"{state} {count}" for state, count in lazy.items()) + " (requests)")
     if doctor:
-        lines.append(f"  Tameru {doctor.get('version', '?')}        self-tuning {'on' if doctor.get('autotune') else 'off'}, "
+        lines.append(f"  Tameru {doctor.get('version', '?')}        (engine {doctor.get('engine_version', '?')}) self-tuning {'on' if doctor.get('autotune') else 'off'}, "
                      f"cleanup {'active' if doctor.get('active') else 'inactive'}")
     lines.append("")
     lines.append("Context freed is not a cost figure: rewriting the cached prompt can cost more than it saves. See the README, 'When Tameru costs more'.")

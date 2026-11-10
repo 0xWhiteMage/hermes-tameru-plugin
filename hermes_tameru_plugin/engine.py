@@ -853,7 +853,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         from .progress import PANEL_BUILD
         from .recovery import SCREEN_REFUSALS
         from .ledger import LEDGER_DROPPED
-        progress["doctor"] = {"version": _plugin_version(), "autotune": bool(self._settings.autotune),
+        progress["doctor"] = {"version": _plugin_version(), "engine_version": ENGINE_VERSION, "autotune": bool(self._settings.autotune),
                               "panel_build": PANEL_BUILD, "schema": SCHEMA,
                               "secret_refusals": SCREEN_REFUSALS["count"],
                               "ledger_lines_dropped": LEDGER_DROPPED["count"],
