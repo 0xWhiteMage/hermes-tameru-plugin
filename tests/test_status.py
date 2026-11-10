@@ -169,7 +169,7 @@ def test_the_artifact_trail_joins_the_summary_when_the_ledger_is_on():
     engine = make_engine(TameruSettings(ledger=True))
     engine.tail_mode = "lean"
     summary = engine._augment_summary_lean("## Goal\nfix it", _turns())
-    assert "## Artifact Trail (Tameru, exact)" in summary and "orders/service.py" in summary
+    assert "## Artifact Trail (Tameru, from tool calls)" in summary and "orders/service.py" in summary
     assert "pytest -q" in summary and "exit 1" in summary
     assert "User asked:" not in summary and summary.count("## Artifact Trail") == 1
     again = engine._augment_summary_lean(summary, _turns())

@@ -650,6 +650,16 @@ def test_a_summary_written_under_the_old_errors_title_still_seeds_the_trail(trai
     assert "LedgerWriteError" in text and "\nErrors:\n" not in text      # carried over, re-titled
 
 
+def test_a_summary_with_the_old_heading_is_read_and_its_section_replaced_once(trail):
+    from hermes_tameru_plugin.ledger import LEGACY_HEADING
+    old = f"## Goal\nfix it\n\n{LEGACY_HEADING}\nCommands:\n- `make` -> exit 2\n\n## Next\nretry\n"
+    ledger = trail(("terminal", {"command": "make"}, run("", exit_code=0)), previous=old)
+    assert ledger.startswith(HEADING) and "- `make` -> exit 2 (x1)" not in ledger and "`make`" in ledger   # seeded from the old section
+    merged = merge_into_summary(old, ledger)
+    assert LEGACY_HEADING not in merged and merged.count("Artifact Trail") == 1
+    assert "## Goal" in merged and "## Next\nretry" in merged
+
+
 def test_dropped_order_like_lines_are_counted_without_their_content(trail):
     from hermes_tameru_plugin.ledger import LEDGER_DROPPED
     before = LEDGER_DROPPED["count"]

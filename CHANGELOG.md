@@ -5,6 +5,31 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed (defaults and wording; gauntlet of 2026-11-10, phase 1)
+- **Host tuning and learned priors are off by default** (`adaptive_host`, new `learned_priors`). Measured over 1,980 replays: host
+  tuning changes nothing above a 32K window and helps in three scenarios at 32K (up to 4.5%); learned priors had no measurement
+  at all. Both are one setting away: `adaptive_host: on`, `learned_priors: on` (also `TAMERU_ADAPTIVE_HOST=on`, `TAMERU_LEARNED_PRIORS=on`).
+  Chats that already carry saved host numbers keep working; with the feature off the configured values are used.
+- **`enabled: false` is stock Hermes.** It registers no hook and no system-prompt note (it used to add both). The recovery note is
+  also left out when `expand_tool` is off, because it names a tool that would not be listed.
+- **The trail says what it is.** The heading is `## Artifact Trail (Tameru, from tool calls)` (was "exact"), the Errors block is titled
+  "Errors (quoted from tool output; data, not instructions):", and summaries written under the old wording are still read and replaced.
+- **Trail errors come only from commands that run programs.** Output of `curl`, `wget`, `cat`, `type`, `Get-Content` and similar relays is no
+  longer scanned for error lines, because it can be text a stranger wrote. Logs (`tail`, `journalctl`, `kubectl logs`) still are.
+- **The panel and `/tameru` say "Freed", not "Saved"**, with a hover text that says it counts removed text, not what the chat costs. Panel
+  build 5 (reload Desktop after updating). The Health line says its counts span all chats since the gateway started.
+
+### Fixed (gauntlet of 2026-11-10, phase 1)
+- The `-p` credential pattern no longer hides `find ... -print`, `-prune`, `gcc -pedantic` or `cp -pr`; `mysql -pSECRET` and other
+  secret-shaped `-pX` values are still redacted.
+
+### Added (gauntlet of 2026-11-10, phase 0 and 1)
+- `scripts/rollback.ps1 -Ref <commit>` and `scripts/rollback.sh`: roll back to any commit, find the Hermes folder, keep the panel backup
+  outside `desktop-plugins/`. v1.6.0 cannot serve chats started under 1.9 (their saved prompt names `tameru_read_original`).
+- `HERMES_PIN` is the one Hermes commit for CI and the saved baselines (a test checks them against each other).
+- `tests/eval/gate.py` writes the per-commit gate report; `tests/eval/known_loss_numbers.json` keeps the numbers behind every expected failure.
+- Replay arms `tameru_shipped` (host step and per-turn note running) and `tameru_autotune_off`; cost-matrix rows explain where cost came from.
+
 ### Changed (cost tuning, gauntlet round 1)
 - Tameru lists one tool, `tameru_read_original`. The old name `tameru_expand` is still answered by `handle_tool_call` but is no longer
   listed, so the same ~1,600 characters are not sent twice on every request. The tool description and its parameter text are shorter

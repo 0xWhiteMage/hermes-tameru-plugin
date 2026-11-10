@@ -25,16 +25,16 @@
   },
   "context_length": 64000,
   "threshold_tokens": 54400,
-  "input_chars_total": 5530090,
+  "input_chars_total": 5530690,
   "input_chars_max": 187413,
-  "input_chars_final": 101737,
+  "input_chars_final": 101797,
   "schema_chars_per_request": 13302,
-  "cost_cache_priced": 1502443.25,
-  "cost_uncached": 5530090.0,
-  "cost_ratio_vs_uncached": 0.271685,
+  "cost_cache_priced": 1502572.25,
+  "cost_uncached": 5530690.0,
+  "cost_ratio_vs_uncached": 0.271679,
   "cost_auxiliary_input": 12636,
-  "total_simulated_input_cost": 1515079.25,
-  "cached_chars_total": 4704495,
+  "total_simulated_input_cost": 1515208.25,
+  "cached_chars_total": 4705035,
   "compress_calls": 1,
   "compactions": 1,
   "compactions_shrinking": 1,
@@ -176,16 +176,16 @@
    156373,
    187311,
    187413,
-   66867,
-   66969,
-   68079,
-   68181,
-   99119,
-   99221,
-   70503,
-   70605,
-   101543,
-   101737
+   66927,
+   67029,
+   68139,
+   68241,
+   99179,
+   99281,
+   70563,
+   70665,
+   101603,
+   101797
   ],
   "cached_chars": [
    0,
@@ -230,15 +230,15 @@
    156373,
    187311,
    16178,
-   66867,
-   36435,
-   68079,
-   68181,
-   99119,
-   37647,
-   70503,
-   70605,
-   101543
+   66927,
+   36495,
+   68139,
+   68241,
+   99179,
+   37707,
+   70563,
+   70665,
+   101603
   ],
   "invalidated_chars": [
    0,
@@ -321,32 +321,32 @@
     "messages_before": 105,
     "messages_after": 73,
     "chars_before": 204943,
-    "chars_after": 53491
+    "chars_after": 53551
    },
    {
     "request": 43,
     "kind": "prune",
     "rows": 1,
-    "chars_before": 84526,
-    "chars_after": 54698
+    "chars_before": 84586,
+    "chars_after": 54758
    },
    {
     "request": 47,
     "kind": "prune",
     "rows": 2,
-    "chars_before": 116768,
-    "chars_after": 57112
+    "chars_before": 116828,
+    "chars_after": 57172
    }
   ]
  },
  "timing": {
-  "engine_seconds": 0.787,
+  "engine_seconds": 0.564,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 0.19,
-   "prune": 0.586,
-   "select_context": 0.007,
-   "on_turn_complete": 0.003
+   "compress": 0.136,
+   "prune": 0.42,
+   "select_context": 0.005,
+   "on_turn_complete": 0.002
   }
  }
 }

@@ -230,7 +230,7 @@
   "reference": 7430.7
  },
  "scenario_64k/oncall/64000/cost/tameru_1_4": {
-  "plugin": 51037.4,
+  "plugin": 51050.8,
   "reference": 50752.9
  },
  "scenario_64k/refactor/64000/cost/tameru_1_4": {
@@ -246,11 +246,11 @@
   "reference": 6339.8
  },
  "scenario_64k/smallrows/64000/cost/tameru_1_4": {
-  "plugin": 47833.6,
+  "plugin": 47845.2,
   "reference": 47108.2
  },
  "scenario_64k/smallrows/64000/cost/tameru_1_4_product": {
-  "plugin": 47833.6,
+  "plugin": 47845.2,
   "reference": 47108.2
  },
  "scenario_64k/smallrows/64000/gold:decision/tameru_1_4": {
@@ -286,7 +286,7 @@
   "reference": 5
  },
  "small_32k/smallrows/32000/cost/tameru_1_4_product": {
-  "plugin": 41215.1,
+  "plugin": 41244.8,
   "reference": 37245.6
  },
  "small_48k/dense/48000/cost/tameru_1_4_product": {
@@ -314,7 +314,7 @@
   "reference": 6339.8
  },
  "small_48k/smallrows/48000/cost/tameru_1_4_product": {
-  "plugin": 43596.6,
+  "plugin": 43610.1,
   "reference": 41852.1
  }
 }

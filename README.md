@@ -109,7 +109,7 @@ prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 cha
   Originals that look like they hold a credential are never stored. A miss points the model to `session_search`.
   Refs are hashes of the call ids and the original; they are not secret.
 - **Artifact trail** (`ledger`, on by default). Hermes' compaction summary gains an exact
-  `## Artifact Trail (Tameru, exact)` section: files touched and how, commands with their last exit code, and one
+  `## Artifact Trail (Tameru, from tool calls)` section: files touched and how, commands with their last exit code, and one
   line per distinct error template of the summarized results. It goes through Hermes' compaction redactor like
   every other section Hermes appends. The summarizer itself sees Tameru rows as Hermes' own one-liners, without refs.
 - **Untrusted content stays marked.** Web, browser and MCP results keep Hermes' `<untrusted_tool_result>` wrapper
@@ -359,11 +359,11 @@ with every later Hermes revision. Nightly CI also checks Hermes `main`.
 |---|---|---|---|
 | Originals of shortened outputs (never anything that looks like a credential) | the engine's memory (512 entries, 32M characters), and Hermes' own session archive | bounded | ends with the process; Hermes' session delete for the archive |
 | Per-chat self-tuning, pause and lean mode | the chat's session metadata, `tameru_tuner_v1` | a few numbers | goes with the chat; a new chat starts clean |
-| Per-chat host settings (summary threshold and protected tail, adapted within bounds) | the chat's session metadata, `tameru_host_v1` | two numbers | `adaptive_host: off`; goes with the chat. Your `config.yaml` is never written |
+| Per-chat host settings (summary threshold and protected tail, adapted within bounds). Off by default | the chat's session metadata, `tameru_host_v1` | two numbers | leave `adaptive_host` off; goes with the chat. Your `config.yaml` is never written |
 | Pinned instructions (your own lines) | the chat's session metadata, `tameru_pins_v1` | up to 5 lines, 1,500 characters | `/tameru unpin N`; goes with the chat |
 | Keeps (pinned outputs) | the chat's session metadata, `tameru_edits_v1` | up to 64 short references | `/tameru unkeep REF`; goes with the chat |
 | Restores | engine memory only | up to 64, five replies each | `/tameru cancel`, or they expire |
-| What self-tuning learned across chats | `$HERMES_HOME/tameru/learned.json` | five numbers, moving at most 0.12 a day | delete the file, or `autotune: off` |
+| What self-tuning learned across chats. Off by default | `$HERMES_HOME/tameru/learned.json` | five numbers, moving at most 0.12 a day | delete the file; it is written only with `learned_priors: on` |
 | Telemetry log (only if `telemetry_log` is set) | under `$HERMES_HOME` or the temp folder | rotates at 5 MB, keeping one `.1` file | delete the file; it holds counts, tool names, rungs and reference hashes, never text |
 | Desktop hint flag | the browser's `localStorage`, one flag | one flag | clear site data |
 
@@ -426,7 +426,7 @@ back. The only user choices are a bias (Save space, Balanced, Preserve detail) a
 **Adaptive is the default.** Unless `policy_mode` is set explicitly (`legacy` and `fixed` stay available by choice),
 Tameru runs the adaptive, self-tuning policy, including when it is selected with `context.engine: tameru` alone.
 
-**It learns across chats.** Each chat's adjustments also move a small profile-wide memory
+**It can learn across chats (off by default: `learned_priors: on`).** Each chat's adjustments then also move a small profile-wide memory
 (`$HERMES_HOME/tameru/learned.json`, five numbers, a moving average); calm stretches ease it back toward neutral. A new
 chat starts from 60% of what that memory holds, and its own saved state, if it has one, wins. This is online learning
 with small, bounded, explainable steps, not a trained model: it adapts to how your sessions behave, and it can be
@@ -438,7 +438,7 @@ original, `/tameru ask REF [START-END | term]` gives the exact instruction that 
 
 - **Desktop:** one condensed panel above the composer, about 30px when closed and a fixed 196px when open (so it never
   jumps). The header reads `Tameru (ためる)` and holds the lean mode (a borderless dropdown), working memory as a thin
-  gauge with "N% full" (ticks where Tameru starts and where Hermes compacts), "Saved ~N%", a pause button and a collapse
+  gauge with "N% full" (ticks where Tameru starts and where Hermes compacts), "Freed ~N%" (the share of context removed, not what the chat costs), a pause button and a collapse
   button. It stays silent while everything is fine and only speaks for a state worth knowing (paused, compacting,
   starts with your next message). Every control explains itself in a small hover card, also shown on keyboard focus.
   Below the header, when the panel is wide enough, the list sits on the left and the viewer on the right; when it is

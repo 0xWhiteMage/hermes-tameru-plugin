@@ -5,7 +5,7 @@ this release. Tameru never edits saved chat history, so every step below is safe
 
 **Where settings live.** `$HERMES_HOME/config.yaml` under `plugins.entries.tameru.settings.<name>`, or an environment
 variable `TAMERU_HERMES_<NAME>` (any setting). The four emergency switches `edits`, `manifest`, `autotune` and
-`adaptive_host` also answer to the short `TAMERU_<NAME>` (for example `TAMERU_EDITS=off`); the long name wins. Restart the Hermes gateway after changing either.
+`adaptive_host`, `pins` and `learned_priors` also answer to the short `TAMERU_<NAME>` (for example `TAMERU_EDITS=off`); the long name wins. `adaptive_host` and `learned_priors` are off by default; turn them on with `TAMERU_ADAPTIVE_HOST=on` / `TAMERU_LEARNED_PRIORS=on`. Restart the Hermes gateway after changing either.
 **Where to look.** `/tameru` in any client prints compression progress and, at the bottom, a *Health* line that counts
 secrets held back and commands refused (it appears only when something was counted). Desktop shows the same counters
 in its hover cards.
@@ -69,15 +69,16 @@ State per chat lives in Hermes session metadata under two keys, `tameru_tuner_v1
 ## F. Self-tuning seems off (too aggressive or stuck)
 
 1. Set `autotune: off` to freeze the policy, or choose **Preserve detail** in the dropdown.
-2. The profile-wide memory is `$HERMES_HOME/tameru/learned.json` (five numbers). It moves at most 0.12 per setting
-   per day. Delete the file to reset it; a missing or unreadable file means "nothing learned yet".
+2. The profile-wide memory is `$HERMES_HOME/tameru/learned.json` (five numbers). It is read and written only when
+   `learned_priors` is on (off by default). It moves at most 0.12 per setting per day. Delete the file to reset it; a
+   missing or unreadable file means "nothing learned yet".
 
 ### F2. Hermes summarises earlier or later than `compression.threshold` says
-Tameru moves Hermes' *effective* `compression.threshold` (at most 10 points under and 15 over, never past 85% of the
+When `adaptive_host` is on (it is off by default), Tameru moves Hermes' *effective* `compression.threshold` (at most 10 points under and 15 over, never past 85% of the
 window) and `protect_last_n` (half to double, 6 to 60) per chat, from how fast the chat grows, how well the cache is
 reused, and how often old outputs are revisited. It never writes `config.yaml`; the Desktop memory hint shows
 "Tuned for this chat" with both numbers. To put the configured values back at once, set `adaptive_host: off` (or
-`TAMERU_ADAPTIVE_HOST=off`), or pause Tameru for the chat. Stored per chat as `tameru_host_v1`.
+`TAMERU_ADAPTIVE_HOST=off`; it is the default), or pause Tameru for the chat. Stored per chat as `tameru_host_v1`.
 
 ## G. The panel says "Out of date: reload Desktop"
 
