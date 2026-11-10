@@ -339,3 +339,26 @@ only ever asked 59 times per session, every time about 20 seconds after the prev
 first request has already written the cache. The only turn-start work a plugin can do is compaction itself (`should_compress` / `compress`), which Hermes treats as a real compaction with its summary.
 So this needs a change in Hermes: a hook that offers the engine the history at the start of a turn, before the request is built (already on the list of upstream requests). The code was removed; the
 idle profiles stay in `protocol3` and the finding above stands.
+
+## Holdouts that really compact (`protocol3.structural_variant(..., grow=N)`)
+
+Five of the six holdout shapes are 8 to 30 KB of tool output in all and never reach a compaction at any real window, so they said nothing about retention or pruning on shapes that were
+never tuned against. `grow` multiplies the filler of every `terminal` and numbered `read_file` result (planted facts, error lines and the first and last three lines are kept, a read's
+numbered lines are renumbered) until the shape fills the window: x20 at 64K and 128K, x50 at 200K. Measured tool block, three structural seeds, effective cost against stock; **a look at the
+holdouts, recorded in `tests/eval/holdout_looks.json`**.
+
+| Grown holdout, window | Stock compacts | Product | Hidden tool | Legacy | Needed facts kept (3 seeds): stock / product |
+|---|---:|---:|---:|---:|---|
+| longform 64K | 2 | -10.0% | -9.4% | -5.0% | 0 / 24 (crude), 0 / 18 (extractive) |
+| mixedlang 64K | 1 | -2.2% | -2.0% | -4.1% | 0 / 15, 0 / 15 |
+| diagnostics 64K | 1 | -8.5% | -7.2% | -8.1% | 1 / 42, 1 / 36 |
+| longform 128K | 1 | -19.9% | -19.5% | -16.6% | 0 / 24, 0 / 19 |
+| longform 200K | 1 | -26.9% | -26.8% | -25.6% | 1 / 24, 1 / 18 |
+| mixedlang 200K | 1 | -30.0% | -30.0% | -25.1% | 0 / 15, 0 / 15 |
+| rereads, dense (all windows); mixedlang 128K; diagnostics 128K and 200K | 0 | +0.6% to +2.1% | 0.0% | +0.6% to +8.8% | equal |
+
+- **Every cell where the grown holdout really compacts is a win for the product (-2.2% to -30.0%)**, and it keeps the planted facts that stock's summary loses (the facts here are planted in
+  tool output; stock's summary of tool results keeps almost none, and Tameru reads them back). No compacting holdout cell is a loss.
+- **Where nothing compacts the product costs its idle price** (+0.6% to +2.1%) and the hidden tool removes it (0.0%).
+- **Legacy generalizes worse**: it costs +8.8% on `mixedlang` at 128K (grown) where the product is -2.1%.
+- `structural_variant` now also varies numbered `read_file` results (it varied only `terminal` results when the structural-seed tables above were made); those tables were not re-run.

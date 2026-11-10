@@ -1,1 +1,17 @@
-[]
+[
+ {
+  "product": "dcb7765a623193f597bf5688f8dba328bfbdce86661d9edf89bb5d8272a73079",
+  "date": "2026-11-10T12:52:19+00:00",
+  "phase": "7",
+  "scenarios": [
+   "longform",
+   "mixedlang",
+   "diagnostics",
+   "rereads",
+   "dense"
+  ],
+  "note": "grown holdouts (x20, x50) at 64K/128K/200K, three structural seeds, product vs stock/lazy/legacy: descriptive, nothing tuned from it",
+  "again": "",
+  "looks_at_this_hash": 1
+ }
+]

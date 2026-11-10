@@ -144,3 +144,19 @@ def test_a_structural_variant_changes_sizes_but_keeps_every_planted_fact_and_err
 def test_structural_seeds_give_different_costs_for_one_arm():
     costs = {protocol3.measure("stock_defaults", "oncall", 64_000, seed, structural=True)["base"] for seed in (0, 1, 2, 3)}
     assert len(costs) == 4
+
+
+def test_grow_makes_outputs_longer_and_keeps_every_planted_fact():
+    import json
+
+    import scenario_registry as reg
+
+    base = reg.get_spec("longform").build(0, reg.get_spec("longform").turns)
+    grown = protocol3.structural_variant(base, 1, grow=4.0)
+    total = lambda s: sum(len(st.result) for t in s.turns for r in t.rounds for st in r.steps)
+    assert total(grown) > 2.5 * total(base)
+    text = " ".join(st.result for t in grown.turns for r in t.rounds for st in r.steps)
+    for fact in base.gold:
+        if fact.source == "tool":
+            assert fact.needle in text or json.dumps(fact.needle, ensure_ascii=False)[1:-1] in text, fact.id
+    assert protocol3.structural_variant(base, 0, grow=1.0) is base          # the default is still the script itself

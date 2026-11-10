@@ -91,7 +91,7 @@ class ExtractiveSummarizer(replay.FakeSummarizer):
         return {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
 
 
-def structural_variant(script, seed: int, *, spread: float = 0.4):
+def structural_variant(script, seed: int, *, spread: float = 0.4, grow: float = 1.0):
     """A different session with the same facts: the filler of every ``terminal`` output is thinned or repeated.
 
     The scenario builders vary a seed only in small ways (a seed changes filler text, not the shape of the work), so six seeds
@@ -99,22 +99,34 @@ def structural_variant(script, seed: int, *, spread: float = 0.4):
     ``[1 - spread, 1 + spread]`` drawn from ``seed``: below 1 each filler line is dropped with that much probability, above 1 each is
     repeated. Never touched: a line holding any planted fact, a line the scenario counts as an error, and the first and last three
     lines. So gold facts and error templates stay exactly where they were and only the size and mix of the rest changes.
-    Seed 0 is the script as built. Deterministic. Only ``terminal`` results are changed (the other envelopes number their lines)."""
-    if seed == 0:
+    ``grow`` multiplies every size factor (default 1: sizes stay centred on the script's); ``grow=4`` makes each terminal output about four
+    times as long, so a shape whose script never fills a window (the holdouts) does. Seed 0 is the script as built unless ``grow`` is not 1.
+    Deterministic. Only ``terminal`` and ``read_file`` results are changed (a read's numbered lines are renumbered)."""
+    if seed == 0 and grow == 1.0:
         return script
     needles = [g.needle for g in script.gold]
     errors = {line.strip() for line in script.error_lines}
     rng = random.Random(f"structural:{seed}")
 
+    gutter = re.compile(r"^(\d+)\|(.*)$")
+
     def vary(step):
-        if step.name != "terminal":
+        if step.name not in ("terminal", "read_file"):
             return step
         try:
             body = json.loads(step.result)
-            lines = body["output"].split("\n")
+            field = "output" if step.name == "terminal" else "content"
+            lines = body[field].split("\n")
         except (TypeError, ValueError, KeyError, AttributeError):
             return step
-        factor = rng.uniform(1 - spread, 1 + spread)
+        first_number = None
+        if step.name == "read_file":                      # ``N|text`` lines: vary the text, number them again afterwards
+            matches = [gutter.match(line) for line in lines]
+            if not all(matches):
+                return step
+            first_number = int(matches[0].group(1))
+            lines = [m.group(2) for m in matches]
+        factor = rng.uniform(1 - spread, 1 + spread) * grow
         out = []
         for index, line in enumerate(lines):
             keep = (index < 3 or index >= len(lines) - 3 or line.strip() in errors or any(n in line for n in needles))
@@ -124,10 +136,16 @@ def structural_variant(script, seed: int, *, spread: float = 0.4):
                 if rng.random() < factor:
                     out.append(line)
             else:
-                out.append(line)
-                if rng.random() < factor - 1:
-                    out.append(line)
-        body["output"] = "\n".join(out)
+                copies = int(factor) + (1 if rng.random() < factor - int(factor) else 0)      # 1 + (a chance of one more) up to x1.4
+                out.extend([line] * copies)
+        if first_number is not None:
+            body[field] = "\n".join(f"{first_number + i}|{line}" for i, line in enumerate(out))
+            if isinstance(body.get("total_lines"), int):
+                body["total_lines"] = max(body["total_lines"], first_number - 1 + len(out))
+            if isinstance(body.get("file_size"), int):
+                body["file_size"] = len("\n".join(out).encode("utf-8"))
+        else:
+            body[field] = "\n".join(out)
         return dataclasses.replace(step, result=json.dumps(body, ensure_ascii=False))
 
     turns = [dataclasses.replace(turn, rounds=tuple(
@@ -188,6 +206,12 @@ IDLE_PROFILES = {
 CACHE_TTL_SECONDS = 300.0
 
 
+def _transform(structural: bool, grow: float):
+    if not structural and grow == 1.0:
+        return None
+    return lambda script, seed: structural_variant(script, seed, grow=grow)
+
+
 def idle_options(profile: str) -> dict:
     if profile == "none":
         return {}
@@ -195,7 +219,7 @@ def idle_options(profile: str) -> dict:
 
 
 def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: str = "crude", structural: bool = False,
-            idle: str = "none") -> dict:
+            idle: str = "none", grow: float = 1.0) -> dict:
     """One replay of ``arm`` on ``scenario`` at ``window``, with the needed facts sorted and priced."""
     made: list[Any] = []
 
@@ -205,14 +229,14 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
 
     result = replay.run_session(factory, scenario=scenario, context_length=window, seed=seed, keep_final_request=True,
                                 summarizer_factory=ExtractiveSummarizer if summarizer == "extractive" else None,
-                                script_transform=structural_variant if structural else None,
-                                **idle_options(idle))
+                                script_transform=_transform(structural, grow), **idle_options(idle))
     metrics = result["metrics"]
     final = result.get("final_request") or []
     spec = registry.get_spec(scenario)
     script = spec.build(seed, spec.turns)
-    if structural:
-        script = structural_variant(script, seed)
+    transform = _transform(structural, grow)
+    if transform is not None:
+        script = transform(script, seed)
     sizes = _tool_results(script)
     text = replay.visible_text(final)
     refs = list(dict.fromkeys(_REF_RE.findall(text)))
@@ -237,8 +261,8 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
     answered = max(1, metrics["turns"] - metrics["failed_turns"])
     base = metrics["total_simulated_input_cost"]
     return {
-        "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer, "structural": structural, "idle": idle,
-        "base": round(base / answered, 1), "effective": round((base + extra) / answered, 1),
+        "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer, "structural": structural, "idle": idle, "grow": grow,
+        "compactions": metrics["compactions"], "failed_turns": metrics["failed_turns"], "base": round(base / answered, 1), "effective": round((base + extra) / answered, 1),
         "needed": len(kept) + len(recoverable) + len(lost),
         "kept": len(kept), "recoverable": len(recoverable), "lost": len(lost), "lost_unrecoverable": len(unrecoverable),
         "kept_ids": kept, "recoverable_ids": recoverable, "lost_ids": lost,
