@@ -337,8 +337,22 @@ clock the replay can drive, the time of the last reply, a waived reclaim-share r
 only ever asked 59 times per session, every time about 20 seconds after the previous reply. Hermes calls the proactive prune only after tool results inside a turn
 (`agent/turn_preflight.py`, `compress_after_tool_results`), never at the start of a turn, and the start of a turn after a pause is the cold moment. By the time a prune hook runs in that turn, the
 first request has already written the cache. The only turn-start work a plugin can do is compaction itself (`should_compress` / `compress`), which Hermes treats as a real compaction with its summary.
-So this needs a change in Hermes: a hook that offers the engine the history at the start of a turn, before the request is built (already on the list of upstream requests). The code was removed; the
+So this needs a change in Hermes: a hook that offers the engine the history at the start of a turn, before the request is built. The code was removed; the
 idle profiles stay in `protocol3` and the finding above stands.
+
+**Ceiling measured, 2026-11-11: it would not pay, so the upstream request is withdrawn.** An oracle in the replay (`TAMERU_ORACLE_COLD=1`, off by default, measurement
+only: `_Session._oracle_cold_start`) offers the shipped proactive prune at every turn start that finds the cache expired, which is the best an upstream hook could do. On
+the product with `lazy_tool` on, 11 shapes at 64K, 128K and 200K, one structural seed, effective cost against the same arm without it:
+
+| Idle profile | Cells | Cells changed | Mean | Best cell | Worst cell |
+|---|---|---|---|---|---|
+| mixed (10-minute pause before every third turn) | 33 | 6 | +0.09% | -10.27% | +13.74% |
+| slow (10-minute pause before every turn) | 33 | 7 | +0.32% | -7.26% | +15.36% |
+
+Most cells do not move (the prune finds nothing to do at the cold moment), a few improve by 7 to 10%, and a few get 4 to 15% dearer (for example `default` at 128K,
+slow: +15.4%): pruning at the cold moment also shortens rows the next compaction would have handled more cheaply. The mean is slightly worse, not better. A Hermes hook is
+therefore not worth asking for, and Phase 5's cache-cold part is closed as measured-and-rejected. `select_context` (a request-only view that exists today) would give the
+same moment without a Hermes change, but the ceiling above applies to it too.
 
 ## Holdouts that really compact (`protocol3.structural_variant(..., grow=N)`)
 

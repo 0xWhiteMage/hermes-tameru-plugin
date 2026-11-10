@@ -527,7 +527,7 @@ class _Session:
                 self.events.append({"request": len(self.request_chars), "kind": "compress_noop"})
             return messages
         prune = getattr(eng, "prune_tool_results_only", None)
-        if after_tools and callable(prune):
+        if (after_tools or self._oracle_cold_start()) and callable(prune):
             before = sum(len(_wire(m)) for m in messages)
             new, n = self._invoke("prune", messages, lambda: prune(messages, current_tokens=est))
             self.prune_calls += 1
@@ -540,6 +540,12 @@ class _Session:
                 )
                 messages = new
         return messages
+
+    def _oracle_cold_start(self) -> bool:
+        """MEASUREMENT ONLY (``TAMERU_ORACLE_COLD=1``): offer the proactive prune at a turn start that finds the prefix cache
+        expired, as an upstream turn-start hook would. Off by default, so no saved baseline moves."""
+        return (os.environ.get("TAMERU_ORACLE_COLD") == "1" and self.cache_ttl_s is not None and self.clock is not None
+                and self._last_sent_at is not None and self.clock.elapsed - self._last_sent_at > self.cache_ttl_s)
 
     # -- optional ContextEngine hooks (Hermes: agent/conversation_loop.py) ---------------------------
     def _overrides(self, name: str) -> bool:

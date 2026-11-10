@@ -17,6 +17,9 @@ idle gaps already favour Tameru by about 4 to 5 points at 128K (mean -19% with t
 **Request.** A hook (or an optional engine method) called once at the start of a user turn, before the request is assembled, that receives the history and may return a pruned copy, with
 the same commit rules as the proactive prune. It would also give an engine the time since the last reply without keeping its own clock.
 
+> **Withdrawn 2026-11-11.** The replay oracle (`docs/COST-TUNING-2026-11-10.md`, "Ceiling measured") shows a turn-start prune hook would not lower
+> the mean cost: +0.09% (mixed idle) and +0.32% (slow idle) across 33 cells each, with a few cells 4 to 15% dearer. Do not file this one.
+
 ## 2. Ids in the subagent hooks
 
 **Today.** `subagent_start` and `subagent_stop` (`hermes_cli/plugins.py`, the valid-hooks list) are observer-only and carry no `tool_call_id` and no toolset list, so a plugin cannot tell which
