@@ -60,6 +60,12 @@ def test_anthropic_without_a_marker_on_the_tool_adds_none():
     assert out["tools"] == [req["tools"][0]]
 
 
+def test_the_subscription_route_prefixes_every_tool_name_and_the_tool_is_still_found():
+    req = {"tools": [anthropic_tool("mcp__terminal"), anthropic_tool("mcp__" + READ_ORIGINAL_TOOL_NAME, marker=True)]}
+    out = strip_tool(req, "anthropic_messages")
+    assert names(out) == ["mcp__terminal"] and out["tools"][0]["cache_control"] == {"type": "ephemeral"}
+
+
 @pytest.mark.parametrize("api_mode", ["codex_responses", "bedrock_converse", "", None, "something_new"])
 def test_other_request_shapes_are_left_alone(api_mode):
     assert strip_tool(chat_request(), api_mode) is None
@@ -190,7 +196,7 @@ def test_stats_show_what_the_middleware_did():
     registry.llm_request_middleware(request=chat_request(), session_id="s1", api_mode="codex_responses")
     registry.llm_request_middleware(request=chat_request(), session_id="nope", api_mode="chat_completions")
     out = _stats(engine)
-    assert "Recovery tool" in out and "hidden 2" in out and "unsupported 1" in out and "no_chat_found 1" in out
+    assert "Recovery tool" in out and "hidden 2" in out and "unsupported (mode codex_responses) 1" in out and "no_chat_found 1" in out
 
 
 def test_stats_say_nothing_about_the_tool_when_the_setting_is_off():

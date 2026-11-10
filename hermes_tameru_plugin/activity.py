@@ -353,7 +353,7 @@ class SessionRegistry:
     def llm_request_middleware(self, *, request=None, session_id='', api_mode='', **_ignored):
         """Hermes ``llm_request`` middleware (registered only with ``lazy_tool: on``): take the recovery tool out of the
         outgoing request until this chat has a shortened result. Returns None to send the request unchanged."""
-        from .lazy_tool import reveal_needed, strip_tool
+        from .lazy_tool import SUPPORTED_API_MODES, _name as _tool_name, reveal_needed, strip_tool
         engine = None
         try:
             engine = self.resolve(session_id)
@@ -367,7 +367,11 @@ class SessionRegistry:
                 return None
             stripped = strip_tool(request, api_mode)
             if stripped is None:
-                engine._telemetry.count("lazy_tool", state="unsupported", api_mode=str(api_mode)[:24])
+                tools = request.get("tools") if isinstance(request, dict) else None
+                why = ("mode " + str(api_mode)[:24]) if api_mode not in SUPPORTED_API_MODES else (
+                    "no tools key" if not isinstance(tools, list) else
+                    f"{len(tools)} tools, ours {[str(_n)[:34] for _n in map(_tool_name, tools) if _n and 'tameru' in _n][:1]}")
+                engine._telemetry.count("lazy_tool", state="unsupported (" + why + ")")
                 return None
             engine._telemetry.count("lazy_tool", state="hidden")
             return {"request": stripped, "source": "tameru", "reason": "recovery tool hidden until a result is shortened"}

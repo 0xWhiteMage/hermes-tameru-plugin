@@ -38,6 +38,13 @@ def _name(tool: Any) -> str | None:
     return name if isinstance(name, str) else None
 
 
+def _hideable(tool: Any) -> bool:
+    """The recovery tool by its own name, or as the Anthropic subscription route sends it (Hermes prefixes every tool name
+    with ``mcp__`` on the wire and maps it back on the reply)."""
+    name = _name(tool)
+    return name in HIDEABLE or (isinstance(name, str) and name.startswith("mcp__") and name[5:] in HIDEABLE)
+
+
 def strip_tool(request: Any, api_mode: Any) -> dict | None:
     """``request`` without the recovery tool, or None when it should be sent as it is.
 
@@ -48,12 +55,12 @@ def strip_tool(request: Any, api_mode: Any) -> dict | None:
     tools = request.get("tools")
     if not isinstance(tools, list) or not tools:
         return None
-    kept = [tool for tool in tools if _name(tool) not in HIDEABLE]
+    kept = [tool for tool in tools if not _hideable(tool)]
     if len(kept) == len(tools) or not kept:
         return None
     if api_mode == "anthropic_messages":
         removed_marker = next((tool["cache_control"] for tool in tools
-                               if _name(tool) in HIDEABLE and isinstance(tool, dict) and "cache_control" in tool), None)
+                               if _hideable(tool) and isinstance(tool, dict) and "cache_control" in tool), None)
         if removed_marker is not None and isinstance(kept[-1], dict) and "cache_control" not in kept[-1]:
             kept[-1] = {**kept[-1], "cache_control": removed_marker}
     request["tools"] = kept
