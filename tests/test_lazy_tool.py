@@ -175,3 +175,25 @@ def test_a_disabled_plugin_registers_no_middleware():
     ctx = Ctx(lazy_tool=True, enabled=False)
     register(ctx)
     assert ctx.middleware == []
+
+
+# ---- what the middleware did, visible in /tameru stats --------------------------------------------------------------
+def _stats(engine):
+    return engine._activity_registry.command("stats", session_id="s1", platform="desktop")
+
+
+def test_stats_show_what_the_middleware_did():
+    engine = _engine()
+    registry = engine._activity_registry
+    registry.llm_request_middleware(request=chat_request(), session_id="s1", api_mode="chat_completions")
+    registry.llm_request_middleware(request=chat_request(), session_id="s1", api_mode="chat_completions")
+    registry.llm_request_middleware(request=chat_request(), session_id="s1", api_mode="codex_responses")
+    registry.llm_request_middleware(request=chat_request(), session_id="nope", api_mode="chat_completions")
+    out = _stats(engine)
+    assert "Recovery tool" in out and "hidden 2" in out and "unsupported 1" in out and "no_chat_found 1" in out
+
+
+def test_stats_say_nothing_about_the_tool_when_the_setting_is_off():
+    engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive"))
+    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    assert "Recovery tool" not in _stats(engine)

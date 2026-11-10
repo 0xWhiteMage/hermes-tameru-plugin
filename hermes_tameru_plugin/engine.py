@@ -726,6 +726,16 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         self._transactions.pending = None
         return count
 
+    def _lazy_tool_counts(self) -> dict | None:
+        """What the ``lazy_tool`` middleware did with this chat's requests (hidden / listed / unsupported ...), or None when it is off."""
+        if not self._settings.lazy_tool:
+            return None
+        counts = dict(self._telemetry.snapshot()["events"].get("lazy_tool", {}).get("labels", {}).get("state", {}))
+        unmatched = getattr(getattr(self, "_activity_registry", None), "lazy_unmatched", 0)
+        if unmatched:
+            counts["no_chat_found"] = unmatched
+        return counts
+
     def update_from_response(self, usage):
         """Keep the provider's own numbers for the last few replies, then let Hermes do its accounting."""
         callback = getattr(super(), "update_from_response", None)
@@ -849,6 +859,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
                               "errors_ignored": self._telemetry.snapshot()["events"].get("error", {}).get("count", 0),
                               "refused_commands": getattr(self._activity_registry, "refused_verbs", 0),
                               "archive": archive_available,
+                              "lazy_tool": self._lazy_tool_counts(),
                               "native_compaction": native_compaction_active(
                                   getattr(self, "model", None), getattr(self, "provider", None), getattr(self, "base_url", None)),
                               "active": bool(self._settings.enabled and self._seams.demote)}

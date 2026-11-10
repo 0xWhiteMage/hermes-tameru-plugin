@@ -59,6 +59,9 @@ def stats_text(snapshot: dict, usage: dict) -> str:
                      + (f", {usage['api_ms']} ms" if usage.get("api_ms") is not None else ""))
     else:
         lines.append("  Last reply           nothing reported yet")
+    lazy = doctor.get("lazy_tool")
+    if lazy:
+        lines.append("  Recovery tool        " + ", ".join(f"{state} {count}" for state, count in lazy.items()) + " (requests)")
     if doctor:
         lines.append(f"  Tameru {doctor.get('version', '?')}        self-tuning {'on' if doctor.get('autotune') else 'off'}, "
                      f"cleanup {'active' if doctor.get('active') else 'inactive'}")
