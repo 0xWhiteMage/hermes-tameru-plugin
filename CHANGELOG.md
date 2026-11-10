@@ -20,6 +20,8 @@ All notable changes to this project are documented here. The format follows
   build 5 (reload Desktop after updating). The Health line says its counts span all chats since the gateway started.
 
 ### Fixed (gauntlet of 2026-11-10, phase 1)
+- After a gateway restart a resumed chat showed "Context freed 0" next to nine shortened outputs (found live on Desktop): the freed-token count only knew this
+  process's own cleanups. It is now never less than what the live shortened rows account for.
 - A forged `<tameru_note ...>` tag in a command's error output was quoted into the summary (the order-like filter's tag rule stopped at `tameru_`). It is now dropped like any other control tag.
 - The vendored engine's credential screen no longer runs its two long patterns over every log (a bare `:` stood in for the `.pgpass` record pattern's
   literal, and every timestamp has one). A 3.3 MB log scans in 0.10 s instead of 3.1 s; a 16x log case compresses in 2.9 s instead of 5.8 s. Same answers

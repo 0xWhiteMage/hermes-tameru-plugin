@@ -106,3 +106,18 @@ def test_the_real_hermes_function_says_yes_for_a_supported_route_and_no_for_othe
     from hermes_tameru_plugin.hermes_compat import native_compaction_active
     assert native_compaction_active("gpt-5.6", "openai", "https://api.openai.com/v1") is True
     assert native_compaction_active("claude-haiku-4-5", "anthropic", "https://api.anthropic.com") is False
+
+
+def test_freed_tokens_count_the_live_rows_after_a_restart_when_no_cleanup_of_this_process_is_recorded():
+    from test_edits import _shortened
+    engine, _out, _idx, _ref, _original = _shortened()
+    engine._policy.saved_tokens = 0                            # a fresh process: its policy has no cleanups yet
+    savings = engine.activity_snapshot()["progress"]["savings"]
+    assert savings["shortened"] == 1 and savings["tokens"] > 0
+
+
+def test_freed_tokens_keep_the_larger_of_the_recorded_cleanups_and_the_rows():
+    from test_edits import _shortened
+    engine, *_ = _shortened()
+    engine._policy.saved_tokens = 10_000_000
+    assert engine.activity_snapshot()["progress"]["savings"]["tokens"] == 10_000_000

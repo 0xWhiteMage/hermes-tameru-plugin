@@ -66,6 +66,10 @@ def build_snapshot(engine) -> dict[str, Any]:
     elif _number(reported) is not None and reported > 0:
         used, basis = reported, "reported"
     rows = engine._activity.rows()
+    # Tokens freed: what this process's cleanups recorded, but never less than what the shortened rows themselves account for
+    # (a chat resumed after a restart has its rows back from history and no cleanup of this process to count).
+    rows_freed = sum(max(0, -(-row.before_chars // 4) - -(-row.after_chars // 4)) for row in rows if row.live)
+    freed = max(int(policy.saved_tokens or 0), rows_freed)
     adjustments = [e for e in policy.events if e.get("kind") == "adjust"][-5:]
     timeline = list(policy.events)[-_TIMELINE:]
     limit = budget.usable_input_tokens
@@ -80,9 +84,8 @@ def build_snapshot(engine) -> dict[str, Any]:
             "limit": budget.usable_input_tokens, "window": budget.window_tokens,
         },
         "savings": {
-            "tokens": policy.saved_tokens, "commits": policy.commit_count, "latency_ms": _latency(timeline),
-            "saved_pct": (round(100 * policy.saved_tokens / limit)
-                          if _number(policy.saved_tokens) and _number(limit) else None),
+            "tokens": freed, "commits": policy.commit_count, "latency_ms": _latency(timeline),
+            "saved_pct": (round(100 * freed / limit) if freed and _number(limit) else None),
             "estimate": True,
             "shortened": sum(1 for row in rows if row.live),
             "originals": sum(1 for row in rows if row.live and engine._activity.original_check(row.ref) != "unavailable"),
