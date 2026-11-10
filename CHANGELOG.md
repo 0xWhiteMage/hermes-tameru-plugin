@@ -30,6 +30,11 @@ All notable changes to this project are documented here. The format follows
   secret-shaped `-pX` values are still redacted.
 
 ### Added (gauntlet of 2026-11-10, phase 0 and 1)
+- `lazy_tool` (off by default; `TAMERU_LAZY_TOOL=on`): a Hermes `llm_request` middleware takes `tameru_read_original` out of the outgoing request until the chat has a
+  shortened result, then puts it back for good. The decision uses engine state only (a forged header in a file cannot make the tool appear); chat-completions and Anthropic
+  requests are edited (the Anthropic cache marker moves to the new last tool), Codex and unknown shapes are left alone; with it on there is no standing system-prompt note.
+  Replay (seed 0): sessions that never compact cost exactly the same as Hermes (+0.0%, was +2% to +5%); compacting sessions cost up to 0.8 points more than with the tool always
+  listed, because the reveal rewrites the cached prefix once.
 - `/tameru` says when Hermes lets the provider compact the model on its own servers (OpenAI Responses on supported routes): that summary does not
   carry pins or the Artifact Trail, and the server compacts before Tameru's trigger. Detection only; Tameru does not change its behaviour there.
 - `/tameru help` (every verb in one line), `/tameru stats` (numbers for this chat: context freed, outputs shortened, cache use of the last reply) and

@@ -105,8 +105,17 @@ def test_effective_cost_matrix():
     seeds = [int(s) for s in os.environ.get("TAMERU_P3_SEEDS", "0").split(",")]
     summarizer = os.environ.get("TAMERU_P3_SUMMARIZER", "crude")
     structural = os.environ.get("TAMERU_P3_STRUCTURAL", "") == "1"
-    rows = [protocol3.measure(arm, scenario, window, seed, summarizer=summarizer, structural=structural)
-            for scenario in scenarios for window in windows for arm in arms for seed in seeds]
+    import replay
+
+    tool_chars = int(os.environ.get("TAMERU_P3_TOOL_CHARS", "0") or 0)          # Hermes' tool block; 0 keeps the replay's 12,000
+    saved = (replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS)
+    if tool_chars:
+        replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS = tool_chars, tool_chars // 4
+    try:
+        rows = [protocol3.measure(arm, scenario, window, seed, summarizer=summarizer, structural=structural)
+                for scenario in scenarios for window in windows for arm in arms for seed in seeds]
+    finally:
+        replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS = saved
     Path(os.environ["TAMERU_P3_MATRIX"]).write_text(json.dumps(rows), encoding="utf-8")
 
 

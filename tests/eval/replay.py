@@ -439,6 +439,7 @@ class _Session:
         # Freeze schemas once, as a real conversation does. The baseline schema size is
         # assumed; engine-added schemas are serialized, with a four-char token estimate.
         self._schema_wire = " " * TOOLS_OVERHEAD_CHARS + extra_wire
+        self._base_wire, self._extra_wire = " " * TOOLS_OVERHEAD_CHARS, extra_wire     # for engines that hide their tool until needed
         self.schema_chars = len(self._schema_wire)
         self._overhead_tokens = TOOLS_OVERHEAD_TOKENS + (len(extra_wire) + 3) // 4
         # overflow path / budget state
@@ -742,7 +743,11 @@ class _Session:
         self.max_attempted_tokens = max(self.max_attempted_tokens, sent_tokens)
         if sent_tokens > self.window:
             self.requests_over_window += 1
-        wire = [self._schema_wire, *(_wire(m) for m in sent)]
+        schema_wire = self._schema_wire
+        if getattr(self.engine, "replay_lazy_tool", False):     # the engine's tool is in the request only once it is needed
+            from hermes_tameru_plugin.lazy_tool import reveal_needed
+            schema_wire = self._base_wire + (self._extra_wire if reveal_needed(self.engine) else "")
+        wire = [schema_wire, *(_wire(m) for m in sent)]
         total = sum(len(w) + 1 for w in wire)
         if self._prev_wire is None:
             lcp = 0

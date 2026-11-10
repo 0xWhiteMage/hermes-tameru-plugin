@@ -104,11 +104,14 @@ def register(ctx: Any) -> None:
             register_hook('api_request_error', engine._activity_registry.observe_request_error)
             register_hook('post_compaction', engine._activity_registry.observe_compaction)
             register_hook('pre_llm_call', engine._activity_registry.pre_llm_call)
+            register_middleware = getattr(ctx, 'register_middleware', None)
+            if settings.lazy_tool and settings.expand_tool and callable(register_middleware):
+                register_middleware('llm_request', engine._activity_registry.llm_request_middleware)
     except Exception as exc:
         logger.warning('tameru: could not register request observer: %r', exc)
     try:
         add_section = getattr(ctx, 'register_system_prompt_section', None)
-        if (active and settings.expand_tool and callable(add_section)
+        if (active and settings.expand_tool and not settings.lazy_tool and callable(add_section)
                 and isinstance(getattr(ctx, 'plugin_id', None), str)):
             add_section('tameru.recovery', RECOVERY_NOTE, position='after_memory', max_chars=600)
     except Exception as exc:                       # an optional prompt note must never stop the engine registering

@@ -157,6 +157,17 @@ def tameru_shipped() -> Any:
     return engine
 
 
+@register("tameru_lazy")
+def tameru_lazy() -> Any:
+    """The product arm with ``lazy_tool`` on: its recovery tool joins the request only once the chat has a shortened result."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    engine = TameruContextEngine(settings=TameruSettings(lazy_tool=True), quiet_mode=True)
+    engine.replay_lazy_tool = True
+    return engine
+
+
 @register("tameru_autotune_off")
 def tameru_autotune_off() -> Any:
     """The product arm with self-tuning off (the fixed balanced table): what ``autotune`` adds or costs."""
