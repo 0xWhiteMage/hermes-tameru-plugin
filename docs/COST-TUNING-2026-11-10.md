@@ -205,3 +205,24 @@ seeds x stock, product, legacy; effective cost, 95% confidence interval over the
   (-9.1% at 64K, -18.9% at 128K) and `default` too (-2.8% at 64K, -16.7% at 128K). The 32K rows with a large block are not meaningful (the block alone takes a third
   of the window and the arms fail different numbers of turns); they are reported for the old assumption only.
 - **Still to measure with a model:** Hermes' system prompt size, the token estimate against billed tokens, and real cache reads and writes (Phase 2).
+
+## Live check on Hermes Desktop (2026-11-10, Haiku 4.5, "This device", backend v0.23.0)
+
+Run on the user's own Desktop with their go-ahead, after restarting the gateway (the log shows the new registration at 19:28:30 and again at 19:34:33)
+and reloading Desktop so the panel (build 5) and backend matched. A resumed Haiku 4.5 session that already held nine shortened outputs was used; three
+short messages were sent (a few cents). What was seen:
+
+- The panel loaded with no "Out of date" warning, the gauge ("33% full") and the label "Freed ~81%"; its table showed the nine shortened outputs, each 493 lines to 5
+  (-98.3%, about 12,251 tokens each).
+- `/tameru help` printed the command list; `/tameru stats` printed "Context freed 110K tokens, outputs shortened 9, originals available 9, context now 45K of 136K,
+  last reply 45K prompt tokens, cache hit 100%, 1,024 ms (2,127 ms on the first)". A real provider reports a 100% cache hit on the turn after a gateway restart in a session
+  resumed two minutes before (the Anthropic cache outlives the process).
+- **A bug found live and fixed (commit `9271cf4`):** the first `/tameru stats` said "Context freed 0 tokens" next to "Outputs shortened 9". The freed-token count only knew
+  this process's own cleanups; it is now never less than what the live shortened rows account for. The panel's "Freed" label was hidden for the same reason.
+- Before the first turn after a restart `/tameru` answers "No live Tameru context is available for this chat" (documented behaviour); one message makes it live.
+- **A reload of Desktop reconnected it to a remote gateway**, as the earlier notes warned. Nothing was typed or clicked there; the connection
+  picker was used to switch back to "This device" within seconds, and every later action ran on "This device".
+- A typing slip worth knowing: passing `/tameru stats` through Git Bash turned it into `C:/Program Files/Git/tameru stats` and sent that to the model (a harmless, wasted Haiku
+  line). With `MSYS_NO_PATHCONV=1` the commands arrive intact.
+
+Still not measured live: Hermes' token estimate against billed tokens, cache writes after an idle gap longer than the cache lifetime, and the real system prompt size.
