@@ -46,8 +46,11 @@ Needed facts across all cells: Hermes keeps 1,345 and loses 355 (91 cannot be re
 
 **When Tameru costs more.** Be aware of these before turning it on:
 
-- **A session that never reaches a compaction costs 3% to 5% more** (+3.2% to +5.1% in the five such shapes, at every window). The cause is the
+- **A session that never reaches a compaction costs a little more** (+3.2% to +5.1% in the replay's five such shapes, which assumes Hermes' tool block is 12,000
+  characters; Hermes' real block is about 40,000 with a bare profile, which brings it to about +2%, and less with more tools). The cause is the
   one tool, `tameru_read_original`, listed on every request. `expand_tool: false` removes it, and with it the ability to read an original back.
+- **Windows under 64K are stress tests.** Hermes refuses models with less than 64,000 tokens of context, so the 32K and 48K columns above show what a very small window
+  would do, not a setup you can run. The real range starts at 64K.
 - **Many small results cost more on small windows.** With results of 800 to 3,000 characters the plugin costs about +10% at 32K, +4% to +6% at 48K and +1% to +4% at 64K
   (it still loses fewer needed facts than Hermes). There is no loss at 128K and above beyond the tool above.
 - **Averages hide a split.** Across 55 shape-and-window cells with six varied sessions each, Tameru is cheaper in 24, dearer in 29 (the five shapes that never compact,

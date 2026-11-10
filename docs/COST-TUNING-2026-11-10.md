@@ -183,3 +183,25 @@ seeds x stock, product, legacy; effective cost, 95% confidence interval over the
   so they are optimistic; the per-cell table above is the honest one.
 - **Needed facts, all 990 runs:** stock 4,047 kept / 1,053 lost (267 cannot be re-run); product 4,509 kept, 136 recoverable, 455 lost (94); legacy 4,505 / 80 / 515 (102).
   The retention lead holds under variation.
+
+## What Hermes really sends: a measured tool block, and a 64K floor (2026-11-10)
+
+- **The tool block is far bigger than the replay assumed.** Building Hermes' own tool definitions (`model_tools.get_tool_definitions`, a bare profile, no MCP servers,
+  no plugins) gives 23 tools and **39,993 characters** (about 10K tokens), against the replay's 12,000-character stand-in. The largest are `computer_use` (5,855),
+  `manage_connections` (4,511), `session_search` (4,006), `skill_manage` (3,699) and `memory` (2,583). A profile with MCP servers or more toolsets is larger still.
+- **Hermes refuses a model with less than 64,000 tokens of context** (`MINIMUM_CONTEXT_LENGTH` in `agent/model_metadata.py`, enforced in `agent/agent_init.py`).
+  The 32K and 48K windows of the replay are therefore stress tests, not configurations a user can run. Real windows start at 64K.
+- **Effect on the idle cost.** With the replay's tool block set to measured sizes (seed 0, 128K window, effective cost against stock), the five shapes that never compact cost:
+
+| Tool block | dense | diagnostics | longform | mixedlang | rereads |
+|---|---:|---:|---:|---:|---:|
+| 12,000 chars (replay's old assumption) | +5.1% | +4.5% | +3.2% | +4.2% | +5.0% |
+| 40,000 chars (measured, bare profile) | +2.4% | +2.3% | +1.9% | +2.2% | +2.4% |
+| 80,000 chars (a heavier profile) | +1.4% | +1.4% | +1.2% | +1.3% | +1.4% |
+
+  The tool schema adds a fixed 1,302 characters to every request; the bigger the block it joins, the smaller the share. On a real profile the idle cost is probably
+  1% to 2.5%, not 3% to 5%.
+- **Small rows at real windows:** +3.2% at 64K and +1.3% at 128K with the 40,000-character block (+1.4% and +0.5% with the old one). `oncall` stays cheaper than stock
+  (-9.1% at 64K, -18.9% at 128K) and `default` too (-2.8% at 64K, -16.7% at 128K). The 32K rows with a large block are not meaningful (the block alone takes a third
+  of the window and the arms fail different numbers of turns); they are reported for the old assumption only.
+- **Still to measure with a model:** Hermes' system prompt size, the token estimate against billed tokens, and real cache reads and writes (Phase 2).
