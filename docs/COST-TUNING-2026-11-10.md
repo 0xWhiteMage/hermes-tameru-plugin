@@ -114,3 +114,27 @@ A lost fact the user or assistant said cannot be re-run and is counted separatel
   Legacy no longer beats the product anywhere once priced, except 32K by 0.7 points.
 - **Not yet in this table:** the per-turn note, idle gaps and a cache lifetime (the replay now accepts `cache_ttl_s` and `idle_seconds`, off by default),
   a realistic stock tool block, and a second summarizer. Those are the rest of the second protocol.
+
+## Small rows: the trail budget and the ledger, tried (effective cost against stock, seed 0, product arm)
+
+The plan's idea was a smaller Artifact Trail at small windows (Files and Commands trimmed, errors kept). Measured on the five development shapes:
+
+| Files + Commands cap | smallrows 32K | smallrows 48K | other shapes |
+|---|---:|---:|---|
+| 1,500 (today) | +10.5% | +4.0% | |
+| 1,000 | +10.3% | +3.7% | oncall 32K keeps one fact fewer (8 to 7) |
+| 700 | +9.9% | +3.5% | same |
+| 400 | +10.2% | +3.3% | same |
+
+A smaller cap gains at most 0.6 points at 32K and 0.7 at 48K and costs a fact in `oncall`: **rejected**. With the ledger switched off entirely
+(`ledger: false`):
+
+| | smallrows 32K | smallrows 48K | smallrows 64K | what it costs |
+|---|---:|---:|---:|---|
+| Ledger on | +10.5% | +4.0% | +1.4% | |
+| Ledger off | +9.1% | +1.8% | -0.2% | error templates kept 14 to 2 (32K), 19 to 10 (48K), 23 to 13 (64K); one fact fewer at 32K and 48K; oncall at 32K 6 facts instead of 8 and no error templates |
+
+So the trail is worth 1.4 to 2.2 points of the smallrows loss at 48K and 64K and the rest is not the trail: at 32K both runs compact six times against
+stock's five, so the loss is mostly the extra compaction (earlier and larger summaries), which none of the levers tried so far removes. The ledger is
+what keeps the error templates (stock keeps 10 of the 38 here, the product 14 to 23), so it stays on. **The smallrows loss is a documented limit of
+windows under 64K, with results of 800 to 3,000 characters.** At 128K and above it is the tool schema only (+0.5%).
