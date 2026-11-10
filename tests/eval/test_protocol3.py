@@ -89,12 +89,21 @@ def test_idle_gaps_longer_than_the_lifetime_expire_the_cache_and_cost_more():
     assert long["prefix_break_events"] == base["prefix_break_events"]     # an expiry is the provider's doing, not a rewrite by the engine
 
 
+def test_the_extractive_summarizer_keeps_more_than_the_crude_one_and_is_deterministic():
+    crude = protocol3.measure("stock_defaults", "default", 32_000, 0)
+    smart = protocol3.measure("stock_defaults", "default", 32_000, 0, summarizer="extractive")
+    again = protocol3.measure("stock_defaults", "default", 32_000, 0, summarizer="extractive")
+    assert smart == again
+    assert smart["summarizer"] == "extractive" and smart["kept"] >= crude["kept"]
+
+
 @pytest.mark.skipif(not os.environ.get("TAMERU_P3_MATRIX"), reason="set TAMERU_P3_MATRIX=<output.json> for the table")
 def test_effective_cost_matrix():
     arms = os.environ.get("TAMERU_P3_ARMS", "stock_defaults,tameru_1_4_product,tameru_legacy").split(",")
     scenarios = [s for s in os.environ.get("TAMERU_P3_SCENARIOS", "").split(",") if s] or list(registry.scenario_names())
     windows = [int(w) for w in os.environ.get("TAMERU_P3_WINDOWS", "32000,48000,64000,128000,200000").split(",")]
     seeds = [int(s) for s in os.environ.get("TAMERU_P3_SEEDS", "0").split(",")]
-    rows = [protocol3.measure(arm, scenario, window, seed)
+    summarizer = os.environ.get("TAMERU_P3_SUMMARIZER", "crude")
+    rows = [protocol3.measure(arm, scenario, window, seed, summarizer=summarizer)
             for scenario in scenarios for window in windows for arm in arms for seed in seeds]
     Path(os.environ["TAMERU_P3_MATRIX"]).write_text(json.dumps(rows), encoding="utf-8")

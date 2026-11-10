@@ -138,3 +138,24 @@ So the trail is worth 1.4 to 2.2 points of the smallrows loss at 48K and 64K and
 stock's five, so the loss is mostly the extra compaction (earlier and larger summaries), which none of the levers tried so far removes. The ledger is
 what keeps the error templates (stock keeps 10 of the 38 here, the product 14 to 23), so it stays on. **The smallrows loss is a documented limit of
 windows under 64K, with results of 800 to 3,000 characters.** At 128K and above it is the tool schema only (+0.5%).
+
+## Does "keeps more facts" depend on the crude fake summarizer? A second summarizer (`protocol3.ExtractiveSummarizer`)
+
+The default stand-in for the summary call keeps 200 characters of every turn and nothing else, which punishes an arm that summarizes
+(stock) more than one that avoids summarizing (Tameru). `ExtractiveSummarizer` also keeps the user's own words (600 characters) and the
+identifiers in every record (paths, numbers of three digits or more, ids, hex strings, quoted strings; 260 characters per record), with a
+longer carry and cap. It is still deterministic and cannot reason. Same 330 runs.
+
+| Needed facts, all cells | Summarizer | Kept | Recoverable | Lost | of which cannot be re-run |
+|---|---|---:|---:|---:|---:|
+| Stock Hermes | crude | 1,345 | 0 | 355 | 91 |
+| Stock Hermes | extractive | 1,404 | 0 | 296 | 36 |
+| Product | crude | 1,511 | 48 | 141 | 30 |
+| Product | extractive | 1,521 | 48 | 131 | 20 |
+| Legacy | extractive | 1,527 | 26 | 147 | 18 |
+
+Product against stock, effective cost, mean: crude -8.4% / -5.0% / -2.4% / -7.3% / -4.3% at 32K/48K/64K/128K/200K; extractive -8.6% / -4.9% / -2.2% /
+-7.4% / -4.3%. **The cost lead is the same under both summarizers and the retention lead survives**: a better summarizer recovers about 60 of stock's
+355 losses, and 55 of the 91 it could not re-run, but the product still keeps 117 more needed facts and loses about 56% fewer. The three 200K cells where
+the product keeps fewer facts than stock (default, i18n, refactor) are the same under both: five facts, four of them readable back. A real model is a third
+case this does not cover; the live checks are the only evidence about one.

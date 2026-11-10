@@ -807,6 +807,7 @@ def run_session(
     context_length: int = CONTEXT_LENGTH, scenario: str = DEFAULT_SCENARIO, realistic: bool = True,
     seconds_per_request: float = SECONDS_PER_REQUEST, max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
     cache_ttl_s: float | None = None, idle_seconds: Callable[[int], float] | None = None,
+    summarizer_factory: Callable[[], FakeSummarizer] | None = None,
 ) -> dict:
     """Replay the scripted session against ``engine_factory()`` and return the metrics.
 
@@ -837,7 +838,7 @@ def run_session(
             engine, script, realistic=realistic, clock=clock, context_length=context_length,
             max_compression_attempts=max_compression_attempts, cache_ttl_s=cache_ttl_s, idle_seconds=idle_seconds,
         )
-        summarizer, final = _play(sess, script, seed)
+        summarizer, final = _play(sess, script, seed, summarizer_factory)
     return _result(sess, summarizer, final, script, engine, turns, seed, context_length, scenario, realistic,
                    seconds_per_request, keep_final_request)
 
@@ -856,9 +857,12 @@ def _attach_note(engine: Any, messages: list[dict]) -> None:
         messages[-1] = dict(messages[-1], content=f"{messages[-1]['content']}\n\n{note}")
 
 
-def _play(sess: _Session, script: Scenario, seed: int) -> tuple[FakeSummarizer, list[dict] | None]:
-    """Drive the script through ``sess``; returns the fake summarizer and the final request."""
-    summarizer = FakeSummarizer()
+def _play(sess: _Session, script: Scenario, seed: int,
+          summarizer_factory: Callable[[], FakeSummarizer] | None = None) -> tuple[FakeSummarizer, list[dict] | None]:
+    """Drive the script through ``sess``; returns the summarizer and the final request.
+
+    ``summarizer_factory`` swaps the stand-in for the summary call (default: the crude ``FakeSummarizer``)."""
+    summarizer = summarizer_factory() if summarizer_factory is not None else FakeSummarizer()
     call_counter = 0
 
     def new_call_id() -> str:

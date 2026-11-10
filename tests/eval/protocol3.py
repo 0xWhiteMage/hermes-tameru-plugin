@@ -31,6 +31,64 @@ READ_TOOL = "tameru_read_original"
 _REF_RE = re.compile(r"ref=([0-9a-f]{8,16})")
 
 
+class ExtractiveSummarizer(replay.FakeSummarizer):
+    """A second stand-in for the summary call, closer to what a model does than the crude default.
+
+    The default keeps the first 200 characters of every turn and nothing else. This one also keeps what a careful
+    summary keeps: the user's own words (up to 600 characters, so a decision or a rule survives), and the identifiers
+    in every record (paths, numbers of three digits or more, ids with dashes or underscores, hex strings, quoted
+    strings), up to 260 characters per record, with a longer cap on the summary. It is still deterministic and still
+    cannot reason: a claim that holds under both summarizers does not rest on the crudeness of one."""
+
+    USER_CHARS = 600
+    ANCHOR_CHARS = 260
+    MAX_CHARS = 14_000
+    _ANCHOR_RE = re.compile(
+        r"(?:[\w./-]+\.[A-Za-z0-9]{1,6}\b|\b\d{3,}\b|\b[A-Za-z]+(?:[-_][A-Za-z0-9]+)+\b|\b[0-9a-f]{7,}\b|\"[^\"\n]{3,60}\"|'[^'\n]{3,60}')")
+
+    def _entry(self, record: str) -> str:
+        flat = " ".join(record.split())
+        if record.startswith("[USER]:"):
+            return flat[: self.USER_CHARS]
+        head = flat[: replay.SUMMARY_FIRST_CHARS]
+        anchors: list[str] = []
+        used = 0
+        for match in self._ANCHOR_RE.finditer(flat[replay.SUMMARY_FIRST_CHARS:]):
+            piece = match.group(0)
+            if piece in head or piece in anchors:
+                continue
+            if used + len(piece) + 1 > self.ANCHOR_CHARS:
+                break
+            anchors.append(piece)
+            used += len(piece) + 1
+        return head + (" | " + " ".join(anchors) if anchors else "")
+
+    def __call__(self, **kwargs: Any) -> dict:
+        prompt = kwargs["messages"][0]["content"]
+        self.calls += 1
+        self.prompt_chars += len(prompt)
+        self.input_chars += sum(len(replay._wire(message)) + 1 for message in kwargs["messages"])
+        records, prev_actions, prev_task = self._parse(prompt)
+        if not records or not replay._RECORD_START_RE.match(records[0]):
+            self.unparsed += 1
+        users = [r for r in records if r.startswith("[USER]:")]
+        task = users[-1][len("[USER]:"):].strip()[: self.USER_CHARS] if users else (prev_task or replay._NO_USER_TASK)
+        entries = [a[: 2 * replay.SUMMARY_CARRY_CHARS] for a in prev_actions]
+        entries += [self._entry(r) for r in records if r.strip()]
+        kept: list[str] = []
+        total = 0
+        for entry in reversed(entries):
+            if total + len(entry) > self.MAX_CHARS:
+                break
+            kept.append(entry)
+            total += len(entry) + 4
+        kept.reverse()
+        text = ("## Historical Task Snapshot\n" + task + "\n\n## Goal\nContinue the work described above.\n\n"
+                "## Completed Actions\n" + "\n".join(f"{i}. {e}" for i, e in enumerate(kept, 1)) + "\n")
+        self.output_chars += len(text)
+        return {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
+
+
 def _tool_results(script) -> dict[str, int]:
     """Characters of the result each scripted tool call printed, by call key."""
     sizes: dict[str, int] = {}
@@ -66,7 +124,7 @@ def _read_back(engine: Any, refs: list[str], needle: str) -> int | None:
     return None
 
 
-def measure(arm: str, scenario: str, window: int, seed: int = 0) -> dict:
+def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: str = "crude") -> dict:
     """One replay of ``arm`` on ``scenario`` at ``window``, with the needed facts sorted and priced."""
     made: list[Any] = []
 
@@ -74,7 +132,8 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0) -> dict:
         made.append(engines.make_engine(arm))
         return made[-1]
 
-    result = replay.run_session(factory, scenario=scenario, context_length=window, seed=seed, keep_final_request=True)
+    result = replay.run_session(factory, scenario=scenario, context_length=window, seed=seed, keep_final_request=True,
+                                summarizer_factory=ExtractiveSummarizer if summarizer == "extractive" else None)
     metrics = result["metrics"]
     final = result.get("final_request") or []
     spec = registry.get_spec(scenario)
@@ -103,7 +162,7 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0) -> dict:
     answered = max(1, metrics["turns"] - metrics["failed_turns"])
     base = metrics["total_simulated_input_cost"]
     return {
-        "arm": arm, "scenario": scenario, "window": window, "seed": seed,
+        "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer,
         "base": round(base / answered, 1), "effective": round((base + extra) / answered, 1),
         "needed": len(kept) + len(recoverable) + len(lost),
         "kept": len(kept), "recoverable": len(recoverable), "lost": len(lost), "lost_unrecoverable": len(unrecoverable),
