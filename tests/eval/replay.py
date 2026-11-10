@@ -808,6 +808,7 @@ def run_session(
     seconds_per_request: float = SECONDS_PER_REQUEST, max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
     cache_ttl_s: float | None = None, idle_seconds: Callable[[int], float] | None = None,
     summarizer_factory: Callable[[], FakeSummarizer] | None = None,
+    script_transform: Callable[[Scenario, int], Scenario] | None = None,
 ) -> dict:
     """Replay the scripted session against ``engine_factory()`` and return the metrics.
 
@@ -830,6 +831,8 @@ def run_session(
     spec = get_spec(scenario)
     turns = spec.turns if turns is None else turns
     script = spec.build(seed, turns)
+    if script_transform is not None:        # e.g. protocol3.structural_variant: a different session with the same facts
+        script = script_transform(script, seed)
     clock = VirtualClock(seconds_per_request) if realistic else None
     with simulated_clock(clock) if clock is not None else nullcontext():  # the engine is built on the clock it runs on
         engine = engine_factory()

@@ -18,7 +18,9 @@ Run ``TAMERU_P3_MATRIX=out.json python -m pytest tests/eval/test_protocol3.py`` 
 """
 from __future__ import annotations
 
+import dataclasses
 import json
+import random
 import re
 from typing import Any
 
@@ -89,6 +91,55 @@ class ExtractiveSummarizer(replay.FakeSummarizer):
         return {"choices": [{"message": {"role": "assistant", "content": text}, "finish_reason": "stop"}]}
 
 
+def structural_variant(script, seed: int, *, spread: float = 0.4):
+    """A different session with the same facts: the filler of every ``terminal`` output is thinned or repeated.
+
+    The scenario builders vary a seed only in small ways (a seed changes filler text, not the shape of the work), so six seeds
+    are close to one session six times. Here each terminal output of the script gets its own size factor in
+    ``[1 - spread, 1 + spread]`` drawn from ``seed``: below 1 each filler line is dropped with that much probability, above 1 each is
+    repeated. Never touched: a line holding any planted fact, a line the scenario counts as an error, and the first and last three
+    lines. So gold facts and error templates stay exactly where they were and only the size and mix of the rest changes.
+    Seed 0 is the script as built. Deterministic. Only ``terminal`` results are changed (the other envelopes number their lines)."""
+    if seed == 0:
+        return script
+    needles = [g.needle for g in script.gold]
+    errors = {line.strip() for line in script.error_lines}
+    rng = random.Random(f"structural:{seed}")
+
+    def vary(step):
+        if step.name != "terminal":
+            return step
+        try:
+            body = json.loads(step.result)
+            lines = body["output"].split("\n")
+        except (TypeError, ValueError, KeyError, AttributeError):
+            return step
+        factor = rng.uniform(1 - spread, 1 + spread)
+        out = []
+        for index, line in enumerate(lines):
+            keep = (index < 3 or index >= len(lines) - 3 or line.strip() in errors or any(n in line for n in needles))
+            if keep:
+                out.append(line)
+            elif factor < 1:
+                if rng.random() < factor:
+                    out.append(line)
+            else:
+                out.append(line)
+                if rng.random() < factor - 1:
+                    out.append(line)
+        body["output"] = "\n".join(out)
+        return dataclasses.replace(step, result=json.dumps(body, ensure_ascii=False))
+
+    turns = [dataclasses.replace(turn, rounds=tuple(
+        dataclasses.replace(rnd, steps=tuple(vary(step) for step in rnd.steps)) for rnd in turn.rounds)) for turn in script.turns]
+    varied = dataclasses.replace(script, turns=turns)
+    for fact in varied.gold:                                   # the guard every scenario builder has: each planted fact is still there
+        if fact.source == "tool":
+            assert any(fact.needle in step.result or json.dumps(fact.needle, ensure_ascii=False)[1:-1] in step.result
+                       for turn in varied.turns for rnd in turn.rounds for step in rnd.steps if step.key == fact.call_key), fact.id
+    return varied
+
+
 def _tool_results(script) -> dict[str, int]:
     """Characters of the result each scripted tool call printed, by call key."""
     sizes: dict[str, int] = {}
@@ -124,7 +175,7 @@ def _read_back(engine: Any, refs: list[str], needle: str) -> int | None:
     return None
 
 
-def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: str = "crude") -> dict:
+def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: str = "crude", structural: bool = False) -> dict:
     """One replay of ``arm`` on ``scenario`` at ``window``, with the needed facts sorted and priced."""
     made: list[Any] = []
 
@@ -133,11 +184,14 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
         return made[-1]
 
     result = replay.run_session(factory, scenario=scenario, context_length=window, seed=seed, keep_final_request=True,
-                                summarizer_factory=ExtractiveSummarizer if summarizer == "extractive" else None)
+                                summarizer_factory=ExtractiveSummarizer if summarizer == "extractive" else None,
+                                script_transform=structural_variant if structural else None)
     metrics = result["metrics"]
     final = result.get("final_request") or []
     spec = registry.get_spec(scenario)
     script = spec.build(seed, spec.turns)
+    if structural:
+        script = structural_variant(script, seed)
     sizes = _tool_results(script)
     text = replay.visible_text(final)
     refs = list(dict.fromkeys(_REF_RE.findall(text)))
@@ -162,7 +216,7 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
     answered = max(1, metrics["turns"] - metrics["failed_turns"])
     base = metrics["total_simulated_input_cost"]
     return {
-        "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer,
+        "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer, "structural": structural,
         "base": round(base / answered, 1), "effective": round((base + extra) / answered, 1),
         "needed": len(kept) + len(recoverable) + len(lost),
         "kept": len(kept), "recoverable": len(recoverable), "lost": len(lost), "lost_unrecoverable": len(unrecoverable),

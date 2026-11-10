@@ -104,6 +104,34 @@ def test_effective_cost_matrix():
     windows = [int(w) for w in os.environ.get("TAMERU_P3_WINDOWS", "32000,48000,64000,128000,200000").split(",")]
     seeds = [int(s) for s in os.environ.get("TAMERU_P3_SEEDS", "0").split(",")]
     summarizer = os.environ.get("TAMERU_P3_SUMMARIZER", "crude")
-    rows = [protocol3.measure(arm, scenario, window, seed, summarizer=summarizer)
+    structural = os.environ.get("TAMERU_P3_STRUCTURAL", "") == "1"
+    rows = [protocol3.measure(arm, scenario, window, seed, summarizer=summarizer, structural=structural)
             for scenario in scenarios for window in windows for arm in arms for seed in seeds]
     Path(os.environ["TAMERU_P3_MATRIX"]).write_text(json.dumps(rows), encoding="utf-8")
+
+
+def test_a_structural_variant_changes_sizes_but_keeps_every_planted_fact_and_error_line():
+    import json
+
+    import scenario_registry as reg
+
+    spec = reg.get_spec("oncall")
+    base = spec.build(0, spec.turns)
+    sizes = []
+    for seed in (1, 2, 3):
+        varied = protocol3.structural_variant(base, seed)
+        assert varied is not base and varied.gold == base.gold and varied.error_lines == base.error_lines
+        assert [t.user for t in varied.turns] == [t.user for t in base.turns]
+        total = lambda s: sum(len(st.result) for t in s.turns for r in t.rounds for st in r.steps)
+        sizes.append(total(varied))
+        text = " ".join(st.result for t in varied.turns for r in t.rounds for st in r.steps)
+        for fact in base.gold:
+            if fact.source == "tool":
+                assert fact.needle in text or json.dumps(fact.needle, ensure_ascii=False)[1:-1] in text, fact.id
+        assert protocol3.structural_variant(base, seed).turns == varied.turns          # deterministic
+    assert len(set(sizes)) == 3 and protocol3.structural_variant(base, 0) is base      # really different; seed 0 is the script
+
+
+def test_structural_seeds_give_different_costs_for_one_arm():
+    costs = {protocol3.measure("stock_defaults", "oncall", 64_000, seed, structural=True)["base"] for seed in (0, 1, 2, 3)}
+    assert len(costs) == 4
