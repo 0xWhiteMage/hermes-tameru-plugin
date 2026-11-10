@@ -398,3 +398,20 @@ this shape; it does not say what a typical chat saves. Three more stock sessions
 commands, $0.078 to $0.103) and are left out because the task was not the same. An earlier "paused" arm was invalid (`/tameru pause`
 did not stop the cleanup; that chat still freed 62K tokens), so it is counted as a Tameru-on session.
 
+### Second live task: log-style outputs (inconclusive)
+
+Sixteen runs of a script printing 400 log lines (about 23,000 characters) ending in a distinct `ERROR code=...` line; the model was asked
+to list the sixteen codes.
+
+| Arm | Sessions | Tool calls | Cost per session |
+|---|---|---|---|
+| Tameru on | 2 | 7 and 7 (the model batched commands) | $0.3776, $0.3554 |
+| Stock | 1 (a second was skipped: the PC was in use) | 13 | $0.3381 |
+
+This does not compare like with like: the Tameru sessions took a different path (7 tool calls against 13), so the cost difference mixes
+Tameru's effect with the model's choice of path. Taken as it stands, Tameru was not cheaper here ($0.37 against $0.34, n = 2 against 1).
+The honest reading is that a live A/B with a free-running model cannot isolate a few percent: path variance is larger than the effect.
+The replay (fixed scripted sessions, paired by construction) stays the instrument for cost; live runs are for direction and for catching
+integration faults, which is what they found (the `mcp__` tool-name prefix). A fair live comparison would need a fixed sequence of tool
+calls (a scripted client), not a free-running model.
+
