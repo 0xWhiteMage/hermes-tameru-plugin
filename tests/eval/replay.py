@@ -414,6 +414,7 @@ class _Session:
         self, engine: Any, scenario: Scenario | None, estimate: Callable[[list[dict]], int] | None = None, *,
         realistic: bool = False, clock: VirtualClock | None = None, context_length: int = CONTEXT_LENGTH,
         max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
+        cache_ttl_s: float | None = None, idle_seconds: Callable[[int], float] | None = None,
     ) -> None:
         if estimate is None:  # Hermes' own rough estimator, as the host uses before a request
             from agent.model_metadata import estimate_messages_tokens_rough as estimate
@@ -424,6 +425,14 @@ class _Session:
         self.clock = clock
         self.window = int(context_length)
         self.max_attempts = int(max_compression_attempts)
+        # Optional cache lifetime (needs the virtual clock): a request sent more than ``cache_ttl_s`` seconds after the
+        # previous one finds the prefix cache expired and pays the write price for all of it. ``idle_seconds(n)`` is the
+        # pause before user turn ``n`` (the human's think time, which the default replay leaves out). Both default to
+        # None: the replay then behaves, and its saved baselines compare, exactly as before.
+        self.cache_ttl_s = None if cache_ttl_s is None else float(cache_ttl_s)
+        self.idle_seconds = idle_seconds
+        self.cache_expiries = 0
+        self._last_sent_at: float | None = None
         schemas = getattr(engine, "get_tool_schemas", None)
         extra_schemas = schemas() if callable(schemas) else []
         extra_wire = json.dumps(extra_schemas, ensure_ascii=False, sort_keys=True) if extra_schemas else ""
@@ -576,6 +585,9 @@ class _Session:
         """A new user turn: Hermes' per-turn compression budget and failure flag start over."""
         self.turn_attempts = 0
         self.turn_failed = False
+        self.user_turns = getattr(self, "user_turns", 0) + 1
+        if self.idle_seconds is not None and self.clock is not None and self.user_turns > 1:
+            self.clock.advance(float(self.idle_seconds(self.user_turns)))
         # The plugin's pre_llm_call hook runs once per turn and takes one bounded step of its host-settings tuning.
         # Only engines built for that comparison (``replay_runs_host_tuning``) do it here, so the older arms and
         # their saved baselines measure exactly what they always did.
@@ -743,10 +755,17 @@ class _Session:
                     lcp += _common_prefix_len(a, b)
                     break
             lcp = min(lcp, self._prev_total, total)
+        expired = (self.cache_ttl_s is not None and self.clock is not None and self._last_sent_at is not None
+                   and self.clock.elapsed - self._last_sent_at > self.cache_ttl_s)
+        if expired:         # the provider dropped the prefix while nobody was asking: everything is written again
+            lcp = 0
+            self.cache_expiries += 1
+        if self.clock is not None:
+            self._last_sent_at = self.clock.elapsed
         new_chars = total - lcp
         self.cost_x100 += round(CACHE_READ * 100) * lcp + round(CACHE_WRITE * 100) * new_chars
         self.cost_uncached += 100 * total
-        invalidated = (self._prev_total - lcp) if self._prev_wire is not None else 0
+        invalidated = (self._prev_total - lcp) if (self._prev_wire is not None and not expired) else 0
         if invalidated > 0:
             self.prefix_breaks += 1
         self.request_chars.append(total)
@@ -787,6 +806,7 @@ def run_session(
     engine_factory: Callable[[], Any], *, turns: int | None = None, seed: int = 0, keep_final_request: bool = False,
     context_length: int = CONTEXT_LENGTH, scenario: str = DEFAULT_SCENARIO, realistic: bool = True,
     seconds_per_request: float = SECONDS_PER_REQUEST, max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
+    cache_ttl_s: float | None = None, idle_seconds: Callable[[int], float] | None = None,
 ) -> dict:
     """Replay the scripted session against ``engine_factory()`` and return the metrics.
 
@@ -815,7 +835,7 @@ def run_session(
         prepare_engine(engine, context_length)
         sess = _Session(
             engine, script, realistic=realistic, clock=clock, context_length=context_length,
-            max_compression_attempts=max_compression_attempts,
+            max_compression_attempts=max_compression_attempts, cache_ttl_s=cache_ttl_s, idle_seconds=idle_seconds,
         )
         summarizer, final = _play(sess, script, seed)
     return _result(sess, summarizer, final, script, engine, turns, seed, context_length, scenario, realistic,
@@ -999,6 +1019,9 @@ def _result(
                            "input_mutations": len(sess.input_mutations),
                            "input_mutation_details": sess.input_mutations[:10]},
     }
+    if sess.cache_ttl_s is not None:     # only when asked for, so the saved baselines (compared whole) keep their shape
+        metrics["cache_ttl_s"] = sess.cache_ttl_s
+        metrics["cache_expiries"] = sess.cache_expiries
     series = {
         "request_chars": sess.request_chars,
         "cached_chars": sess.cached_chars,
