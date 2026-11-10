@@ -13,9 +13,9 @@ store or the session archive. Viewing an original does not by itself restore it 
 `/tameru restore|keep REF`) show the full original on the next requests and never edit saved history. Hermes still
 decides when to prune, which rows, and whether a pass commits.
 
-Measurements: [docs/REPORT-1.7.0.md](docs/REPORT-1.7.0.md) (the replay of the 1.7.0 candidate; the extraction engine is
-unchanged apart from two later fixes). Validation of the 1.8.0 additions, with what was and was not run:
-[docs/RELEASE-1.8.0.md](docs/RELEASE-1.8.0.md). Changes by version: [CHANGELOG.md](CHANGELOG.md).
+Measurements: [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md) (the current replay results, what was tried and
+rejected, and the live checks); the older [docs/REPORT-1.7.0.md](docs/REPORT-1.7.0.md). Validation of the 1.8.0 additions, with what was and
+was not run: [docs/RELEASE-1.8.0.md](docs/RELEASE-1.8.0.md). Changes by version: [CHANGELOG.md](CHANGELOG.md).
 Releasing: [docs/RELEASING.md](docs/RELEASING.md). When something looks wrong: [docs/RUNBOOKS.md](docs/RUNBOOKS.md).
 
 ## Two repositories
@@ -29,26 +29,32 @@ what, where a change belongs, and how releases flow between them: [docs/REPOSITO
 
 ## At a glance
 
-A frozen replay of the 1.7.0 candidate compares 60 scripted sessions per arm against Hermes
-`a0a49926`: five session shapes, six windows from 32K to 256K, and two seeds.
-It uses real Hermes imports, a simulated clock and a lossy fake summarizer.
-[Protocol, raw captures and limitations](docs/REPORT-1.7.0.md).
+Everything below comes from a **replay**: scripted agent sessions run against real Hermes imports with a simulated clock, prefix-cache
+pricing and a deliberately lossy fake summarizer. It does not measure live-agent task success or real provider bills (the live evidence is a
+handful of manual checks with Claude Haiku on Hermes Desktop, listed in [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md)).
+Hermes commit `2bd378ed` (v0.23), 11 session shapes, five context windows from 32K to 200K, six seeds.
 
-| Over 60 scripted sessions | Stock Hermes | With Tameru |
-|---|---:|---:|
-| Turns failing after context-overflow recovery | 76 | **0** |
-| Required snippets present in the final requests | 705 / 1,044 | **859 / 1,044** |
-| Error-template opportunities retained | 510 / 1,056 | **940 / 1,056** |
-| Fake-summary calls standing in for LLM summaries | 106 | **48** |
-| Potential re-fetch calls identified from missing facts | 228 | **146** |
+**Cost against Hermes as shipped** (mean over the 11 shapes; negative is cheaper). The second row also prices what an arm loses: a fact it
+dropped costs a re-run of the tool, a fact it only holds behind a `tameru_read_original` call costs that call.
 
-Mean paired **simulated input-cost change was −3.21%**; Tameru cost more in
-12 of 60 pairs. This is total input cost per scripted session, not the older
-cost-per-answered-turn statistic. Some stock runs failed turns; the report also
-shows completed-pair results and scenario differences.
+| | 32K | 48K | 64K | 128K | 200K |
+|---|---:|---:|---:|---:|---:|
+| Input cost | -7.4% | -2.7% | -0.8% | -5.7% | -4.0% |
+| Input cost, with lost and recoverable facts priced | -8.4% | -5.0% | -2.4% | -7.3% | -4.3% |
 
-These checks measure literal retention and simulated prefix-cache cost. They do
-not measure live-agent task success, actual provider bills or executed re-fetches.
+Needed facts across all cells: Hermes keeps 1,345 and loses 355 (91 cannot be re-run); Tameru keeps 1,511, can read back 48 more, and loses 141 (30).
+
+**When Tameru costs more.** Be aware of these before turning it on:
+
+- **A session that never reaches a compaction costs 3% to 5% more** (+3.2% to +5.1% in the five such shapes, at every window). The cause is the
+  one tool, `tameru_read_original`, listed on every request. `expand_tool: false` removes it, and with it the ability to read an original back.
+- **Many small results cost more on small windows.** With results of 800 to 3,000 characters the plugin costs +10.5% at 32K, +4.0% at 48K and +1.4% at 64K
+  (it still loses fewer needed facts than Hermes). There is no loss at 128K and above beyond the tool above.
+- **Per-turn note and self-tuning are not free.** With the note running, the replay costs 0.2% to 1.0% more on average and up to 6.8% in one cell; self-tuning
+  has not been shown to help (switching it off is slightly cheaper at 32K to 64K).
+- At a 200K window the plugin prunes before Hermes would compact and keeps two or three fewer facts than Hermes in three shapes; the tool reads them back.
+
+[Protocol and raw results](docs/COST-TUNING-2026-11-10.md); the older 1.7.0 replay is kept in [docs/REPORT-1.7.0.md](docs/REPORT-1.7.0.md).
 
 ## What it does
 
@@ -88,7 +94,8 @@ the plugin turns it on with a trigger that follows the model's window, re-derive
 
 After a prune, the next one may fire once the prompt has regrown by 20% of the threshold, and a repeat prune on a
 large window only goes ahead if it brings the prompt down to 30% of the threshold or less, so it is worth the
-prompt-cache break. The minimum result size for pruning is Hermes' own 8,000 characters.
+prompt-cache break. The proactive prune keeps Hermes' own minimum result size of 8,000 characters; a full compaction prunes results from 1,000 characters, so the
+summarizer reads stubs instead of raw rows.
 
 ### Properties
 
@@ -169,7 +176,7 @@ changes if the folder and the value change together. `scripts/use_display_name.p
 `-Apply` to do it, `-Revert` to undo):
 
 ```powershell
-pwsh scripts/use_display_name.ps1 -Apply     # plugins	ameru -> plugins	ameru_(ためる), context.engine to match
+pwsh scripts/use_display_name.ps1 -Apply     # plugins\tameru -> plugins\tameru_(ためる), context.engine to match
 ```
 
 The plugin's own id stays `tameru` (it comes from `plugin.yaml`), so `plugins.enabled`, `plugins.entries.tameru` and the
@@ -409,13 +416,11 @@ MIT, same as upstream Tameru. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md
 
 ### Compaction policy mode
 
-Existing Tameru configuration stays on **Legacy** unless an explicit `policy_mode` or a new
-preference/timing/recent control selects adaptive. Enable this chat with
-`/tameru policy mode=adaptive`. To persist the adaptive default, set
-`plugins.entries.tameru.settings.policy_mode: adaptive`. Input/output budget settings alone do not
-switch the retention policy. Direct unconfigured settings default to adaptive.
+**Adaptive is the default**, with or without any Tameru configuration. `legacy` (the fixed prune gates of 1.6) and `fixed` (a comparison aid) stay available:
+set `plugins.entries.tameru.settings.policy_mode: legacy`, or switch one chat with `/tameru policy mode=legacy`. Legacy is not cheaper than adaptive
+in the replay once lost and recoverable facts are priced, except by 0.7 points at 32K; it is kept as a fallback and is not tuned further.
 
-### Self-tuning and compression progress (unreleased)
+### Self-tuning and compression progress
 
 In adaptive mode Tameru tunes itself while a chat runs (`autotune`, on by default; `TAMERU_AUTOTUNE=off`
 returns to the fixed table). It starts at the old "balanced" numbers and moves them in small, bounded steps
@@ -480,5 +485,5 @@ the compaction status line and the post-commit chat line were checked on Hermes'
 Hermes does not let a plugin rewrite saved history, so recovery adds information instead of editing the past. The
 agent is also told, in a short note frozen into each new session, that lines which are not shown are not absent from
 the original, and to call `tameru_read_original` with a grep or line range before relying on a detail. Originals that
-looked like they held credentials are never stored, so a miss there is expected. Pinning an output so future
-compactions keep it is planned, not built yet.
+looked like they held credentials are never stored, so a miss there is expected. To keep an output in front of the model, use **Keep** (Desktop,
+or `/tameru keep REF`); to keep a line of your own through every summary, use `/tameru pin`.
