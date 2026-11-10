@@ -96,7 +96,7 @@ _INSTRUCTION_RE = re.compile(
     r"|\b(?:system|assistant|developer)\s*(?:prompt|message|instruction)s?\b"
     r"|^\s*(?:note|important|instructions?|system|assistant|user)\s*:"
     r"|\btameru\b[^\n]{0,24}\b(?:verified|says|checked|confirms?|instructs?|notes?|system|trail)\b"
-    r"|</?\s*(?:tameru|system|instructions?)\b"
+    r"|</?\s*(?:tameru\w*|system|instructions?)\b"            # also <tameru_note ...>: \b alone stops at the underscore
     r"|\bnext\s+step\b[^\n]{0,16}\b(?:run|execute|call|curl|wget|upload|send|delete)\b",
     re.IGNORECASE,
 )
