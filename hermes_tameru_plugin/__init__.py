@@ -51,7 +51,11 @@ def _build_engine(settings: TameruSettings) -> TameruContextEngine:
 
 
 def register(ctx: Any) -> None:
-    """Register the engine with the settings of ``plugins.entries.tameru`` (never raises)."""
+    """Register the engine with the settings of ``plugins.entries.tameru`` (never raises).
+
+    With ``enabled: false`` only the engine (which then behaves as Hermes' own compressor) and the ``/tameru`` command
+    are registered: no hook and no system-prompt note, so every request is the one stock Hermes would send. The note
+    is also left out when ``expand_tool`` is off, because it tells the model to call a tool that is then not listed."""
     try:
         settings, warnings = load_settings(ctx)
         for warning in warnings:
@@ -59,11 +63,13 @@ def register(ctx: Any) -> None:
         engine = _build_engine(settings)
     except Exception as exc:
         logger.warning("tameru: engine setup failed (%r); registering it with defaults", exc)
+        settings = TameruSettings()
         try:
-            engine = _build_engine(TameruSettings())
+            engine = _build_engine(settings)
         except Exception as fallback_exc:
             logger.warning("tameru: engine unavailable: %r", fallback_exc)
             return
+    active = bool(settings.enabled)
     try:
         ctx.register_context_engine(engine)
     except Exception as exc:
@@ -92,7 +98,7 @@ def register(ctx: Any) -> None:
         register_hook = getattr(ctx, 'register_hook', None)
         # The directory-only engine collector inherits a no-op hook method.
         # A general-plugin context owns real hook registrations and their lease.
-        if callable(register_hook) and isinstance(getattr(ctx, 'plugin_id', None), str):
+        if active and callable(register_hook) and isinstance(getattr(ctx, 'plugin_id', None), str):
             register_hook('pre_api_request', engine._activity_registry.observe_request)
             register_hook('post_api_request', engine._activity_registry.observe_response)
             register_hook('api_request_error', engine._activity_registry.observe_request_error)
@@ -102,7 +108,8 @@ def register(ctx: Any) -> None:
         logger.warning('tameru: could not register request observer: %r', exc)
     try:
         add_section = getattr(ctx, 'register_system_prompt_section', None)
-        if callable(add_section) and isinstance(getattr(ctx, 'plugin_id', None), str):
+        if (active and settings.expand_tool and callable(add_section)
+                and isinstance(getattr(ctx, 'plugin_id', None), str)):
             add_section('tameru.recovery', RECOVERY_NOTE, position='after_memory', max_chars=600)
     except Exception as exc:                       # an optional prompt note must never stop the engine registering
         logger.warning('tameru: could not register the recovery note: %r', exc)
