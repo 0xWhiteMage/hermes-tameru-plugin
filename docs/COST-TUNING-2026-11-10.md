@@ -1,7 +1,7 @@
 # Cost tuning against Hermes as shipped (2026-11-10)
 
 Goal: adaptive (the default) and legacy should cost no more than Hermes as shipped. Measured with `tests/eval/test_cost_matrix.py`
-(replay, cost per answered turn, cache-aware pricing; see `docs/DEVELOPMENT.md`). Gold-fact retention was never below stock in any cell.
+(replay, cost per answered turn, cache-aware pricing; see `docs/DEVELOPMENT.md`). Gold-fact retention was never below stock in any cell up to a 128K window; at 200K the plugin keeps 1-2 fewer facts than stock in three scenarios (default, refactor, i18n), because it prunes before any compaction is needed (see the Phase 0 section at the end).
 
 ## What changed
 1. One tool is listed (`tameru_read_original`); the old name is still answered. Saves one copy of the schema per request.
@@ -63,3 +63,19 @@ Run with `TAMERU_COST_SEEDS=0,1,2,3,4,5` over `stock_defaults`, `plain_masking`,
 - **Plain masking** costs 5-63% more than stock in most compacting cells and keeps fewer gold facts than adaptive in every one.
 - **Host tuning (the plan's gate "host on is at least host off") failed at 128K, found and fixed:** host on kept 11 fewer gold facts than off in 12 of 66 cell-seeds and cost 2-6% more in default and refactor. An A/B showed the protected-tail half was inert and the threshold half was the cause: Tameru's own prune trigger and budgets were sized from Hermes' tuned threshold, so raising Hermes' summary threshold also delayed Tameru's pruning. Tameru's policy now uses the threshold the user configured (`_policy_threshold_tokens`, remembered while untuned); host tuning only moves when Hermes summarises. Re-run at 64K and 128K, seeds 0-5, all scenarios: host on equals host off in every cell (no cost difference over 0.05%, gold delta 0). Regression test: `test_tameru_prunes_from_the_configured_threshold_not_the_tuned_one`.
 - **Probe types:** `tests/eval/scenarios_probes.py` adds a 24-turn `directives` scenario (not in the registry, so the saved baselines are untouched; `test_probe_scenario.py` registers it for one run) with three of the plan's four probe types: a standing user instruction (I1, I2), a rejected theory (R1, R2) and a superseded setting (S1, S2). At 32K and 48K, seeds 0-1, stock Hermes (three or four compactions) loses I2 and S2; adaptive and legacy keep all six in every cell. The fourth type is `test_every_ref_in_the_final_request_resolves` in the same file: after compaction in the 32K replay, every `ref=` left in the final request is read back through `tameru_read_original`.
+
+## Phase 0 measurement (2026-11-10, commit after `7cce52c`): the product as shipped, five windows, six seeds
+
+1,980 replays: 11 scenarios x 32K/48K/64K/128K/200K x seeds 0-5 x six arms. Means over scenarios and seeds, cost against the named reference.
+
+| Comparison | 32K | 48K | 64K | 128K | 200K |
+|---|---|---|---|---|---|
+| Product vs stock | -7.4% | -2.7% | -0.8% | -5.7% | -4.0% |
+| Host tuning on vs off | -0.6% | 0.0% | 0.0% | 0.0% | 0.0% |
+| As shipped (host step and per-turn note run) vs product | +0.9% | +1.0% | +0.4% | +0.2% | 0.0% |
+| Autotune off vs on | -0.7% | -1.4% | -0.2% | 0.0% | 0.0% |
+
+- **Host tuning does nothing except at 32K**, where it helps in three scenarios only (default -4.5%, oncall -1.3%, refactor -0.4%) and loses no fact. Keeping it off by default costs that 0.6%.
+- **The per-turn note costs 0.2-1.0% on average and up to 6.8% in one cell** (it is stored in the user message, so every later request carries it), and at 32K/48K the as-shipped arm keeps 6 and 12 fewer gold facts than the product arm across all cells. The note was unpriced before.
+- **Autotune off is cheaper at 32K/48K/64K and keeps more facts** (+11, +5, +4 across cells), so self-tuning is not shown to help.
+- Raw rows: `phase0-matrix.json` (kept outside the repository; regenerate with the command in `tests/eval/test_cost_matrix.py`).
