@@ -59,7 +59,7 @@ def test_defaults_match_the_contract():
         "enabled": True, "min_tool_chars": 400, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
         "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (), "anchor_errors": True, "prose_brief": True,
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
-        "policy_mode": "adaptive", "autotune": True, "manifest": True, "edits": True, "pins": True, "adaptive_host": False, "learned_priors": False, "lazy_tool": False, "preference": "balanced", "activation": "auto", "recent_protection": "auto",
+        "policy_mode": "adaptive", "autotune": True, "manifest": True, "edits": True, "pins": True, "adaptive_host": False, "learned_priors": False, "lazy_tool": False, "net_estimate": False, "stats_ledger": False, "preference": "balanced", "activation": "auto", "recent_protection": "auto",
         "input_budget_tokens": None, "output_reserve_tokens": None,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "small_window_threshold_tokens": 54_400, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.75, "small_window_prune_ratio": 0.60,
@@ -96,6 +96,8 @@ ENV_SAMPLES = {
     "edits": ("off", False),
     "adaptive_host": ("on", True),
     "learned_priors": ("on", True),
+    "net_estimate": ("on", True),
+    "stats_ledger": ("on", True),
     "lazy_tool": ("on", True),
     "pins": ("off", False),
     "preference": ("Preserve-detail", "preserve_detail"),
@@ -928,7 +930,7 @@ def test_documented_short_switches_turn_features_off(name):
     assert getattr(settings, name) is False
 
 
-@pytest.mark.parametrize("name", ["adaptive_host", "learned_priors", "lazy_tool"])
+@pytest.mark.parametrize("name", ["adaptive_host", "learned_priors", "lazy_tool", "net_estimate", "stats_ledger"])
 def test_documented_short_switches_turn_the_off_by_default_features_on(name):
     settings, _warnings = load_settings(env={"TAMERU_" + name.upper(): "on"})
     assert getattr(settings, name) is True

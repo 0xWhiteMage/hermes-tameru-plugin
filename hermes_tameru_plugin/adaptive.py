@@ -98,6 +98,7 @@ class PolicyRuntime:
         self.events: deque[dict] = deque(maxlen=_EVENTS)    # scalars + short reason codes, never text
         self.saved_tokens = 0               # cumulative reclaim of this session's Tameru commits
         self.commit_count = 0
+        self.cost_events: deque = deque(maxlen=64)   # (removed tokens, rewritten suffix tokens or None, replies so far), for net_estimate
         self.host_notice = False            # Hermes compacted ahead of Tameru; cleared by the next check
 
     def _fresh(self) -> "PolicyRuntime":
@@ -486,6 +487,7 @@ class AdaptiveMixin:
             required = plan.required_reclaim(suffix)
             stage_scope.native_options["proactive_prune_min_reclaim_tokens"] = required
             stage_scope.policy_after_tokens = after
+            stage_scope.policy_suffix_tokens = suffix
             if gain < required:
                 continue
             entry = (stage_scope, candidate, n, held)
@@ -530,6 +532,11 @@ class AdaptiveMixin:
             self._policy.host_notice = False
             self._policy.saved_tokens += max(0, reclaim)
             self._policy.commit_count += 1
+            if getattr(self._settings, "stats_ledger", False) and reclaim > 0:
+                from .stats_ledger import record_cleanup
+                record_cleanup(int(reclaim))
+            self._policy.cost_events.append((max(0, reclaim), getattr(scope, "policy_suffix_tokens", None),
+                                             getattr(self, "_responses", 0)))
             changes = list(getattr(scope, "changes", {}).values())[:8]
             refs = [c.ref for c in changes if isinstance(getattr(c, "ref", None), str)]
             tools = []

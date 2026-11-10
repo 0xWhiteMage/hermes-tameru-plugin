@@ -25,6 +25,7 @@ HELP_LINES = (
     ("/tameru policy [key=value ...]", "show or set the compaction policy; `policy reset` for the defaults"),
     ("/tameru stats", "numbers for this chat: context freed, outputs shortened, cache use"),
     ("/tameru reset [confirm]", "put this chat's self-tuning back to neutral (lists what it clears first)"),
+    ("/tameru reset stats [confirm]", "delete the daily stats ledger (only exists with stats_ledger: on)"),
 )
 HELP_FOOTER = ("Most verbs need the Desktop app, CLI or TUI; in a shared chat only `/tameru`, `changes`, `help` and `stats` work. "
                "Add --json for machine-readable output. Turn Tameru off with `enabled: false` in its settings.")
@@ -59,6 +60,12 @@ def stats_text(snapshot: dict, usage: dict) -> str:
                      + (f", {usage['api_ms']} ms" if usage.get("api_ms") is not None else ""))
     else:
         lines.append("  Last reply           nothing reported yet")
+    net = snapshot.get("net_estimate")
+    if net is not None:
+        lines.append("  Net estimate         " + net)
+    week = snapshot.get("ledger_week")
+    if week:
+        lines.append(f"  Last 7 days          {week['cleanups']} cleanups, {fmt_tokens(week['tokens'])} tokens removed, on {week['active_days']} days (all chats)")
     lazy = doctor.get("lazy_tool")
     if lazy:
         lines.append("  Recovery tool        " + ", ".join(f"{state} {count}" for state, count in lazy.items()) + " (requests)")
@@ -73,7 +80,18 @@ def stats_text(snapshot: dict, usage: dict) -> str:
 def stats_command(engine, parts, **_context) -> dict:
     if parts:
         raise PolicyError("Use /tameru stats.")
-    return {"ok": True, "kind": "stats", "text": stats_text(engine.activity_snapshot(), engine.usage_snapshot())}
+    snapshot = dict(engine.activity_snapshot())
+    if getattr(engine._settings, "net_estimate", False):
+        from .net_estimate import describe, estimate
+
+        with engine._activity.lifecycle_lock:
+            events = list(engine._policy.cost_events)
+        snapshot["net_estimate"] = describe(estimate(events, getattr(engine, "_responses", 0)))
+    if getattr(engine._settings, "stats_ledger", False):
+        from .stats_ledger import summary
+
+        snapshot["ledger_week"] = summary(7)
+    return {"ok": True, "kind": "stats", "text": stats_text(snapshot, engine.usage_snapshot())}
 
 
 def reset_plan(engine) -> list[str]:
@@ -96,6 +114,18 @@ def reset_plan(engine) -> list[str]:
 def reset_command(engine, parts, *, session_id, lifecycle_id, json_mode, **_context) -> dict:
     from .session_tuner import reset_chat
 
+    if parts[:1] == ["stats"]:
+        from .stats_ledger import purge, summary
+
+        if parts[1:] == ["confirm"]:
+            return {"ok": True, "kind": "reset", "done": True, "cleared": ["stats ledger"],
+                    "text": "Stats ledger deleted." if purge() else "There was no stats ledger to delete."}
+        if parts[1:]:
+            raise PolicyError("Use /tameru reset stats, then /tameru reset stats confirm.")
+        week = summary(90)
+        return {"ok": True, "kind": "reset", "done": False, "cleared": [],
+                "text": ("The stats ledger holds daily totals only (%d cleanups, %s tokens over %d days). Run /tameru reset stats confirm to delete it."
+                         % (week["cleanups"], fmt_tokens(week["tokens"]), week["active_days"])) if week else "The stats ledger is empty."}
     if len(parts) > 1 or (parts and parts[0] not in ("confirm", "preview")):
         raise PolicyError(RESET_HELP)
     plan = reset_plan(engine)

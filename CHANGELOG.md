@@ -5,6 +5,20 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added (gauntlet of 2026-11-10, phase 6; both off by default)
+- **`net_estimate: on`** adds a signed "Net estimate" line to `/tameru stats`: for each cleanup, tokens removed x replies since x 0.10
+  (cache read) minus the rewritten suffix x 1.15 (cache write premium). Uncached-input-token equivalents, an estimate, not a bill;
+  a cleanup without a measured rewrite (a full compaction pass) is named as leaning toward saving. `TAMERU_NET_ESTIMATE=on`.
+- **`stats_ledger: on`** keeps daily totals of cleanups and tokens removed (no chat ids, text, tool names or paths) in
+  `$HERMES_HOME/tameru/stats-ledger.json`, 90 days, written under a lock, shown only in `/tameru stats` ("Last 7 days"), never read
+  by policy code (a test checks that). `/tameru reset stats` shows what it holds; `/tameru reset stats confirm` deletes it.
+  `TAMERU_STATS_LEDGER=on`.
+
+### Fixed
+- **`lazy_tool` now finds the recovery tool on the Anthropic subscription route,** where Hermes sends every tool name with an
+  `mcp__` prefix. Seen live on Desktop (Haiku 4.5): before the fix the tool was in the request and never matched; after it, a fresh
+  chat reports `hidden`. `/tameru stats` now says why a request was left alone.
+
 ### Changed (defaults and wording; gauntlet of 2026-11-10, phase 1)
 - **Host tuning and learned priors are off by default** (`adaptive_host`, new `learned_priors`). Measured over 1,980 replays: host
   tuning changes nothing above a 32K window and helps in three scenarios at 32K (up to 4.5%); learned priors had no measurement

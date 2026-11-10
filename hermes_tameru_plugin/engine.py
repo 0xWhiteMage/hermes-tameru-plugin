@@ -265,6 +265,7 @@ class _Pass:
     native_options: dict = field(default_factory=dict)  # per-pass native gate overrides
     policy_before_tokens: int = 0               # body tokens before the plan's stage
     policy_after_tokens: "int | None" = None    # body tokens after the selected stage
+    policy_suffix_tokens: "int | None" = None   # tokens from the first changed message to the end (the rewritten cache suffix)
     policy_stage_index: int = 0
     full_local: bool = False
     prepared_prune: Any = None                  # one native replay: input, candidate, count, held telemetry
@@ -746,6 +747,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
             def count(key):
                 value = usage.get(key)
                 return value if type(value) is int and value >= 0 else None
+            self._responses = getattr(self, "_responses", 0) + 1
             self._usage_ring.append((count("prompt_tokens"), count("cache_read_tokens"),
                                      count("cache_write_tokens"), count("input_tokens")))
         except Exception:
