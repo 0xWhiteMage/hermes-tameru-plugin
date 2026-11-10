@@ -43,53 +43,23 @@ MIN_COMPACTIONS = {"oncall": 2, "refactor": 1, "smallrows": 1, "i18n": 1}  # of 
 
 #: ``(scenario, check, engine)`` -> why the plugin loses it (measured numbers; see docs/REPORT-1.4.1.md section 9).
 KNOWN_LOSSES: dict[tuple[str, str, str], str] = {
-    ("smallrows", "cost", "tameru_1_4_product"): (
-        "LOSS +1.7%: 1,725,663 vs Hermes as shipped 1,696,390 char-eq (seed 0; was +2.0% before the summarizer read a Tameru row "
-        "as Hermes' line: summary prompts 69,360 chars, were 81,833, Hermes 53,085). Since the plugin's prune floor is Hermes' own "
-        "8,000 chars (it was 2,000: +21.7% here, small prunes paying full-suffix cache rewrites), no row of this scenario is "
-        "pruned and the run equals the equal-gates one: the loss is the summary's Artifact Trail (2.5K) and the Anchor Index "
-        "lines for the error templates it keeps (79,378 vs 75,264 chars after the first compaction; the same run without the "
-        "ledger is +0.3%), which buys 21/38 error templates against 10/38."
-    ),
-    ("smallrows", "gold:decision", "tameru_1_4_product"): (
-        "LOSS 3/4 vs 4/4 decision facts (seed 0): D3, as for tameru_1_4 below (the run is identical since the 8,000-char prune "
-        "floor): the plugin's first compaction keeps 68 messages against Hermes' 94, so the user turn carrying D3 falls into the "
-        "first summary and the fake summarizer drops it."
-    ),
-    ("refactor", "cost", "tameru_1_4"): (
-        "LOSS +1.8%: 1,526,442 vs stock (prune on at 48K) 1,499,065 char-eq (seed 0; +1.9..+6.7% over seeds 0-3 before the summary view). Same single prune (request 29) "
-        "and compaction (57) as stock, but every context after a rewrite is 3-4K chars bigger: 86,310 vs 83,078 after the "
-        "prune (brief/errors/header text where stock keeps 80-character one-liners) and 56,153 vs 52,430 after the compaction "
-        "(Artifact Trail + Errors ledger in the summary). That is the price of 9/9 error templates (stock 1/9)."
-    ),
-    ("smallrows", "cost", "tameru_1_4"): (
-        "LOSS +1.7%: 1,725,663 vs stock 1,696,390 char-eq (seed 0; was +2.0%, +1.3..2.1% over seeds 0-3, before the summary view). Neither engine "
-        "prunes (no 8,000-char result exists); both compact at requests 41 and 79. The plugin's summary carries the Artifact "
-        "Trail and the Anchor Index lines of the error templates: 79,378 vs 75,264 chars after the first compaction and 78,657 vs "
-        "75,760 after the second, bought 21/38 error templates against 10/38."
-    ),
-    ("smallrows", "gold:decision", "tameru_1_4"): (
-        "LOSS 3/4 vs 4/4 decision facts (HEAD b7bb68c, seed 0): D3 (user, 'Do not bump its base image until its schema migration "
-        "has shipped') is missing. Hermes quotes the user messages of the compacted region verbatim; the plugin's first "
-        "compaction keeps 68 messages (stock: 94, whose old tool rows are 80-character stubs), so the 'inventory.' and 'ledger.' "
-        "user turns fall into the first summary, not the second one's verbatim section, and the fake summarizer drops them. The "
-        "plugin's own larger rows (briefs, extracts) take the token budget of the tail walk."
-    ),
-    ("oncall", "cost", "tameru_1_4"): (
-        "LOSS +1.3%: 2,055,836 vs 2,029,526 char-eq (seed 0)."
-    ),
-    # Held-out recipes: the session never reaches the plugin's trigger on a 64K window, so the only delta is the
-    # declared recovery/activity schemas the shipped engines price per request.
-    ("longform", "cost", "tameru_1_4_product"): "LOSS +6.5%: 268,903 vs 252,597 char-eq (seed 0): under-trigger schema delta.",
-    ("longform", "cost", "tameru_1_4"): "LOSS +6.5%: 268,903 vs 252,597 char-eq (seed 0): under-trigger schema delta.",
-    ("mixedlang", "cost", "tameru_1_4_product"): "LOSS +8.4%: 209,505 vs 193,198 char-eq (seed 0): under-trigger schema delta.",
-    ("mixedlang", "cost", "tameru_1_4"): "LOSS +8.4%: 209,505 vs 193,198 char-eq (seed 0): under-trigger schema delta.",
-    ("diagnostics", "cost", "tameru_1_4_product"): "LOSS +9.1%: 183,043 vs 167,780 char-eq (seed 0): under-trigger schema delta.",
-    ("diagnostics", "cost", "tameru_1_4"): "LOSS +9.1%: 183,043 vs 167,780 char-eq (seed 0): under-trigger schema delta.",
-    ("rereads", "cost", "tameru_1_4_product"): "LOSS +10.0%: 167,417 vs 152,154 char-eq (seed 0): under-trigger schema delta.",
-    ("rereads", "cost", "tameru_1_4"): "LOSS +10.0%: 167,417 vs 152,154 char-eq (seed 0): under-trigger schema delta.",
-    ("dense", "cost", "tameru_1_4_product"): "LOSS +10.2%: 165,297 vs 150,035 char-eq (seed 0): under-trigger schema delta.",
-    ("dense", "cost", "tameru_1_4"): "LOSS +10.2%: 165,297 vs 150,035 char-eq (seed 0): under-trigger schema delta.",
+    # Why each check is lost. The measured numbers are in known_loss_numbers.json (test_known_loss_numbers.py keeps them current).
+    ('smallrows', 'cost', 'tameru_1_4_product'): 'nothing is prunable (every result is under the prune floor); the cost is the Artifact Trail and the anchor lines in the compaction summaries',
+    ('smallrows', 'gold:decision', 'tameru_1_4_product'): "D3, a user decision: the plugin's first compaction keeps fewer messages, so the turn carrying it falls into the first summary and the fake summarizer drops it",
+    ('refactor', 'cost', 'tameru_1_4'): 'equal gates: the same prune and compaction as stock, but each rewritten context is larger (briefs, error lines, the trail)',
+    ('smallrows', 'cost', 'tameru_1_4'): 'nothing is prunable (every result is under the prune floor); the cost is the Artifact Trail and the anchor lines in the compaction summaries',
+    ('smallrows', 'gold:decision', 'tameru_1_4'): "D3, a user decision: the plugin's first compaction keeps fewer messages, so the turn carrying it falls into the first summary and the fake summarizer drops it",
+    ('oncall', 'cost', 'tameru_1_4'): "equal gates: each rewritten context is larger than stock's",
+    ('longform', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('longform', 'cost', 'tameru_1_4'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('mixedlang', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('mixedlang', 'cost', 'tameru_1_4'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('diagnostics', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('diagnostics', 'cost', 'tameru_1_4'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('rereads', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('rereads', 'cost', 'tameru_1_4'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('dense', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('dense', 'cost', 'tameru_1_4'): "under the trigger: the only difference is the plugin's tool schema on every request",
 }
 
 _CACHE: dict[tuple[str, str], list[dict]] = {}

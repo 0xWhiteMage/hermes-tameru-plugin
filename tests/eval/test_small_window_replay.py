@@ -42,40 +42,27 @@ ENGINES = ("stock_defaults", "tameru_1_4_product")
 
 #: ``(scenario, check, engine)`` -> why the plugin loses it (measured numbers, seed 0, 20 s per request, 32K window).
 KNOWN_LOSSES: dict[tuple[str, str, str], str] = {
-    ("smallrows", "cost", "tameru_1_4_product"): (
-        "LOSS +8.9%: 1,350,518 vs 1,240,606 char-eq (seed 0). Nothing overflows (99 requests, no failed turn); the plugin "
-        "compacts 6 times (requests 20, 31, 40, 60, 73, 96) against 5 (20, 32, 44, 64, 77): 6.85M vs 6.36M input chars and "
-        "530,969 vs 445,253 invalidated chars, for 11/38 error templates against 10/38. No row is prunable here (every "
-        "result is under the prune floor), so the cost is the compaction summaries: the artifact trail and the anchor "
-        "index lines of the error templates the plugin keeps."
-    ),
-    ("smallrows", "compactions", "tameru_1_4_product"): (
-        "LOSS 6 compactions vs 5 (seed 0): the plugin compacts earlier each time (31 vs 32, 40 vs 44, 60 vs 64, 73 vs 77) "
-        "and a sixth one at 96 falls before the end."
-    ),
-    # Measured on Hermes v0.23 (cost per answered turn, seed 0): Hermes as shipped / the plugin as shipped (adaptive default).
-    # The plugin in ``policy_mode: legacy`` costs 34,453 and 23,255 here: the loss is the adaptive default's price.
-    # Held-out recipes never reach the plugin's trigger at 32K: the delta is the declared recovery/activity schemas.
-    ("longform", "cost", "tameru_1_4_product"): "LOSS (seed 0): under-trigger schema delta.",
-    ("mixedlang", "cost", "tameru_1_4_product"): "LOSS (seed 0): under-trigger schema delta.",
-    ("diagnostics", "cost", "tameru_1_4_product"): "LOSS (seed 0): under-trigger schema delta.",
-    ("rereads", "cost", "tameru_1_4_product"): "LOSS (seed 0): under-trigger schema delta.",
-    ("dense", "cost", "tameru_1_4_product"): "LOSS (seed 0): under-trigger schema delta.",
+    # Why each check is lost. The measured numbers are in known_loss_numbers.json (test_known_loss_numbers.py keeps them current).
+    ('smallrows', 'cost', 'tameru_1_4_product'): 'one more compaction than stock and larger summaries (the trail and anchor lines); nothing is prunable',
+    ('smallrows', 'compactions', 'tameru_1_4_product'): 'the plugin compacts a little earlier each time, so a sixth compaction fits before the end',
+    ('longform', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('mixedlang', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('diagnostics', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('rereads', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('dense', 'cost', 'tameru_1_4_product'): "under the trigger: the only difference is the plugin's tool schema on every request",
 }
 
 WINDOW_48K = 48_000
 #: the same for a 48K window (``test_48k_*``): totals only (gold facts, error templates), no exact baselines.
 KNOWN_LOSSES_48K: dict[tuple[str, str], str] = {
-    ("refactor", "cost"): (
-        "LOSS +3.2% per answered turn (seed 0): the plugin prunes 7 times (cache breaks) and compacts once against 3, and "
-        "keeps 13 gold facts against 10 and 9 error templates against 0."
-    ),
-    ("smallrows", "cost"): "LOSS +1.6% (seed 0): the smallrows artifact-trail overhead (see the 32K row); nothing is prunable.",
-    ("longform", "cost"): "LOSS (seed 0): under-trigger schema delta.",
-    ("mixedlang", "cost"): "LOSS (seed 0): under-trigger schema delta.",
-    ("diagnostics", "cost"): "LOSS (seed 0): under-trigger schema delta.",
-    ("rereads", "cost"): "LOSS (seed 0): under-trigger schema delta.",
-    ("dense", "cost"): "LOSS (seed 0): under-trigger schema delta.",
+    # Why each check is lost. The measured numbers are in known_loss_numbers.json (test_known_loss_numbers.py keeps them current).
+    ('refactor', 'cost'): 'more prune commits, each a cache break, than the compactions they replace',
+    ('smallrows', 'cost'): 'the trail overhead in the summaries; nothing is prunable',
+    ('longform', 'cost'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('mixedlang', 'cost'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('diagnostics', 'cost'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('rereads', 'cost'): "under the trigger: the only difference is the plugin's tool schema on every request",
+    ('dense', 'cost'): "under the trigger: the only difference is the plugin's tool schema on every request",
 }
 
 _CACHE: dict[tuple[str, str, int], list[dict]] = {}

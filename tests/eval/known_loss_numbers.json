@@ -1,0 +1,320 @@
+{
+ "large/default/200000/gold/tameru_1_4_product": {
+  "plugin": [
+   "A1",
+   "A2",
+   "A3",
+   "A4",
+   "C1",
+   "C2",
+   "C3",
+   "D1",
+   "D2",
+   "D3",
+   "D4",
+   "R1",
+   "R2",
+   "R3",
+   "R4"
+  ],
+  "reference": [
+   "A1",
+   "A2",
+   "A3",
+   "A4",
+   "C1",
+   "C2",
+   "C3",
+   "D1",
+   "D2",
+   "D3",
+   "D4",
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6"
+  ]
+ },
+ "large/default/256000/cost/tameru_1_4_product": {
+  "plugin": 65611.6,
+  "reference": 65292.6
+ },
+ "large/dense/128000/cost/tameru_1_4_product": {
+  "plugin": 6568.8,
+  "reference": 6251.4
+ },
+ "large/dense/200000/cost/tameru_1_4_product": {
+  "plugin": 6568.8,
+  "reference": 6251.4
+ },
+ "large/dense/256000/cost/tameru_1_4_product": {
+  "plugin": 6568.8,
+  "reference": 6251.4
+ },
+ "large/diagnostics/128000/cost/tameru_1_4_product": {
+  "plugin": 7308.2,
+  "reference": 6990.9
+ },
+ "large/diagnostics/200000/cost/tameru_1_4_product": {
+  "plugin": 7308.2,
+  "reference": 6990.9
+ },
+ "large/diagnostics/256000/cost/tameru_1_4_product": {
+  "plugin": 7308.2,
+  "reference": 6990.9
+ },
+ "large/i18n/200000/errors/tameru_1_4_product": {
+  "plugin": 16,
+  "reference": 17
+ },
+ "large/i18n/200000/gold/tameru_1_4_product": {
+  "plugin": [
+   "A1",
+   "A2",
+   "A3",
+   "C1",
+   "C2",
+   "D1",
+   "D2",
+   "D3",
+   "R1",
+   "R2",
+   "R5",
+   "R6",
+   "R7"
+  ],
+  "reference": [
+   "A1",
+   "A2",
+   "A3",
+   "C1",
+   "C2",
+   "D1",
+   "D2",
+   "D3",
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6",
+   "R7"
+  ]
+ },
+ "large/i18n/256000/cost/tameru_1_4_product": {
+  "plugin": 48019.4,
+  "reference": 47732.6
+ },
+ "large/longform/128000/cost/tameru_1_4_product": {
+  "plugin": 10028.2,
+  "reference": 9715.3
+ },
+ "large/longform/200000/cost/tameru_1_4_product": {
+  "plugin": 10028.2,
+  "reference": 9715.3
+ },
+ "large/longform/256000/cost/tameru_1_4_product": {
+  "plugin": 10028.2,
+  "reference": 9715.3
+ },
+ "large/mixedlang/128000/cost/tameru_1_4_product": {
+  "plugin": 7743.7,
+  "reference": 7430.7
+ },
+ "large/mixedlang/200000/cost/tameru_1_4_product": {
+  "plugin": 7743.7,
+  "reference": 7430.7
+ },
+ "large/mixedlang/256000/cost/tameru_1_4_product": {
+  "plugin": 7743.7,
+  "reference": 7430.7
+ },
+ "large/refactor/200000/gold/tameru_1_4_product": {
+  "plugin": [
+   "A1",
+   "A2",
+   "A3",
+   "A4",
+   "C1",
+   "C2",
+   "C3",
+   "D1",
+   "D2",
+   "D3",
+   "D4",
+   "R1",
+   "R3",
+   "R4",
+   "R6"
+  ],
+  "reference": [
+   "A1",
+   "A2",
+   "A3",
+   "A4",
+   "C1",
+   "C2",
+   "C3",
+   "D1",
+   "D2",
+   "D3",
+   "D4",
+   "R1",
+   "R2",
+   "R3",
+   "R4",
+   "R5",
+   "R6"
+  ]
+ },
+ "large/refactor/256000/cost/tameru_1_4_product": {
+  "plugin": 73254.0,
+  "reference": 72895.0
+ },
+ "large/rereads/128000/cost/tameru_1_4_product": {
+  "plugin": 6657.1,
+  "reference": 6339.8
+ },
+ "large/rereads/200000/cost/tameru_1_4_product": {
+  "plugin": 6657.1,
+  "reference": 6339.8
+ },
+ "large/rereads/256000/cost/tameru_1_4_product": {
+  "plugin": 6657.1,
+  "reference": 6339.8
+ },
+ "large/smallrows/128000/cost/tameru_1_4_product": {
+  "plugin": 68148.6,
+  "reference": 67788.9
+ },
+ "large/smallrows/200000/cost/tameru_1_4_product": {
+  "plugin": 68148.6,
+  "reference": 67788.9
+ },
+ "large/smallrows/256000/cost/tameru_1_4_product": {
+  "plugin": 68148.6,
+  "reference": 67788.9
+ },
+ "scenario_64k/dense/64000/cost/tameru_1_4": {
+  "plugin": 6568.8,
+  "reference": 6251.4
+ },
+ "scenario_64k/dense/64000/cost/tameru_1_4_product": {
+  "plugin": 6568.8,
+  "reference": 6251.4
+ },
+ "scenario_64k/diagnostics/64000/cost/tameru_1_4": {
+  "plugin": 7308.2,
+  "reference": 6990.9
+ },
+ "scenario_64k/diagnostics/64000/cost/tameru_1_4_product": {
+  "plugin": 7308.2,
+  "reference": 6990.9
+ },
+ "scenario_64k/longform/64000/cost/tameru_1_4": {
+  "plugin": 10028.2,
+  "reference": 9715.3
+ },
+ "scenario_64k/longform/64000/cost/tameru_1_4_product": {
+  "plugin": 10028.2,
+  "reference": 9715.3
+ },
+ "scenario_64k/mixedlang/64000/cost/tameru_1_4": {
+  "plugin": 7743.7,
+  "reference": 7430.7
+ },
+ "scenario_64k/mixedlang/64000/cost/tameru_1_4_product": {
+  "plugin": 7743.7,
+  "reference": 7430.7
+ },
+ "scenario_64k/oncall/64000/cost/tameru_1_4": {
+  "plugin": 51037.4,
+  "reference": 50752.9
+ },
+ "scenario_64k/refactor/64000/cost/tameru_1_4": {
+  "plugin": 50617.5,
+  "reference": 46400.0
+ },
+ "scenario_64k/rereads/64000/cost/tameru_1_4": {
+  "plugin": 6657.1,
+  "reference": 6339.8
+ },
+ "scenario_64k/rereads/64000/cost/tameru_1_4_product": {
+  "plugin": 6657.1,
+  "reference": 6339.8
+ },
+ "scenario_64k/smallrows/64000/cost/tameru_1_4": {
+  "plugin": 47833.6,
+  "reference": 47108.2
+ },
+ "scenario_64k/smallrows/64000/cost/tameru_1_4_product": {
+  "plugin": 47833.6,
+  "reference": 47108.2
+ },
+ "scenario_64k/smallrows/64000/gold:decision/tameru_1_4": {
+  "plugin": 3,
+  "reference": 4
+ },
+ "scenario_64k/smallrows/64000/gold:decision/tameru_1_4_product": {
+  "plugin": 3,
+  "reference": 4
+ },
+ "small_32k/dense/32000/cost/tameru_1_4_product": {
+  "plugin": 6568.8,
+  "reference": 6251.4
+ },
+ "small_32k/diagnostics/32000/cost/tameru_1_4_product": {
+  "plugin": 7308.2,
+  "reference": 6990.9
+ },
+ "small_32k/longform/32000/cost/tameru_1_4_product": {
+  "plugin": 10028.2,
+  "reference": 9715.3
+ },
+ "small_32k/mixedlang/32000/cost/tameru_1_4_product": {
+  "plugin": 7743.7,
+  "reference": 7430.7
+ },
+ "small_32k/rereads/32000/cost/tameru_1_4_product": {
+  "plugin": 6657.1,
+  "reference": 6339.8
+ },
+ "small_32k/smallrows/32000/compactions/tameru_1_4_product": {
+  "plugin": 6,
+  "reference": 5
+ },
+ "small_32k/smallrows/32000/cost/tameru_1_4_product": {
+  "plugin": 41215.1,
+  "reference": 37245.6
+ },
+ "small_48k/dense/48000/cost/tameru_1_4_product": {
+  "plugin": 6568.8,
+  "reference": 6251.4
+ },
+ "small_48k/diagnostics/48000/cost/tameru_1_4_product": {
+  "plugin": 7308.2,
+  "reference": 6990.9
+ },
+ "small_48k/longform/48000/cost/tameru_1_4_product": {
+  "plugin": 10028.2,
+  "reference": 9715.3
+ },
+ "small_48k/mixedlang/48000/cost/tameru_1_4_product": {
+  "plugin": 7743.7,
+  "reference": 7430.7
+ },
+ "small_48k/refactor/48000/cost/tameru_1_4_product": {
+  "plugin": 43293.0,
+  "reference": 41499.8
+ },
+ "small_48k/rereads/48000/cost/tameru_1_4_product": {
+  "plugin": 6657.1,
+  "reference": 6339.8
+ },
+ "small_48k/smallrows/48000/cost/tameru_1_4_product": {
+  "plugin": 43596.6,
+  "reference": 41852.1
+ }
+}
