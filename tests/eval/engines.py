@@ -142,3 +142,25 @@ def tameru_legacy() -> Any:
     from hermes_tameru_plugin.engine import TameruContextEngine
 
     return TameruContextEngine(settings=TameruSettings(policy_mode="legacy"), quiet_mode=True)
+
+
+@register("tameru_shipped")
+def tameru_shipped() -> Any:
+    """The plugin as a user runs it: default settings, plus the two per-turn steps Hermes' ``pre_llm_call`` hook
+    drives live and the product arm never ran: the host-settings step and the note about shortened results (which
+    is stored in the user message, so it is priced on every later request)."""
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    engine = TameruContextEngine(quiet_mode=True)
+    engine.replay_runs_host_tuning = True
+    engine.replay_runs_note = True
+    return engine
+
+
+@register("tameru_autotune_off")
+def tameru_autotune_off() -> Any:
+    """The product arm with self-tuning off (the fixed balanced table): what ``autotune`` adds or costs."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(settings=TameruSettings(autotune=False), quiet_mode=True)

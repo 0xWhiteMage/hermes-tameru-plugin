@@ -822,6 +822,20 @@ def run_session(
                    seconds_per_request, keep_final_request)
 
 
+def _attach_note(engine: Any, messages: list[dict]) -> None:
+    """Append the per-turn note of the plugin's ``pre_llm_call`` hook to the new user message, the way Hermes does
+    (``content + "\\n\\n" + context``; the message is stored, so every later request replays it).
+
+    Only engines built for the as-shipped comparison (``replay_runs_note``) get it, so the older arms and their saved
+    baselines measure exactly what they always did."""
+    note_for = getattr(engine, "manifest_for_turn", None)
+    if not callable(note_for) or not getattr(engine, "replay_runs_note", False):
+        return
+    note = note_for(messages)
+    if note:
+        messages[-1] = dict(messages[-1], content=f"{messages[-1]['content']}\n\n{note}")
+
+
 def _play(sess: _Session, script: Scenario, seed: int) -> tuple[FakeSummarizer, list[dict] | None]:
     """Drive the script through ``sess``; returns the fake summarizer and the final request."""
     summarizer = FakeSummarizer()
@@ -837,6 +851,7 @@ def _play(sess: _Session, script: Scenario, seed: int) -> tuple[FakeSummarizer, 
         for turn in script.turns:
             messages.append({"role": "user", "content": turn.user})
             sess.begin_turn()
+            _attach_note(sess.engine, messages)
             for rnd in turn.rounds:
                 messages = sess.request(messages)
                 ids = [new_call_id() for _ in rnd.steps]
@@ -849,6 +864,7 @@ def _play(sess: _Session, script: Scenario, seed: int) -> tuple[FakeSummarizer, 
                 sess.turn_complete(messages)
         messages.append({"role": "user", "content": script.final_question})
         sess.begin_turn()
+        _attach_note(sess.engine, messages)
         sent_before = len(sess.request_chars)
         messages = sess.request(messages)
         sess.closing_request_slot = sess.request_slots
