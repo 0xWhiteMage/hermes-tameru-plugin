@@ -275,3 +275,22 @@ A second live reading, 28 minutes later (20:05, after a gateway restart and a ne
 two minutes after the previous turn. That is the cache lifetime at work on a real provider: a gap of about half an hour dropped the whole prefix, so the next request paid to write all
 45K tokens again. It is the situation the replay's optional cache lifetime and idle gaps (`cache_ttl_s`, `idle_seconds`) model, and the case a cache-aware pruning rule would use (prune
 and reveal the tool when the cache is cold anyway). The exact lifetime of this route was not measured (somewhere between 2 and 28 minutes; Anthropic's default is 5).
+
+### Also rejected: no proactive pruning on small windows (64K and 128K, measured tool block, three structural seeds, six compacting shapes)
+
+Skipping the proactive prune whenever Hermes' compaction threshold is under 80K tokens (so at 64K) and leaving Hermes to compact:
+
+| 64K, effective cost against stock | Product | No proactive prune when small |
+|---|---:|---:|
+| default | -3.6% (30 facts) | +0.1% (12 facts) |
+| oncall | -4.6% (30) | +1.3% (31) |
+| refactor | +9.1% (48) | +2.9% (42) |
+| smallrows | +3.6% (33) | +3.5% (33) |
+| i18n | -1.3% (35) | -1.2% (34) |
+| bursty | -14.7% (12) | -1.8% (6) |
+| mean of the six | -1.9% | +0.8% |
+
+It repairs `refactor` and breaks the shapes where the proactive prune is what wins; at 128K the two arms are identical. A window-size switch is therefore the wrong tool. What separates
+`refactor` from `default` is not the window but how much each prune reclaims against the cache it rewrites (a compaction reclaims most of the prompt for one rewrite; a prune reclaims about a
+quarter for one rewrite, so seven of them cost more than two compactions). The rule that would get both right is per prune: weigh its reclaim against its rewrite and against the
+compaction Hermes will do anyway, over the requests expected before that compaction. That is not built; it is the open item behind the 64K `refactor` loss.
