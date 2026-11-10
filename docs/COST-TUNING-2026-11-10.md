@@ -270,3 +270,8 @@ Needed facts, all runs: stock 2,592 kept / 468 lost (52 cannot be re-run); produ
   three structural seeds: the shipped values (0.35 and 0.15) have the best mean at both windows (-1.9% and -14.8%); the settings that shrink `refactor` 64K to +6.4% cost 23
   facts and move the mean to -0.6% and -8.6%. **Rejected.** A fix needs a policy that weighs, before each prune, the cache rewrite it causes against the compaction Hermes would do
   anyway (the plan's phase 5), not another threshold.
+
+A second live reading, 28 minutes later (20:05, after a gateway restart and a new message in the same Haiku session, 45K-token prompt): `/tameru stats` showed **cache hit 0%**, against 100%
+two minutes after the previous turn. That is the cache lifetime at work on a real provider: a gap of about half an hour dropped the whole prefix, so the next request paid to write all
+45K tokens again. It is the situation the replay's optional cache lifetime and idle gaps (`cache_ttl_s`, `idle_seconds`) model, and the case a cache-aware pruning rule would use (prune
+and reveal the tool when the cache is cold anyway). The exact lifetime of this route was not measured (somewhere between 2 and 28 minutes; Anthropic's default is 5).
