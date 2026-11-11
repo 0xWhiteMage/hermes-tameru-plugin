@@ -415,6 +415,7 @@ class _Session:
         realistic: bool = False, clock: VirtualClock | None = None, context_length: int = CONTEXT_LENGTH,
         max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
         cache_ttl_s: float | None = None, idle_seconds: Callable[[int], float] | None = None,
+        request_log: list | None = None,
     ) -> None:
         if estimate is None:  # Hermes' own rough estimator, as the host uses before a request
             from agent.model_metadata import estimate_messages_tokens_rough as estimate
@@ -431,6 +432,9 @@ class _Session:
         # None: the replay then behaves, and its saved baselines compare, exactly as before.
         self.cache_ttl_s = None if cache_ttl_s is None else float(cache_ttl_s)
         self.idle_seconds = idle_seconds
+        # Optional recorder (``run_session(request_log=[])``): every request that is sent is appended as
+        # ``{"n", "messages", "tool_block_chars"}``, so a live runner can send the exact same requests to a real provider.
+        self.request_log = request_log
         self.cache_expiries = 0
         self._last_sent_at: float | None = None
         schemas = getattr(engine, "get_tool_schemas", None)
@@ -786,6 +790,8 @@ class _Session:
             self.violations.append(f"request {len(self.request_chars)}: {v}")
         self._prev_wire, self._prev_total = wire, total
         self.last_request = copy.deepcopy(sent)
+        if self.request_log is not None:
+            self.request_log.append({"n": len(self.request_chars), "messages": self.last_request, "tool_block_chars": len(schema_wire)})
         # provider usage for this request (rough tokens + overhead), fed back like Hermes does
         prompt_tokens = sent_tokens
         self.last_usage = {"prompt_tokens": prompt_tokens, "completion_tokens": 120, "total_tokens": prompt_tokens + 120}
@@ -818,6 +824,7 @@ def run_session(
     context_length: int = CONTEXT_LENGTH, scenario: str = DEFAULT_SCENARIO, realistic: bool = True,
     seconds_per_request: float = SECONDS_PER_REQUEST, max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
     cache_ttl_s: float | None = None, idle_seconds: Callable[[int], float] | None = None,
+    request_log: list | None = None,
     summarizer_factory: Callable[[], FakeSummarizer] | None = None,
     script_transform: Callable[[Scenario, int], Scenario] | None = None,
 ) -> dict:
@@ -851,6 +858,7 @@ def run_session(
         sess = _Session(
             engine, script, realistic=realistic, clock=clock, context_length=context_length,
             max_compression_attempts=max_compression_attempts, cache_ttl_s=cache_ttl_s, idle_seconds=idle_seconds,
+            request_log=request_log,
         )
         summarizer, final = _play(sess, script, seed, summarizer_factory)
     return _result(sess, summarizer, final, script, engine, turns, seed, context_length, scenario, realistic,
