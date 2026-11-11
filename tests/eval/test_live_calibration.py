@@ -182,6 +182,7 @@ def test_summarise_shows_the_ratio_to_the_first_arm():
 
 
 # ---- the real replay feeds it -----------------------------------------------------------------------------------------
+@pytest.mark.real_hermes
 def test_a_recorded_replay_ends_with_the_closing_question_and_names_the_needed_facts():
     recorded = lc.capture("stock_defaults", "default", 64_000, 0, structural=False)
     assert recorded["requests"] and recorded["needles"] and recorded["replay_cost"] > 0
@@ -191,6 +192,7 @@ def test_a_recorded_replay_ends_with_the_closing_question_and_names_the_needed_f
     assert out[0]["role"] == "user" and out[-1]["role"] == "user"
 
 
+@pytest.mark.real_hermes
 def test_the_plugin_arm_records_fewer_characters_than_stock_on_a_long_session():
     stock = lc.capture("stock_defaults", "default", 64_000, 0, structural=False)
     plugin = lc.capture("tameru_lazy", "default", 64_000, 0, structural=False)
