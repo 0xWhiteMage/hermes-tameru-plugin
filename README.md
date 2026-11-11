@@ -124,10 +124,24 @@ pairing repair. Where Hermes would write a one-line summary, the plugin runs a d
 
 ### When it prunes
 
-Hermes ships its proactive tool-result prune off. Unless you set `compression.proactive_prune_tokens` yourself,
-the plugin turns it on with a trigger that follows the model's window, re-derived whenever the model changes:
+Hermes ships its proactive tool-result prune off; the plugin turns it on. In the default **adaptive** mode, at each check (Hermes runs one after tool
+results) the planner works from the numbers below. They are the balanced starting values; self-tuning and the bias move them within fixed bounds.
 
-| Window | Hermes' compaction threshold | Plugin's prune trigger |
+1. **Start considering a prune** when the prompt reaches 0.60 of Hermes' compaction threshold (tunable between 0.35 and 1.00). If you set
+   `compression.proactive_prune_tokens` yourself, that value replaces the 0.60 starting point.
+2. **Aim** at 85% of the threshold, less the recent growth, so a prune leaves room to work.
+3. **Accept a candidate only if it pays back.** A prune rewrites everything from its first changed message onward into the prompt cache, so the tokens it
+   removes must be at least 35% of the tokens it rewrites. The test is waived when the prompt is within 5% of the usable limit.
+4. **Wait before the next prune** until the prompt has regrown by 15% of the threshold.
+5. **Never touch a committed row** unless Hermes is committing a pass that demotes it further, so the plugin does not break the cache prefix on its own.
+
+Self-tuning (see *Self-tuning* below) changes these numbers in small, bounded steps from live signals. Two honest limits: the 0.35 share is a fixed
+estimate of the cache cost, not a computed one, and the checks run after tool results rather than on a clock. A full compaction prunes results from 1,000
+characters, so the summarizer reads stubs instead of raw rows; the proactive prune keeps Hermes' own minimum result size of 8,000 characters.
+
+**Legacy mode and explicit triggers.** In `policy_mode: legacy` the plugin instead uses a fixed trigger that follows the model's window:
+
+| Window | Hermes' compaction threshold | Legacy prune trigger |
 |---|---|---|
 | 32K | 27,200 | 16,320 (0.60 of the threshold) |
 | 48K | 40,800 | 24,480 |
@@ -136,10 +150,8 @@ the plugin turns it on with a trigger that follows the model's window, re-derive
 | 200K | 150,000 | 112,500 |
 | 256K | 192,000 | 144,000 |
 
-After a prune, the next one may fire once the prompt has regrown by 20% of the threshold, and a repeat prune on a
-large window only goes ahead if it brings the prompt down to 30% of the threshold or less, so it is worth the
-prompt-cache break. The proactive prune keeps Hermes' own minimum result size of 8,000 characters; a full compaction prunes results from 1,000 characters, so the
-summarizer reads stubs instead of raw rows.
+After a legacy prune, the next one may fire once the prompt has regrown by 20% of the threshold, and a repeat prune on a large window only goes ahead if it
+brings the prompt down to 30% of the threshold or less.
 
 ### Properties
 
@@ -370,7 +382,7 @@ plugins:
 | `edits` | `true` | Keep and Restore. |
 | `pins` | `true` | Pinned instructions. |
 | `manifest` | `true` | The short per-turn note to the model. Deprecated unless a live comparison shows it raises read-backs. |
-| `preference` | `balanced` | `save_space`, `balanced` or `preserve_detail` (also `/tameru bias`). |
+| `preference` | `balanced` | `save_space`, `balanced` or `preserve_detail`: the chat's starting bias (change it later with `/tameru bias` or the panel's lean mode). |
 | `net_estimate` | `false` | `/tameru stats` adds a signed, labelled estimate of what the cleanups saved or cost, in uncached-input-token equivalents. Not a bill. |
 | `stats_ledger` | `false` | Keep daily totals (cleanups and tokens removed, no chat ids or text) for 90 days in `$HERMES_HOME/tameru/stats-ledger.json`. Shown only in `/tameru stats`; never read by policy code; `/tameru reset stats confirm` deletes it. |
 

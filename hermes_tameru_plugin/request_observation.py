@@ -6,7 +6,6 @@ about the next request. Do not retain request text, credentials or route strings
 from __future__ import annotations
 
 import math
-import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -81,7 +80,7 @@ def observe_request(
         # Native started_at is time.time() at the beginning of an iteration.
         # A rerouted retry carrying an older timestamp stays conservatively
         # unknown until a new iteration; it cannot resurrect a pre-reset cap.
-        if timestamp < state.request_observed_after or timestamp > time.time():
+        if timestamp < state.request_observed_after or timestamp > state.clock():
             return False
         if state.last_request is not None and timestamp < state.last_request.started_at:
             return False

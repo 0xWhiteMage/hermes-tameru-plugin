@@ -19,6 +19,9 @@ _SAVE = (0.70, 0.75, 0.80, 0.20, 0.10)
 _BALANCED = (0.60, 0.50, 1.00, 0.35, 0.15)
 _DETAIL = (1.00, 2.00, 1.50, 0.50, 0.20)
 
+# The configured preference as a starting bias: -1 is the save-space row, +1 the preserve-detail row, 0 balanced.
+PREFERENCE_BIAS = {"save_space": -1.0, "balanced": 0.0, "preserve_detail": 1.0}
+
 # Hard bounds on the effective values: Tuner can never leave them, whatever the signals say.
 _BOUNDS = ((0.35, 1.00), (0.40, 2.50), (0.60, 2.00), (0.08, 0.60), (0.06, 0.30))
 _NAMES = ("activation", "detail", "recent", "minimum_reclaim_share", "regrowth")

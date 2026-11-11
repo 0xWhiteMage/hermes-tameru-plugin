@@ -4,8 +4,9 @@ The unit is uncached-input-token equivalents, priced with the usual provider cac
 uncached token, a cache write 125%). For every cleanup Tameru recorded:
 
 * saving   = tokens it removed x replies sent since x 0.10   (the removed text no longer rides each cached prefix)
-* cost     = tokens from its first change to the end of the prompt x 1.15   (that suffix is written to the cache again
-             instead of read: 1.25 - 0.10)
+* cost     = tokens from its first change to the end of the prompt x 1.15, less what the cleanup itself removed x 1.25
+             (the suffix is written to the cache again instead of read, 1.25 - 0.10, but the removed tokens are not
+             written at all; never below zero)
 
 A cleanup with no recorded suffix (a full compaction pass) adds its saving and an unknown cost, and the result says so.
 It is an estimate: output tokens, the recovery tool's own schema and the provider's real cache lifetime are not in it, and
@@ -32,7 +33,7 @@ def estimate(events, responses_now: int) -> dict[str, Any] | None:
         reads = max(0, min(MAX_READS, int(responses_now) - int(at)))
         saving += removed * reads * READ_RATE
         if isinstance(suffix, int) and suffix >= 0:
-            cost += suffix * (WRITE_RATE - READ_RATE)
+            cost += max(0.0, suffix * (WRITE_RATE - READ_RATE) - WRITE_RATE * min(removed, suffix))
         else:
             unknown += 1
     if not count:

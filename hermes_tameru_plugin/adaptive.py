@@ -13,7 +13,7 @@ from collections import deque
 from dataclasses import asdict, dataclass
 from typing import Any
 
-from .autotune import Tuner, Tuning
+from .autotune import PREFERENCE_BIAS, Tuner, Tuning
 from .config import TameruSettings, scaled_error_budget, scaled_retained_budget
 from .hermes_compat import message_budget_tokens
 from .request_observation import RequestObservation, observe_request
@@ -77,7 +77,8 @@ class PolicyRuntime:
     as new defaults but none of the observations or commit history.
     """
 
-    def __init__(self, controls: Controls) -> None:
+    def __init__(self, controls: Controls, clock=time.time) -> None:
+        self.clock = clock                  # host wall-clock source; tests and the replay can inject a fixed one
         self.defaults = controls
         self.controls = controls
         self.has_override = False
@@ -88,8 +89,13 @@ class PolicyRuntime:
         self.last_check: _Check | None = None
         self.last_commit: _Commit | None = None
         self.last_request: RequestObservation | None = None
-        self.request_observed_after = time.time()
+        self.request_observed_after = self.clock()
         self.tuner = Tuner()
+        # With self-tuning on the planner reads the tuner, not the preference row, so the configured preference seeds the
+        # tuner's starting bias (a bias saved with the chat still wins when the chat binds).
+        seed = PREFERENCE_BIAS.get(controls.preference)
+        if seed:
+            self.tuner.set_bias(seed)
         self.paused = False
         self.decline_streak = 0             # consecutive "considered, nothing to reclaim" checks
         self.commits_since_host = 0         # Tameru commits since Hermes last compacted
@@ -201,7 +207,7 @@ class AdaptiveMixin:
     def _discard_policy_views(self, *, preserve_controls: bool = True) -> None:
         """Fresh runtime: reset leaks no observations; an unrelated bind also drops choices."""
         old = self._policy
-        fresh = PolicyRuntime(old.defaults)
+        fresh = PolicyRuntime(old.defaults, clock=old.clock)
         if preserve_controls:
             fresh.tuner.set_bias(old.tuner.bias)
             fresh.paused = old.paused
@@ -255,7 +261,7 @@ class AdaptiveMixin:
             self._policy.growth.clear()
             self._policy.last_body_tokens = None
             self._policy.last_request = None
-            self._policy.request_observed_after = time.time()
+            self._policy.request_observed_after = self._policy.clock()
             self._policy.last_check = None
 
     def _model_update_budget(self, bound: inspect.BoundArguments) -> None:

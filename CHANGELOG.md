@@ -17,6 +17,12 @@ Removes three things that showed no measured benefit, as announced under *Deprec
   treated as an invalid value and falls back to the default.
 - Their replay arms (`tameru_1_9_host_off`, `tameru_1_9_host_on`) and tests. The stock and product baselines are unchanged.
 
+### Fixed
+- **The `preference` setting now does something.** With self-tuning on (the default) the planner read only the tuner, so `preference: save_space` or `preserve_detail` had no effect; it now sets the chat's starting bias (a bias saved with the chat still wins).
+- **The net-cost estimate no longer overstates the rewrite cost:** the tokens a cleanup removes are not rewritten into the cache, so they come off its cost (`net_estimate`).
+- **The policy's wall clock is injectable** (`PolicyRuntime(clock=...)`), so request-ordering decisions can be replayed deterministically; live behaviour is unchanged.
+- **README:** "When it prunes" now describes the adaptive mode (0.60 start, 85% target, 35% pay-back, 15% runway) instead of the legacy trigger.
+
 ### Changed
 - A configured `adaptive_host` or `learned_priors` is named in `get_status()["tameru"]["warnings"]` ("removed in 1.10.0; ignored") instead of "unknown setting".
 - The plugin is version 1.10.0 (engine 1.9.0); `/tameru stats` shows both.

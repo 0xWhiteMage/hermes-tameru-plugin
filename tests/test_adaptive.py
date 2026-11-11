@@ -1075,3 +1075,21 @@ def test_policy_controls_without_db_and_mode_gating(hermes_home, monkeypatch):
     legacy.set_policy_controls({"mode": "adaptive"}, session_id="s1", lifecycle_id=legacy_life)
     legacy.set_policy_controls({"recent": "long"}, session_id="s1", lifecycle_id=legacy_life)
     assert legacy.get_policy_status()["controls"]["recent"] == "long"
+
+
+def test_the_policy_clock_is_injectable_and_decides_nothing_else(hermes_home, monkeypatch):
+    # The wall clock is a parameter of the runtime: with a fixed clock the same observations always give the same answer.
+    engine = _observation_engine(monkeypatch)
+    engine._policy.clock = lambda: 1_000.0
+    engine._clear_policy_observations()
+    assert engine._policy.request_observed_after == 1_000.0
+    engine._policy.clock = lambda: 1_001.0                 # the next request starts a second later
+    assert _observe(engine, started_at=1_000.5)            # after the reset and not in the injected clock's future
+    assert not _observe(engine, started_at=999.0)          # older than the reset: conservatively unknown
+    assert not _observe(engine, started_at=1_002.0)        # in the injected clock's future
+
+
+def test_the_preference_setting_seeds_the_tuner_bias(hermes_home, monkeypatch):
+    for preference, bias in (("save_space", -1.0), ("balanced", 0.0), ("preserve_detail", 1.0)):
+        engine = _observation_engine(monkeypatch, preference=preference)
+        assert engine._policy.tuner.bias == bias
