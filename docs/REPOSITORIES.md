@@ -11,7 +11,7 @@ growing.
 | Contains | Extraction and reducers, structured-format handling, folding, supersession, Unicode handling, credential screening for recovery storage, the benchmarks | The Hermes context-engine subclass, the adaptive policy and self-tuning, Restore and Keep, the per-turn note, the Desktop panel, the `/tameru` commands, per-chat state, security gates for chat surfaces, packaging for the Hermes catalogue |
 | Depends on | The Python standard library | Hermes' plugin interfaces and a few private seams (listed in the Hermes validator output); the engine, vendored |
 | Knows about | Text in, smaller text out | Chats, sessions, tools, the prompt cache, Hermes settings and surfaces |
-| Version | Semantic; `ENGINE_VERSION` | Always equal to the vendored engine's version |
+| Version | Semantic; `ENGINE_VERSION` | Semantic, separate from the engine's (1.9.0 vendors engine 1.9.0; `/tameru stats` shows both) |
 
 **The one rule between them.** `hermes_tameru_plugin/tameru/` is a byte-for-byte copy of the engine's `src/tameru/`
 and is never edited here. An engine fix is made in the engine repository first, released, and re-vendored
@@ -39,5 +39,5 @@ owns only `tameru/__init__.py` in that folder, which records `VENDORED_FROM` (th
 ## Releasing, in short
 
 1. Engine change lands and is released in the engine repository (version bumped there).
-2. This repository re-vendors it, sets `VENDORED_FROM`, and bumps its own version to match.
+2. This repository re-vendors it, sets `VENDORED_FROM`, and bumps its own version if its behaviour changed; the two versions need not match.
 3. One catalogue pull request to Nous per release. Details in [RELEASING.md](RELEASING.md).

@@ -16,6 +16,16 @@ and checks caller-input mutation plus the whole historical message prefix.
 New golden captures belong in `baselines/protocol-2/`; the old captures remain
 unchanged. Migration and new candidate comparisons are pending.
 
+**Beside protocol 2: `protocol3.py`.** It leaves every protocol-2 baseline untouched and adds, as options that default to today's behaviour:
+*effective cost* (every needed fact is kept, recoverable behind a priced `tameru_read_original` call, or lost and priced as a re-run of the tool, for
+every arm alike), *structural seeds* (six different sessions per cell instead of one session with different filler), a cache lifetime with *idle
+gaps* (profiles `interactive`, `mixed`, `slow`), a selectable tool-block size (`TAMERU_P3_TOOL_CHARS`, 39,993 measured on Hermes 0.23), two further
+summarizers (extractive, and one written independently from the interface alone) and *grown* holdouts that really compact. The README's headline
+tables come from it; reproduce them with the command in [docs/DEVELOPMENT.md](../../docs/DEVELOPMENT.md#cost-tables). `TAMERU_ORACLE_COLD=1` is a
+measurement-only switch for the cache-cold pruning ceiling (see [docs/COST-TUNING-2026-11-10.md](../../docs/COST-TUNING-2026-11-10.md)); it is off in
+every saved baseline. The baselines are recorded on the commit in `HERMES_PIN` (Hermes v0.23.1); timing keys change on every run and are not compared.
+Everything here is deterministic offline code, so the cost and retention numbers do not depend on the machine it runs on.
+
 ## Run it
 
 Real Hermes is required (the harness drives the real `ContextCompressor` and its real seams):

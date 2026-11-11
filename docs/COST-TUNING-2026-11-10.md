@@ -429,3 +429,19 @@ The replay (fixed scripted sessions, paired by construction) stays the instrumen
 integration faults, which is what they found (the `mcp__` tool-name prefix). A fair live comparison would need a fixed sequence of tool
 calls (a scripted client), not a free-running model.
 
+## Re-measured on Hermes v0.23.1 (2026-11-11)
+
+After the Hermes update the headline table was measured again on the development PC: 11 shapes, windows 64K, 128K and 200K, six structural seeds, Hermes' measured
+tool block (39,993 characters), the crude fake summarizer, no idle gaps; effective cost against stock (`protocol3`, command in `docs/DEVELOPMENT.md`, 594 replays).
+
+| Arm | 64K | 128K | 200K | Cells cheaper / dearer / undecided (of 33) |
+|---|---:|---:|---:|---|
+| Tameru (product) | -0.6% | -7.2% | -7.4% | 13 / 19 / 1 |
+| Tameru with `lazy_tool` | -1.4% | -8.1% | -8.4% | 13 / 3 / 17 |
+
+Needed facts over all 198 runs per arm (kept / readable back / lost, of which cannot be re-run): stock 2,603 / 0 / 457 (44); Tameru 2,805 / 86 / 169 (4), the same with `lazy_tool`.
+
+Worst cells: `refactor` at 64K +8.4% (+9.1% with `lazy_tool`), `smallrows` at 64K +3.8%, `dense` at 128K and 200K +2.4% (all five shapes that never compact: +2.3% on average,
++0.0% with `lazy_tool`). `refactor` at 128K and 200K is 20% and 17% cheaper. The earlier tables in this document were measured on v0.23.0; they differ from these by a few tenths of a
+point (for example -7.1% and -6.8% at 128K and 200K, then) and the conclusions do not change. Idle-gap, per-turn-note and 200K-fact figures were not repeated on v0.23.1.
+

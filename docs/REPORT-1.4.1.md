@@ -1,5 +1,7 @@
 # Tameru 1.4.1 candidate: what changed and what was measured
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 Status: on `main` (developed on branch `tameru-1.4.1`) on top of 1.4.0 (`0a7e568`), not released. Vendored engine:
 the 1.4.1 candidate `e099d10` (now on `main` of `tameru-compaction-system`; patches `0004` and
 `0005` in [upstream-patches/](upstream-patches/README.md)); after the red-team round (§7) `a1e8a7f` (patch `0006`). Every number below was measured on 2026-10-12 with

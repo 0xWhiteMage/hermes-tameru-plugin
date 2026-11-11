@@ -1,5 +1,7 @@
 # 1.7.0 adaptive candidate: acceptance and coverage
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 Owner: lead agent. Started 2026-11-05, before adaptive implementation or tuning.
 This document defines the work and records acceptance; it is not a pass report.
 

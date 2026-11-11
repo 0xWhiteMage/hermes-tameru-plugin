@@ -31,18 +31,33 @@ separately; everything Hermes-specific below lives in this plugin.
 
 ## Inspection and recovery
 
-The UI's original viewer is read-only: it does not restore past model context.
-If the agent calls the recovery tool, the returned text can be used as a new
-result; this does not undo an earlier Hermes summary.
+Viewing an original in the panel or with `/tameru view REF` does not change what
+the model sees. To put an output back in front of the model, **Restore** (the
+next few replies) and **Keep** (until you unpin it) are on each row in Desktop,
+or `/tameru restore|keep REF`; both change only what is sent in the request, never
+saved history, and wait for your next message. If the agent calls the recovery
+tool, the returned text is a new result; it does not undo an earlier Hermes
+summary.
 
 A `ref=` identifies an original, but does not guarantee it remains available.
 Storage limits, credential screening and archive availability can prevent
-recovery. Persistent Restore and Keep controls are not implemented.
+recovery. Web, browser and MCP output can never be restored or kept.
+
+## Commands
+
+`/tameru` shows what changed and the context gauge. `/tameru help` lists every verb;
+`/tameru stats` prints numbers for the chat; `/tameru reset` puts the chat's
+self-tuning back to neutral (it lists what it clears and asks first);
+`/tameru pin TEXT` keeps a line of your own word for word through every summary;
+`/tameru pause|resume` and `/tameru bias save|balanced|detail` are the two
+choices that persist with a chat.
 
 ## The tool: `tameru_read_original`
 
 The model can request original lines using the reference in a shortened result.
-The alias `tameru_expand` accepts the same arguments.
+The old name `tameru_expand` is still answered but no longer listed, so the
+schema is sent once. With the optional `lazy_tool: on` the tool is left out of
+requests until Tameru has shortened something in the chat.
 
 | Argument | What it does |
 |---|---|

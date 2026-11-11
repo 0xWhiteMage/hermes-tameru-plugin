@@ -98,10 +98,10 @@ def test_the_escalation_pass_runs_with_header_only_rungs():
     assert degrade == [False, True]
 
 
-def test_a_declined_pass_leaves_no_telemetry_log_line(tmp_path):
+def test_a_declined_pass_leaves_no_telemetry_log_line(log_root):
     from hermes_tameru_plugin.config import TameruSettings
 
-    log = tmp_path / "t.jsonl"
+    log = log_root / "t.jsonl"
     engine = make_engine(TameruSettings(telemetry_log=str(log)), proactive_prune_min_reclaim_tokens=10_000_000)
     assert engine.prune_tool_results_only(_messages(), 500_000)[1] == 0
     assert not log.exists()

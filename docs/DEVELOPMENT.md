@@ -18,9 +18,16 @@ HERMES_PYTHON=/path/to/test/python bash /path/to/hermes-agent/scripts/run_tests.
 # real Hermes; this option is read before test collection. The older HERMES_REPO_ROOT
 # environment selector remains supported by direct harness scripts.
 
-ruff check .
+ruff check .      # the rule set is explicit in pyproject.toml (E4, E7, E9, F)
 ```
 
+On a development PC with Hermes checked out beside the plugin, the quickest real-Hermes run (Windows or POSIX, system Python 3.11 to 3.13)
+puts a small `ruamel.yaml` stand-in on the path: `PYTHONPATH=<shim> HERMES_REPO_ROOT=<hermes-agent> python -m pytest -q -p no:cacheprovider`
+(about 7 minutes; the full gate below takes about 12).
+
+Where measurements run: the replay and the cost matrix are deterministic offline code, so a given commit gives the same cost and retention
+numbers on any machine; only the `timing` fields differ. All the numbers in this repository were measured on the development PC (Windows 11,
+local Hermes Desktop on the "This device" connection), never on a NAS or any shared host. The live checks used the Desktop app on that PC.
 `.[dev]` brings `pyyaml`, `setuptools` and `hypothesis`; without them the direct `config.yaml` read
 (`tests/test_config.py`), the offline packaging build (`tests/test_packaging.py`) and the fuzz harness
 (`tests/test_fuzz_redteam.py`) skip, so check the skip count. In the real-mode venv install them too
@@ -36,7 +43,8 @@ after a Hermes bump, a seam moved.
 every module of `hermes_tameru_plugin/tameru/` with the engine repository's `src/tameru` at the commit `VENDORED_FROM` records, ignoring line
 endings. CI runs it in the `vendored` job against the engine's public repository, so the engine commit must be pushed before the plugin that
 names it. The Desktop panel tests run in the `desktop-panel` job; locally: `TAMERU_UI_TEST_DEPS=<a node_modules with jsdom, react and react-dom>
-node --experimental-vm-modules --test tests/desktop/activity.test.mjs`. Neither job has run on a real runner yet (nothing is pushed).
+node --experimental-vm-modules --test tests/desktop/activity.test.mjs` (since Hermes 0.23.1 those packages are in
+`hermes-agent/apps/desktop/node_modules`). Both jobs ran green on GitHub's runners for 1.9.0.
 
 ## Looking at the holdouts
 
@@ -51,12 +59,16 @@ Five of the six holdouts never compact at any window, so they check idle cost, n
 git clone https://github.com/NousResearch/hermes-agent
 git -C hermes-agent checkout "$(cat HERMES_PIN)"   # the commit CI and the saved baselines use
 python3.14 -m venv venv314
-venv314/bin/pip install -e ./hermes-agent pytest pyyaml setuptools hypothesis
+venv314/bin/pip install uv
+# Hermes pins Pillow exactly while its own browser-harness dependency pins another version; pip cannot resolve that, uv with an override can.
+echo "pillow==13.0.0" > overrides.txt
+venv314/bin/uv pip install --override overrides.txt -e ./hermes-agent -e '.[dev]'
 export HERMES_REPO_ROOT=$PWD/hermes-agent
 ```
 
 Bump the pin deliberately, together with `tests/test_seam_contract.py` if a seam changed, and re-record the
-`stock` baseline (below).
+baselines (below; `tests/test_hermes_pin.py` checks that every saved baseline names the pinned commit). The last bump (v0.23.0 to v0.23.1)
+changed only timing keys in the baselines.
 
 ## Replay harness and baselines
 
@@ -82,7 +94,24 @@ TAMERU_WRITE_BASELINES=1 HERMES_REPO_ROOT=... python -m pytest -q tests/eval
 git diff tests/eval/baselines    # read the diff before committing it
 ```
 
-`stock.json` is compared exactly; `tameru_1_3.json` only while the vendored engine reports 1.3.x (skipped now).
+`stock.json` is compared exactly; `tameru_1_3.json` only while the vendored engine reports 1.3.x (skipped now). Timing keys
+(`engine_seconds`, per-operation seconds) change on every run and are not compared.
+
+## The gate report
+
+`python tests/eval/gate.py` runs the stub suite, the real-Hermes suite (when `HERMES_REPO_ROOT` is set) and the Desktop panel tests (set
+`TAMERU_UI_TEST_DEPS`), then writes `docs/gate-reports/gate-<commit>.json`: the commit, whether the tree was clean, the Hermes pin, a hash of the
+saved stock baselines (a canary: if it changes, the harness moved, not the product) and each result. "Done" means this file exists for HEAD and says
+`"clean": true` and `"passed": true`; the changelog and docs quote numbers only from it. It needs a clean tree and takes about 12 minutes.
+
+## Cost tables
+
+The README's headline tables come from `protocol3` (`tests/eval/protocol3.py`): effective cost (a fact an arm dropped is priced as a re-run of the
+tool, a fact it holds behind the recovery tool as that call), structural seeds, optional cache lifetime and idle gaps, and a selectable tool-block
+size. Reproduce a table with `TAMERU_P3_MATRIX=out.json TAMERU_P3_ARMS=stock_defaults,tameru_1_4_product,tameru_lazy TAMERU_P3_WINDOWS=64000,128000,200000
+TAMERU_P3_SEEDS=0,1,2,3,4,5 TAMERU_P3_STRUCTURAL=1 TAMERU_P3_TOOL_CHARS=39993 python -m pytest tests/eval/test_protocol3.py -k effective_cost_matrix`.
+`TAMERU_ORACLE_COLD=1` is a measurement-only switch (offer the proactive prune at turn starts that find the cache expired); it is off in every
+saved baseline.
 
 ## Vendoring the engine
 
@@ -104,10 +133,12 @@ hand-written (no `kind:` key). Engine fixes go upstream first; see
 
 | Job | What |
 |---|---|
-| `unit` | Stub-mode suite (`-m "not perf"`) on Python 3.11, 3.12, 3.13, 3.14 |
-| `real-hermes` | Full suite against Hermes at the pinned SHA, Python 3.14, `HERMES_REPO_ROOT` set (required) |
+| `unit` | Stub-mode suite (`-m "not perf"`) on Python 3.11, 3.12, 3.13, 3.14 (full history is fetched: the rollback-script tests check out a release tag) |
+| `real-hermes` | Full suite against Hermes at the pinned SHA, Python 3.14, installed through `uv` with a Pillow override, `HERMES_REPO_ROOT` set (required) |
 | `hermes-main-nightly` | Same against Hermes `main`, nightly and on dispatch; allowed to fail (early warning that a private seam or the `stock` baseline moved) |
 | `lint` | `ruff check .` and `compileall` of the plugin |
+| `vendored` | The vendored engine equals the engine repository at the commit `VENDORED_FROM` records |
+| `desktop-panel` | The Desktop panel's jsdom tests |
 | `build` | Builds the wheel and sdist; asserts every module, `plugin.yaml` and the `hermes_agent.plugins` entry point are in the wheel and that tests/docs are not shipped |
 
 ## Conventions

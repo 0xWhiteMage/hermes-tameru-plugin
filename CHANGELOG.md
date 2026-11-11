@@ -3,7 +3,27 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
-## [Unreleased]
+## [1.9.0] - 2026-11-11
+
+One release: the first candidate of 2026-11-09 (the second block below), then the cost-tuning and trust work of 2026-11-10 and 11. The plugin and the
+engine are versioned separately; this release vendors engine 1.9.0.
+
+### Changed (Hermes 0.23.1, CI)
+- **Tested on Hermes v0.23.1** (`3b421578`, `HERMES_PIN`). The stub, real-Hermes (3,289 tests), eval and Desktop panel (88) suites pass and the saved baselines were
+  re-recorded: only the pin and timing keys differ, so stock and Tameru behaviour are unchanged. The per-commit gate report is in `docs/gate-reports/`.
+- **CI ran on GitHub's runners for the first time and found four problems, all fixed:** the ruff rule set is now explicit in `pyproject.toml` (E4, E7, E9, F) and
+  the tree is clean under it (unused imports removed, one constant moved below the imports); the unit jobs fetch full history because the rollback-script tests
+  check out the `v1.6.0` tag; the real-Hermes jobs install through `uv` with a Pillow override, because Hermes pins Pillow exactly while its own
+  `browser-harness` dependency pins another version, which pip cannot resolve.
+- The Desktop panel tests find `jsdom` and `react` in `hermes-agent/apps/desktop/node_modules` (Hermes 0.23.1 moved them).
+
+### Measured and rejected (Phase 5)
+- **Cache-cold pruning is not worth an upstream hook.** An oracle in the replay (`TAMERU_ORACLE_COLD=1`, measurement only) offered the proactive prune at every turn
+  start that found the cache expired, the best any hook could do: mean change +0.09% (mixed idle) and +0.32% (slow idle) over 33 cells each, some cells -10% and
+  some +15%. The request is withdrawn in `docs/UPSTREAM-REQUESTS-DRAFT.md`; details in `docs/COST-TUNING-2026-11-10.md`.
+- **Live comparison on Hermes Desktop (Claude Haiku 4.5):** one heavy-output task cost $0.2094 (Tameru) against $0.2569 (stock), 18.5% cheaper (n=2 against 3); a
+  second task was inconclusive because the model took different tool paths. Free-running live comparisons cannot isolate a few percent; the replay stays the cost
+  instrument. Both are in `docs/COST-TUNING-2026-11-10.md` with their caveats.
 
 ### Added (gauntlet of 2026-11-10, phase 6; both off by default)
 - **`net_estimate: on`** adds a signed "Net estimate" line to `/tameru stats`: for each cleanup, tokens removed x replies since x 0.10
@@ -100,7 +120,7 @@ raises read-backs. `policy_mode: legacy` stays as a frozen fallback with no furt
 - `tests/eval/test_cost_matrix.py` (set `TAMERU_COST_MATRIX=out.json`; `TAMERU_COST_SCENARIOS`, `TAMERU_COST_WINDOWS` and `TAMERU_COST_ARMS` narrow it) measures every scenario, window and arm.
 - Baselines re-recorded; three strict known-loss entries (refactor and i18n at 32K, i18n at 48K) and the default-session cost xfail removed because they now pass.
 
-## [1.9.0] - 2026-11-09
+**First 1.9.0 candidate (2026-11-09):**
 
 ### Changed
 - The name is `Tameru (ためる)` everywhere: the Hermes plugin list, the engine's display name, the Desktop header, the

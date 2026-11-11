@@ -113,8 +113,8 @@ def test_counters_are_exact_under_threads():
 
 
 # ---- the log -----------------------------------------------------------------------------------
-def test_emit_appends_one_json_line_per_record(tmp_path):
-    log = tmp_path / "logs" / "tameru.jsonl"
+def test_emit_appends_one_json_line_per_record(log_root):
+    log = log_root / "logs" / "tameru.jsonl"
     t = Telemetry(str(log))
     t.emit({"pass": 1, "rung": "extract", "tool": "terminal", "before": 9000, "after": 800})
     t.emit({"pass": 2, "rung": "header"})
@@ -126,28 +126,28 @@ def test_emit_appends_one_json_line_per_record(tmp_path):
     assert lines[0] == json.dumps(json.loads(lines[0]), sort_keys=True, ensure_ascii=False)
 
 
-def test_emit_without_a_path_writes_nothing(tmp_path, monkeypatch):
-    cwd = tmp_path / "telemetry-cwd"   # a verified-empty cwd: autouse fixtures may own tmp_path
+def test_emit_without_a_path_writes_nothing(log_root, monkeypatch):
+    cwd = log_root / "telemetry-cwd"   # a verified-empty cwd: autouse fixtures may own log_root
     cwd.mkdir()
     monkeypatch.chdir(cwd)
     Telemetry().emit({"pass": 1})
     assert list(cwd.iterdir()) == []
 
 
-def test_emit_never_raises(tmp_path):
-    Telemetry(str(tmp_path)).emit({"pass": 1})                   # the path is a directory
-    Telemetry(str(tmp_path / "blocked" / "x.jsonl")).emit({})    # fine: parent created
-    blocker = tmp_path / "file"
+def test_emit_never_raises(log_root):
+    Telemetry(str(log_root)).emit({"pass": 1})                   # the path is a directory
+    Telemetry(str(log_root / "blocked" / "x.jsonl")).emit({})    # fine: parent created
+    blocker = log_root / "file"
     blocker.write_text("x")
     Telemetry(str(blocker / "x.jsonl")).emit({"pass": 1})        # a parent that is a file
     loop: dict = {}
     loop["self"] = loop
-    Telemetry(str(tmp_path / "loop.jsonl")).emit(loop)           # unserializable record
-    Telemetry(str(tmp_path / "ok.jsonl")).emit({"set": {1, 2}})  # default=str covers odd values
+    Telemetry(str(log_root / "loop.jsonl")).emit(loop)           # unserializable record
+    Telemetry(str(log_root / "ok.jsonl")).emit({"set": {1, 2}})  # default=str covers odd values
 
 
-def test_emit_is_exact_under_threads(tmp_path):
-    log = tmp_path / "t.jsonl"
+def test_emit_is_exact_under_threads(log_root):
+    log = log_root / "t.jsonl"
     t = Telemetry(str(log))
     threads = [
         threading.Thread(target=lambda n=n: [t.emit({"worker": n, "i": i}) for i in range(50)])
@@ -163,15 +163,15 @@ def test_emit_is_exact_under_threads(tmp_path):
 
 
 # ---- copies ------------------------------------------------------------------------------------
-def test_copy_and_deepcopy_give_a_fresh_instance_with_the_same_log(tmp_path):
-    t = Telemetry(str(tmp_path / "t.jsonl"))
+def test_copy_and_deepcopy_give_a_fresh_instance_with_the_same_log(log_root):
+    t = Telemetry(str(log_root / "t.jsonl"))
     t.count("render", rung="extract")
     t.add_chars(10, 1)
     for clone in (copy.copy(t), copy.deepcopy(t)):
         assert clone is not t
         assert clone.snapshot() == Telemetry().snapshot()
         clone.emit({"pass": 1})
-    assert (tmp_path / "t.jsonl").read_text(encoding="utf-8").count("\n") == 2
+    assert (log_root / "t.jsonl").read_text(encoding="utf-8").count("\n") == 2
     assert t.snapshot()["events"]["render"]["count"] == 1, "the original is untouched"
 
 
@@ -182,14 +182,14 @@ def test_deepcopy_of_a_holder_does_not_trip_over_the_lock():
     assert cloned["telemetry"] is not holder["telemetry"]
 
 
-def test_a_hold_applies_what_it_recorded_only_when_kept(tmp_path):
-    t = Telemetry(str(tmp_path / "t.jsonl"))
+def test_a_hold_applies_what_it_recorded_only_when_kept(log_root):
+    t = Telemetry(str(log_root / "t.jsonl"))
     with t.hold() as held:
         t.count("render", rung="extract")
         t.add_chars(100, 10)
         t.emit({"event": "render"})
         assert t.snapshot()["events"] == {} and t.snapshot()["chars"]["before"] == 0
-    assert t.snapshot()["events"] == {} and not (tmp_path / "t.jsonl").exists()
+    assert t.snapshot()["events"] == {} and not (log_root / "t.jsonl").exists()
 
     with t.hold() as held:
         t.count("render", rung="extract")
@@ -198,7 +198,7 @@ def test_a_hold_applies_what_it_recorded_only_when_kept(tmp_path):
         held.keep = True
     snapshot = t.snapshot()
     assert snapshot["events"]["render"]["count"] == 1 and snapshot["chars"]["saved"] == 90
-    assert (tmp_path / "t.jsonl").read_text().count("\n") == 1
+    assert (log_root / "t.jsonl").read_text().count("\n") == 1
 
 
 def test_a_hold_that_raises_drops_its_counts_and_time_is_never_held():
@@ -215,8 +215,8 @@ def test_a_hold_that_raises_drops_its_counts_and_time_is_never_held():
     assert t.snapshot()["time"]["calls"] == 1
 
 
-def test_prepared_telemetry_can_be_published_later_only_once(tmp_path):
-    log = tmp_path / "deferred.jsonl"
+def test_prepared_telemetry_can_be_published_later_only_once(log_root):
+    log = log_root / "deferred.jsonl"
     telemetry = Telemetry(str(log))
     with telemetry.hold() as prepared:
         telemetry.count("render", rung="extract")
@@ -251,20 +251,20 @@ def test_an_inner_hold_defers_to_the_outer_one():
     assert t.snapshot()["events"]["a"]["count"] == 1
 
 
-def test_the_log_path_is_confined_and_network_or_device_paths_are_refused(tmp_path, monkeypatch):
+def test_the_log_path_is_confined_and_network_or_device_paths_are_refused(log_root, monkeypatch):
     from hermes_tameru_plugin.telemetry import safe_log_path
-    monkeypatch.setenv("HERMES_HOME", str(tmp_path / "home"))
-    assert safe_log_path(str(tmp_path / "home" / "t.jsonl")) is not None
-    assert safe_log_path(str(tmp_path / "elsewhere.jsonl")) is not None   # the system temp folder is allowed
+    monkeypatch.setenv("HERMES_HOME", str(log_root / "home"))
+    assert safe_log_path(str(log_root / "home" / "t.jsonl")) is not None
+    assert safe_log_path(str(log_root / "elsewhere.jsonl")) is not None   # the system temp folder is allowed
     for bad in ("", "\\\\server\\share\\t.jsonl", "//server/share/t.jsonl", "bad\x00name",
                 "C:\\Windows\\System32\\t.jsonl", "/etc/t.jsonl"):
         assert safe_log_path(bad) is None, bad
 
 
-def test_the_log_rotates_once_it_is_large(tmp_path, monkeypatch):
+def test_the_log_rotates_once_it_is_large(log_root, monkeypatch):
     from hermes_tameru_plugin import telemetry
     monkeypatch.setattr(telemetry, "LOG_MAX_BYTES", 200)
-    log = tmp_path / "t.jsonl"
+    log = log_root / "t.jsonl"
     t = Telemetry(str(log))
     for index in range(20):
         t.emit({"event": "x", "n": index, "pad": "p" * 30})

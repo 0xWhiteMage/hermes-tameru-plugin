@@ -1,5 +1,7 @@
 # Subagent grants: security design review (2026-11-10)
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 Scope: should a delegate_task subagent be able to call tameru_read_original on refs its parent holds? Read-only review; no code changed.
 
 ## 1. What Hermes exposes today (verified in source)

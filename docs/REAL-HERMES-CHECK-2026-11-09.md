@@ -1,5 +1,7 @@
 # Real-Hermes check of 1.9.0 (2026-11-09)
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 The plugin's own tests run against a stub of Hermes by default; the checks marked `real_hermes` (and the whole of
 `tests/eval`) run only against a real checkout (`HERMES_REPO_ROOT`). Until today none of the 1.7 to 1.9 work had been
 run against real Hermes, and a test run against a real install could not be done safely. This note records what the

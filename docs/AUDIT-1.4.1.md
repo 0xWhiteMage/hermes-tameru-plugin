@@ -1,5 +1,7 @@
 # Tameru plugin 1.4.1 source audit — 12 October 2026
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 ## Scope and identity
 
 The standalone plugin's package, manifest and vendored engine identify 1.4.1. The engine source is `dbe40619b9ebcb1595269809dd9f963b1c246015`; Hermes compatibility is pinned to `a0a49926f44c231f3456faffeaa4b1cc8ee4274c`. GitHub tag/Release publication is still pending.

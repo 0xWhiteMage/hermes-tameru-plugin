@@ -110,6 +110,15 @@ def _isolated_learned_prior(tmp_path, monkeypatch):
     monkeypatch.setenv("TAMERU_LEARNED_DIR", str(tmp_path / "learned"))
 
 
+
+@pytest.fixture
+def log_root():
+    """A fresh directory under ``tempfile.gettempdir()``: the telemetry log is confined to ``HERMES_HOME`` and the system temp folder,
+    and pytest's own ``tmp_path`` is not always under the latter when real Hermes has been imported."""
+    path = Path(tempfile.mkdtemp(prefix="tameru-log-"))
+    yield path
+    shutil.rmtree(path, ignore_errors=True)
+
 @pytest.fixture
 def hermes_home(tmp_path, monkeypatch) -> Path:
     """A fresh ``HERMES_HOME`` for one test (config.yaml, plugins/, ...)."""

@@ -1,5 +1,7 @@
 # Repo audit, 2026-11-09 (Ponytail audit method)
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 Method: the `ponytail-audit` procedure (DietrichGebert/ponytail, MIT), applied by hand to both repositories. Nothing from
 Ponytail was installed or run: its skills are plain instructions, so only the method was used. Reading order was README,
 build config, entry points, then the paths where a mistake costs most (the summary ledger, Keep/Restore, pins, host-settings

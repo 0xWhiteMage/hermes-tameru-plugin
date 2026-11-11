@@ -1,5 +1,7 @@
 # Live Hermes validation — 2026-11-06
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 Real stack: `hermes serve` (tui_gateway JSON-RPC, the Desktop wire path) on
 127.0.0.1:9520, model gpt-4.1 via GitHub Copilot, plugin installed at
 `~/AppData/Local/hermes/plugins/tameru`, enabled via `plugins.enabled`,

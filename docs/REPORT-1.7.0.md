@@ -1,5 +1,7 @@
 # Tameru 1.7.0 candidate: validation and replay
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 Recorded 2026-11-05. This report describes the local 1.7.0 candidate and its
 captured checks. It does not establish publication or catalog acceptance.
 

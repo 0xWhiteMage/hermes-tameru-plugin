@@ -4,8 +4,10 @@ Short, step-by-step answers for when something looks wrong. Everything here uses
 this release. Tameru never edits saved chat history, so every step below is safe to take and undo.
 
 **Where settings live.** `$HERMES_HOME/config.yaml` under `plugins.entries.tameru.settings.<name>`, or an environment
-variable `TAMERU_HERMES_<NAME>` (any setting). The four emergency switches `edits`, `manifest`, `autotune` and
-`adaptive_host`, `pins` and `learned_priors` also answer to the short `TAMERU_<NAME>` (for example `TAMERU_EDITS=off`); the long name wins. `adaptive_host` and `learned_priors` are off by default; turn them on with `TAMERU_ADAPTIVE_HOST=on` / `TAMERU_LEARNED_PRIORS=on`. Restart the Hermes gateway after changing either.
+variable `TAMERU_HERMES_<NAME>` (any setting). The feature switches `edits`, `manifest`, `autotune`, `pins`, `adaptive_host`, `learned_priors`,
+`lazy_tool`, `net_estimate` and `stats_ledger` also answer to the short `TAMERU_<NAME>` (for example `TAMERU_EDITS=off`); the long name wins.
+`adaptive_host`, `learned_priors`, `lazy_tool`, `net_estimate` and `stats_ledger` are off by default. Settings are read when the engine is
+created: restart the Hermes gateway after changing one.
 **Where to look.** `/tameru` in any client prints compression progress and, at the bottom, a *Health* line that counts
 secrets held back and commands refused (it appears only when something was counted). Desktop shows the same counters
 in its hover cards.
@@ -16,7 +18,10 @@ in its hover cards.
 | `manifest: off` | the per-turn `<tameru_note>` sent to the model |
 | `autotune: off` | self-tuning (the policy stays where it is) |
 | `/tameru pause` | all Tameru changes to this chat until `/tameru resume` |
-| `enabled: false` | Tameru entirely |
+| `pins: off` | pinned instructions |
+| `lazy_tool: off` (the default) | the recovery-tool filter: the tool is listed on every request again |
+| `net_estimate: off`, `stats_ledger: off` (the defaults) | the net-cost estimate and the daily totals in `/tameru stats` |
+| `enabled: false` | Tameru entirely: stock Hermes, no hooks and no system-prompt note |
 
 ## A. A secret appeared where it should not
 
@@ -63,8 +68,9 @@ State per chat lives in Hermes session metadata under two keys, `tameru_tuner_v1
 
 1. `/tameru cancel` and `/tameru unkeep REF` clear edits one by one.
 2. Starting a new chat starts from clean per-chat state.
-3. There is no reset command in 1.8.0; if you must clear a chat's keys, do it through Hermes' session tools, not by
-   editing the database by hand.
+3. `/tameru reset` lists what it would clear for this chat (self-tuning offsets, bias, pause, Hermes-setting offsets) and changes nothing until
+   `/tameru reset confirm`; pins and Keeps stay (`/tameru unpin N`, `/tameru unkeep REF`). To clear anything else, use Hermes' session tools, not
+   the database by hand.
 
 ## F. Self-tuning seems off (too aggressive or stuck)
 
@@ -91,7 +97,8 @@ The Desktop panel and the Python plugin carry the same build number; a mismatch 
 
 ## H. Roll back
 
-Use `scripts/rollback.ps1`. It restores a tagged release (default `v1.6.0`, the last published release; 1.7.0 and 1.8.0 were never released and are part of 1.9.0) from this
+Use `scripts/rollback.ps1` (or `scripts/rollback.sh`). It restores a tagged release or any commit (`-Tag v1.6.0` is the default and the last
+published release; `-Ref <commit>` takes a commit; 1.7.0 and 1.8.0 were never released and are part of 1.9.0) from this
 repository into `$HERMES_HOME/plugins/tameru` (or `tameru_(ためる)` if `scripts/use_display_name.ps1` was run) and the Desktop copy, keeps a timestamped backup of what it replaced in `$HERMES_HOME/plugin-backups/` (outside the folders Hermes and Desktop scan),
 makes no network calls, and changes nothing unless you pass `-Apply`.
 
@@ -113,3 +120,17 @@ not exist, Hermes falls back to its built-in compressor and logs "Context engine
 Settings or `config.yaml`, then restart the gateway. Only one copy of the plugin may sit in `plugins/` and one panel in `desktop-plugins/`: both are loaded from every folder
 there, hidden or not, so a leftover backup breaks the panel ("duplicate id tameru" in `desktop.log`). Move backups to
 `plugin-backups/`.
+
+## J. The recovery tool is missing from a chat (or is always there)
+
+With `lazy_tool: on`, `tameru_read_original` is left out of the request until Tameru has shortened something in this chat, then listed for good. That is
+intended. `/tameru stats` shows what the filter did: `hidden N` (left out), `listed N` (sent), `unsupported (...)` (the request was not changed, with the
+reason: an unsupported API mode, no tool list, or the tool not found) and `no_chat_found N`. Only chat-completions and Anthropic requests are touched
+(Anthropic subscription routes prefix every tool name with `mcp__`; that form is recognised too). If the model needs the tool before a result was
+shortened, or something looks wrong, set `lazy_tool: off` and restart the gateway; the tool is then listed on every request, as before.
+
+## K. The stats ledger
+
+`stats_ledger: on` keeps daily totals only (cleanups and tokens removed) in `$HERMES_HOME/tameru/stats-ledger.json`, for 90 days, shown in
+`/tameru stats` as "Last 7 days". It holds no chat id, text, tool name or path and is never read by policy code. `/tameru reset stats` says what it
+holds; `/tameru reset stats confirm` deletes it; deleting the file does the same. A ledger problem never reaches a chat.

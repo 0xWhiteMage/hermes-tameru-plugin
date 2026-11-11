@@ -1,5 +1,7 @@
 # Tameru for Hermes 1.5.0: report
 
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+
 Date: 2026-10-13. Plugin `claude/funny-albattani-gac36w` (merge `559f61d` and later), engine Tameru 1.5.0 (`933aa33`).
 Verified against Hermes `a0a4992` (CI pin), `63d0b94` and `6e7b83a2f1` (main on this date).
 
