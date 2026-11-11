@@ -110,25 +110,21 @@ many sessions can lower `store_max_chars`. See the
 - Use the default `plugins.isolation: in_process`. Under `host` isolation,
   archive-backed recovery after restart is limited.
 
-## Measured on the 1.7.0 candidate (first released in 1.8.0)
+## What was measured (version 1.9.0)
 
-A replay compared 60 scripted sessions per arm at six context-window sizes
-against Hermes `a0a49926`:
+A replay of scripted agent sessions against real Hermes v0.23.1 (11 session shapes, six varied sessions per cell, Hermes' measured tool block, a deliberately
+lossy fake summarizer, prefix-cache pricing; a fact an arm dropped is priced as a re-run of the tool) gives these costs against Hermes as shipped:
 
-| Metric | Stock Hermes | With Tameru |
-|---|---:|---:|
-| Turns failing after overflow recovery | 76 | 0 |
-| Required snippets present in final requests | 705 / 1,044 | 859 / 1,044 |
-| Fake-summary calls | 106 | 48 |
+| Mean over the shapes | 64K window | 128K | 200K |
+|---|---:|---:|---:|
+| Tameru | -0.6% | -7.2% | -7.4% |
+| Tameru with `lazy_tool: on` | -1.4% | -8.1% | -8.4% |
 
-Mean paired simulated input-cost change was **−3.21%**; Tameru cost more in
-12 of 60 pairs. These are synthetic retention and character-priced cache checks,
-not live task-success or provider-billing measurements.
-[Full report and raw captures](https://github.com/0xWhiteMage/hermes-tameru-plugin/blob/main/docs/REPORT-1.7.0.md).
-
-Live Electron validation remains pending; the bundled panel's DOM behavior tests
-pass. Pressure-aware task preferences are a research proposal, not a shipped
-feature of this candidate.
+Hermes keeps 2,603 needed facts and loses 457; Tameru keeps 2,805, can read back 86 more and loses 169. Tameru costs more in some cases: at a 64K window with
+`refactor`-like work (+8.4%), with many small results (+3.8% at 64K), and by about 2% in a session that never reaches a compaction (which `lazy_tool` removes).
+On Hermes Desktop with Claude Haiku 4.5, one heavy-output task cost $0.2094 with Tameru against $0.2569 for stock (n=2 against 3); a second task was
+inconclusive. These are synthetic and small live checks, not a promise about your bill.
+[Method, every result and the rejected ideas](https://github.com/0xWhiteMage/hermes-tameru-plugin/blob/main/docs/COST-TUNING-2026-11-10.md).
 
 ## Links
 
