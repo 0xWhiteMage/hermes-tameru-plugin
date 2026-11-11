@@ -1,0 +1,30 @@
+{
+ "commit": "510410fd5a13ce59bafbaf70c7ae512a06928aa3",
+ "clean": true,
+ "created": "2026-11-11T01:18:38+00:00",
+ "hermes_pin": "3b421578588243f920886e6fe79a6faa87ea026e",
+ "hermes_checkout": "3b421578588243f920886e6fe79a6faa87ea026e",
+ "stock_canary": "332e21928e64809318ee456a0caa182c6bac50915496a93d0a684c963d933c14",
+ "suites": [
+  {
+   "name": "stub",
+   "exit_code": 0,
+   "summary": "2095 passed, 1246 skipped, 3 warnings in 45.48s",
+   "passed": true
+  },
+  {
+   "name": "real_hermes",
+   "exit_code": 0,
+   "summary": "3289 passed, 7 skipped, 55 xfailed, 7 warnings in 414.79s (0:06:54)",
+   "passed": true
+  },
+  {
+   "name": "desktop_panel",
+   "exit_code": 0,
+   "summary": "\u00e2\u201e\u00b9 duration_ms 4330.7432",
+   "passed": true
+  }
+ ],
+ "skipped": [],
+ "passed": true
+}
