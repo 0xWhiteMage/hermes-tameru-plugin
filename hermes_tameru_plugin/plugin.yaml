@@ -11,5 +11,5 @@ provides_hooks:
   - pre_llm_call
 provides_middleware:
   - llm_request
-license: MIT
+license: Apache-2.0
 homepage: https://github.com/0xWhiteMage/hermes-tameru-plugin

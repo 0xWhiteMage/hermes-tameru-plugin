@@ -545,4 +545,4 @@ Then update `VENDORED_FROM`, run both test modes and review the replay baselines
 
 ## License
 
-MIT, same as upstream Tameru. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Apache License 2.0, same as the Tameru engine. See [LICENSE](LICENSE), [NOTICE](NOTICE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -1,6 +1,6 @@
 # Third-party notices
 
-This repository is MIT-licensed (see `LICENSE`). The files listed below incorporate or are derived
+This repository is Apache-2.0-licensed (see `LICENSE`). The files listed below incorporate or are derived
 from third-party MIT-licensed code. They are **test fixtures only**: they live under `tests/`, are
 not part of the wheel, and are used only when a real Hermes Agent checkout is not available
 (`HERMES_REPO_ROOT` unset).
@@ -47,5 +47,5 @@ SOFTWARE.
 ## Tameru compaction engine
 
 `hermes_tameru_plugin/tameru/` is vendored from
-<https://github.com/0xWhiteMage/tameru-compaction-system> (`src/tameru/`), MIT, same copyright
+<https://github.com/0xWhiteMage/tameru-compaction-system> (`src/tameru/`), Apache-2.0, same copyright
 holder as this repository.

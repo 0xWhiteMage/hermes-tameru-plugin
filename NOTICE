@@ -1,0 +1,7 @@
+hermes-tameru-plugin
+Copyright 2026 Benjamin Ang
+
+This product includes software developed by Benjamin Ang (The White Mage).
+
+This plugin vendors the Tameru compaction engine (https://github.com/0xWhiteMage/tameru-compaction-system), Apache-2.0, same copyright holder.
+Test fixtures derived from Hermes Agent (MIT, Nous Research) are listed in THIRD_PARTY_NOTICES.md.

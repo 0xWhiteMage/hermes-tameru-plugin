@@ -3,6 +3,11 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased]
+
+- **Licence: MIT to Apache License 2.0**, matching the engine. `LICENSE` is the Apache-2.0 text, `NOTICE` is new, and `pyproject.toml` and `plugin.yaml` declare `Apache-2.0`. The Hermes-derived test fixtures keep their MIT notice (`THIRD_PARTY_NOTICES.md`).
+- Documentation: the README is rewritten for users with a recording for each feature; six historical docs and the remote-gateway address in the cost notes are removed.
+
 ## [1.9.0] - 2026-11-11
 
 One release: the first candidate of 2026-11-09 (the second block below), then the cost-tuning and trust work of 2026-11-10 and 11. The plugin and the

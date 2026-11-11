@@ -132,4 +132,4 @@ inconclusive. These are synthetic and small live checks, not a promise about you
 - [Changelog](https://github.com/0xWhiteMage/hermes-tameru-plugin/blob/main/CHANGELOG.md)
 - [Tameru compaction engine](https://github.com/0xWhiteMage/tameru-compaction-system)
 
-MIT licensed.
+Apache License 2.0.
