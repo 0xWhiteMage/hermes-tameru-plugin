@@ -22,7 +22,7 @@ HEADING = "## Pinned by you (Tameru, verbatim)"
 MAX_PINS = 5
 PIN_CHARS = 300
 TOTAL_CHARS = 1500
-_CONTROL = re.compile(r"[\x00-\x1f\x7f  ‪-‮⁦-⁩]")
+_CONTROL = re.compile(r"[\x00-\x1f\x7f\u2028\u2029\u202a-\u202e\u2066-\u2069]")   # control characters, line separators and direction overrides, written as escapes
 _USER_ASKED = re.compile(r"\bUser\s+asked\s*:", re.IGNORECASE)
 _FRAME = re.compile(r"</?\s*tameru", re.IGNORECASE)
 _SECTION = re.compile(rf"^{re.escape(HEADING)}[^\n]*(?:\n|\Z).*?(?=^## |\Z)", re.MULTILINE | re.DOTALL)
