@@ -54,3 +54,11 @@ def test_the_rewrite_cost_does_not_count_tokens_the_cleanup_removed():
     assert whole["cost"] == 0                      # the cleanup removed the whole suffix: nothing is rewritten
     half = estimate([(500, 1_000, 0)], responses_now=0)
     assert half["cost"] == round(1_000 * 1.15 - 500 * 1.25)
+
+
+def test_a_recorded_rewritten_part_replaces_the_whole_suffix_in_the_cost():
+    # The new assistant call and tool results are written to the cache either way; only the cached part is a rewrite.
+    detail = {"rewritten": 2_000, "unsent": 1_000}
+    result = estimate([(500, 3_000, 0, detail)], responses_now=0)
+    assert result["cost"] == round(2_000 * 1.15 - 500 * 1.25)
+    assert estimate([(500, 3_000, 0)], responses_now=0)["cost"] == round(3_000 * 1.15 - 500 * 1.25)    # the old 3-field event still works

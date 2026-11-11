@@ -22,7 +22,10 @@ from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
 REGISTER = Path(__file__).with_name("holdout_looks.json")
-HOLDOUTS = ("longform", "mixedlang", "diagnostics", "rereads", "dense", "bursty")
+# ``bursty`` appeared in every tuning table and in rejected sweeps, so it is a development shape, not a holdout.
+# The ``blind_*`` scenarios were written by a separate agent that never saw the product, its results or the other holdouts.
+BLIND = ("blind_migration", "blind_perf", "blind_audit", "blind_support")
+HOLDOUTS = ("longform", "mixedlang", "diagnostics", "rereads", "dense", *BLIND)
 
 
 def product_hash(root: Path = ROOT) -> str:

@@ -261,6 +261,8 @@ class _Pass:
     native_options: dict = field(default_factory=dict)  # per-pass native gate overrides
     policy_before_tokens: int = 0               # body tokens before the plan's stage
     policy_after_tokens: "int | None" = None    # body tokens after the selected stage
+    policy_rewritten_tokens: "int | None" = None   # the part of that suffix the provider had already cached (up to the new assistant call)
+    policy_unsent_tokens: "int | None" = None   # the new assistant call and tool results, never cached (written at full price either way)
     policy_suffix_tokens: "int | None" = None   # tokens from the first changed message to the end (the rewritten cache suffix)
     policy_stage_index: int = 0
     full_local: bool = False

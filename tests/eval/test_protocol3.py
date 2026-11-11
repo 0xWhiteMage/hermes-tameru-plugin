@@ -160,3 +160,23 @@ def test_grow_makes_outputs_longer_and_keeps_every_planted_fact():
         if fact.source == "tool":
             assert fact.needle in text or json.dumps(fact.needle, ensure_ascii=False)[1:-1] in text, fact.id
     assert protocol3.structural_variant(base, 0, grow=1.0) is base          # the default is still the script itself
+
+
+def test_a_row_carries_the_scorecard_and_is_still_deterministic():
+    one = protocol3.measure("tameru_1_4_product", "oncall", 32_000, 0)
+    assert one == protocol3.measure("tameru_1_4_product", "oncall", 32_000, 0)
+    for key in ("requests", "prune_commits", "prefix_breaks", "mean_request_chars", "first_compaction_request"):
+        assert key in one
+    assert one["requests"] > 0 and one["mean_request_chars"] > 0 and "timing" not in one
+    timed = protocol3.measure("tameru_1_4_product", "oncall", 32_000, 0, timing=True)
+    assert timed["timing"]["engine_seconds"] >= 0 and {k: v for k, v in timed.items() if k != "timing"} == one
+
+
+def test_other_cache_prices_change_the_cost_and_restore_afterwards():
+    import replay
+
+    plain = protocol3.measure("stock_defaults", *CELL)
+    with protocol3.pricing(read=0.05):
+        cheaper_reads = protocol3.measure("stock_defaults", *CELL)
+    assert cheaper_reads["base"] < plain["base"] and (replay.CACHE_WRITE, replay.CACHE_READ) == (1.25, 0.10)
+    assert protocol3.measure("stock_defaults", *CELL) == plain

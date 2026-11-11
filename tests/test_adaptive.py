@@ -1093,3 +1093,14 @@ def test_the_preference_setting_seeds_the_tuner_bias(hermes_home, monkeypatch):
     for preference, bias in (("save_space", -1.0), ("balanced", 0.0), ("preserve_detail", 1.0)):
         engine = _observation_engine(monkeypatch, preference=preference)
         assert engine._policy.tuner.bias == bias
+
+
+def test_the_unsent_tail_is_the_last_assistant_call_and_its_tool_results():
+    from hermes_tameru_plugin.adaptive import _unsent_start
+
+    rows = [{"role": "user"}, {"role": "assistant", "tool_calls": [1]}, {"role": "tool"}, {"role": "assistant", "tool_calls": [2]},
+            {"role": "tool"}, {"role": "tool"}]
+    assert _unsent_start(rows) == 3                           # the last call and its two results were never sent
+    assert _unsent_start(rows[:3]) == 1
+    assert _unsent_start([{"role": "user"}]) == 1             # nothing after the last user message is unsent
+    assert _unsent_start([]) == 0

@@ -26,7 +26,12 @@ def estimate(events, responses_now: int) -> dict[str, Any] | None:
     saving = cost = 0.0
     unknown = 0
     count = 0
-    for removed, suffix, at in events:
+    for event in events:
+        removed, suffix, at = event[0], event[1], event[2]
+        detail = event[3] if len(event) > 3 and isinstance(event[3], dict) else {}
+        rewritten = detail.get("rewritten")
+        if isinstance(rewritten, int) and rewritten >= 0:
+            suffix = rewritten             # only text the provider had cached is a real rewrite; the new rows are written either way
         if not isinstance(removed, int) or removed <= 0:
             continue
         count += 1

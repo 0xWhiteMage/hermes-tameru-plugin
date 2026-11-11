@@ -69,6 +69,20 @@ class _Commit:
     method: str = "proactive"
 
 
+def _unsent_start(messages) -> int:
+    """Index where the not-yet-sent tail starts: the last assistant message and the tool results after it.
+
+    Those rows were produced after the previous request, so they are written to the provider's cache at full price whether or not
+    a prune happens; only the rows before them are a real rewrite of cached text.
+    """
+    index = len(messages)
+    while index > 0 and messages[index - 1].get("role") == "tool":
+        index -= 1
+    if index > 0 and messages[index - 1].get("role") == "assistant":
+        return index - 1
+    return index
+
+
 class PolicyRuntime:
     """Observed policy state: controls plus a small bounded growth history.
 
@@ -484,6 +498,10 @@ class AdaptiveMixin:
                  if old is not new and any(old.get(k) != new.get(k) for k in _WIRE_KEYS)),
                 len(candidate))
             suffix = message_budget_tokens(messages[first_changed:])
+            unsent_at = _unsent_start(messages)
+            stage_scope.policy_unsent_tokens = message_budget_tokens(messages[max(first_changed, unsent_at):])
+            stage_scope.policy_rewritten_tokens = (message_budget_tokens(messages[first_changed:unsent_at])
+                                                   if unsent_at > first_changed else 0)
             required = plan.required_reclaim(suffix)
             stage_scope.native_options["proactive_prune_min_reclaim_tokens"] = required
             stage_scope.policy_after_tokens = after
@@ -524,6 +542,7 @@ class AdaptiveMixin:
             self._policy.last_commit = _Commit(plan.stage, reclaim, plan, method)
             self._policy.last_check = _Check(
                 "committed", plan.input_tokens, scope.policy_before_tokens, plan.reason, plan)
+            growth_samples = sorted(self._policy.growth)
             self._policy.growth.clear()          # the committed body is the new baseline
             self._policy.last_body_tokens = after
             self._policy.decline_streak = 0
@@ -535,8 +554,13 @@ class AdaptiveMixin:
             if getattr(self._settings, "stats_ledger", False) and reclaim > 0:
                 from .stats_ledger import record_cleanup
                 record_cleanup(int(reclaim))
+            threshold = int(self._policy_threshold_tokens() or 0)
+            detail = {"rewritten": getattr(scope, "policy_rewritten_tokens", None),
+                      "unsent": getattr(scope, "policy_unsent_tokens", None),
+                      "growth": growth_samples[len(growth_samples) // 2] if growth_samples else None,
+                      "headroom": threshold - after if threshold > 0 else None}
             self._policy.cost_events.append((max(0, reclaim), getattr(scope, "policy_suffix_tokens", None),
-                                             getattr(self, "_responses", 0)))
+                                             getattr(self, "_responses", 0), detail))
             changes = list(getattr(scope, "changes", {}).values())[:8]
             refs = [c.ref for c in changes if isinstance(getattr(c, "ref", None), str)]
             tools = []

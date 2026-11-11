@@ -34,23 +34,23 @@ def test_the_hash_ignores_line_endings_and_pycache_but_not_content(tree):
 
 def test_a_first_look_is_recorded_and_a_repeat_look_needs_a_reason(tree, tmp_path):
     register = tmp_path / "looks.json"
-    first = reg.record_look("3", ["bursty", "dense"], note="first", register=register, root=tree)
+    first = reg.record_look("3", ["longform", "dense"], note="first", register=register, root=tree)
     assert first["looks_at_this_hash"] == 1 and first["again"] == ""
     with pytest.raises(ValueError, match="already looked at"):
-        reg.record_look("3", ["bursty"], register=register, root=tree)
-    second = reg.record_look("3", ["bursty"], again="a holdout cell failed to load", register=register, root=tree)
+        reg.record_look("3", ["longform"], register=register, root=tree)
+    second = reg.record_look("3", ["longform"], again="a holdout cell failed to load", register=register, root=tree)
     assert second["looks_at_this_hash"] == 2 and second["again"] == "a holdout cell failed to load"
     assert len(json.loads(register.read_text(encoding="utf-8"))) == 2
 
 
 def test_a_changed_product_is_a_new_look_by_construction(tree, tmp_path):
     register = tmp_path / "looks.json"
-    reg.record_look("3", ["bursty"], register=register, root=tree)
+    reg.record_look("3", ["longform"], register=register, root=tree)
     (tree / "hermes_tameru_plugin" / "b.py").write_text("y = 3\n", encoding="utf-8")
-    assert reg.record_look("3", ["bursty"], register=register, root=tree)["looks_at_this_hash"] == 1
+    assert reg.record_look("3", ["longform"], register=register, root=tree)["looks_at_this_hash"] == 1
 
 
-@pytest.mark.parametrize("phase,scenarios", [("", ["bursty"]), ("3", []), ("3", ["oncall"]), ("3", ["bursty", "nope"])])
+@pytest.mark.parametrize("phase,scenarios", [("", ["longform"]), ("3", []), ("3", ["oncall"]), ("3", ["longform", "nope"])])
 def test_bad_input_is_refused(tree, tmp_path, phase, scenarios):
     with pytest.raises(ValueError):
         reg.record_look(phase, scenarios, register=tmp_path / "looks.json", root=tree)

@@ -18,6 +18,7 @@ Run ``TAMERU_P3_MATRIX=out.json python -m pytest tests/eval/test_protocol3.py`` 
 """
 from __future__ import annotations
 
+import contextlib
 import dataclasses
 import json
 import random
@@ -229,8 +230,26 @@ def idle_options(profile: str) -> dict:
     return {"cache_ttl_s": CACHE_TTL_SECONDS, "idle_seconds": IDLE_PROFILES[profile]}
 
 
+@contextlib.contextmanager
+def pricing(*, write: float | None = None, read: float | None = None):
+    """Price the replay with other cache multipliers (a model whose reads cost less, or a tier whose writes cost more).
+
+    Defaults are the replay's own (read 0.10, write 1.25), so a run outside this block is unchanged and the saved baselines do not move.
+    The read-back and re-run prices in ``measure`` follow the write multiplier.
+    """
+    saved = (replay.CACHE_WRITE, replay.CACHE_READ)
+    if write is not None:
+        replay.CACHE_WRITE = write
+    if read is not None:
+        replay.CACHE_READ = read
+    try:
+        yield
+    finally:
+        replay.CACHE_WRITE, replay.CACHE_READ = saved
+
+
 def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: str = "crude", structural: bool = False,
-            idle: str = "none", grow: float = 1.0) -> dict:
+            idle: str = "none", grow: float = 1.0, timing: bool = False) -> dict:
     """One replay of ``arm`` on ``scenario`` at ``window``, with the needed facts sorted and priced."""
     made: list[Any] = []
 
@@ -271,10 +290,18 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
             unrecoverable.append(fact.id)
     answered = max(1, metrics["turns"] - metrics["failed_turns"])
     base = metrics["total_simulated_input_cost"]
-    return {
+    compress_at = [e["request"] for e in result["series"]["events"] if e.get("kind") == "compress"]
+    row = {
         "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer, "structural": structural, "idle": idle, "grow": grow,
         "compactions": metrics["compactions"], "failed_turns": metrics["failed_turns"], "base": round(base / answered, 1), "effective": round((base + extra) / answered, 1),
         "needed": len(kept) + len(recoverable) + len(lost),
         "kept": len(kept), "recoverable": len(recoverable), "lost": len(lost), "lost_unrecoverable": len(unrecoverable),
         "kept_ids": kept, "recoverable_ids": recoverable, "lost_ids": lost,
+        # the scorecard beyond cost and facts (all deterministic): runway, extra requests, cache breaks, prompt size
+        "requests": metrics["requests"], "prune_commits": metrics["prune_commits"], "prefix_breaks": metrics["prefix_break_events"],
+        "mean_request_chars": round(metrics["input_chars_total"] / max(1, metrics["requests"]), 1),
+        "first_compaction_request": compress_at[0] if compress_at else None,
     }
+    if timing:       # wall-clock seconds spent inside the engine: informative, never part of an identity check
+        row["timing"] = {"engine_seconds": result["timing"]["engine_seconds"]}
+    return row
