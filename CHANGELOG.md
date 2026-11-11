@@ -15,6 +15,7 @@ engine are versioned separately; this release vendors engine 1.9.0.
   the tree is clean under it (unused imports removed, one constant moved below the imports); the unit jobs fetch full history because the rollback-script tests
   check out the `v1.6.0` tag; the real-Hermes jobs install through `uv` with a Pillow override, because Hermes pins Pillow exactly while its own
   `browser-harness` dependency pins another version, which pip cannot resolve.
+- The manifest declares `requires_hermes: ">=0.23.0"` (the range 1.9.0 was tested on), as the catalogue's compatibility rule asks; the catalogue entry carries the same floor.
 - The Desktop panel tests find `jsdom` and `react` in `hermes-agent/apps/desktop/node_modules` (Hermes 0.23.1 moved them).
 
 ### Measured and rejected (Phase 5)

@@ -217,7 +217,7 @@ or `/tameru keep REF`); to keep a line of your own through every summary, use `/
 ## Requirements
 
 - Python 3.11 to 3.14.
-- Hermes Agent with the context-engine plugin API (see [Compatibility](#compatibility)).
+- Hermes Agent 0.23.0 or later (`requires_hermes` in the manifest; tested on v0.23.0 and v0.23.1, see [Compatibility](#compatibility)).
 - No runtime dependencies (standard library only; `pyyaml` is a fallback config reader if Hermes' loader is
   unavailable).
 
