@@ -61,7 +61,8 @@ def test_limits_on_how_many_and_how_long_together():
 
 def test_unpin_by_number():
     state = PinState()
-    state.add("one"); state.add("two")
+    state.add("one")
+    state.add("two")
     assert state.drop(1) == "one" and state.items == ["two"]
     with pytest.raises(PolicyError):
         state.drop(5)

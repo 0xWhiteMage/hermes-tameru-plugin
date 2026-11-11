@@ -149,7 +149,8 @@ def test_the_older_policy_verb_still_works():
 
 def test_posture_events_say_what_the_user_did():
     engine = _bound()
-    _cmd(engine, "bias detail"); _cmd(engine, "pause"); _cmd(engine, "resume"); _cmd(engine, "bias save")
+    for command in ("bias detail", "pause", "resume", "bias save"):
+        _cmd(engine, command)
     text = render_text(build_snapshot(engine), ascii_only=True, timeline=10)
     assert "you set the preference to keeping detail" in text
     assert "you paused Tameru" in text and "you resumed Tameru" in text

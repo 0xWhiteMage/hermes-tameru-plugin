@@ -10,7 +10,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import sys
 import tempfile
 import time
@@ -38,18 +37,14 @@ from hermes_tameru_plugin import register  # noqa: E402
 from hermes_tameru_plugin.config import TameruSettings, load_settings  # noqa: E402
 from hermes_tameru_plugin.engine import TameruContextEngine  # noqa: E402
 from hermes_tameru_plugin.hermes_compat import (  # noqa: E402
-    has_untrusted_wrapper,
     is_untrusted_tool,
     wrap_untrusted,
     wrapped_intact,
 )
-from hermes_tameru_plugin import recovery  # noqa: E402
 from hermes_tameru_plugin.recovery import OriginalStore, expand  # noqa: E402
 from hermes_tameru_plugin.render import (  # noqa: E402
     classify_render,
     for_summary,
-    header_parent,
-    is_tameru_rendered,
     make_ref,
     parse_header,
     retarget_rung,
@@ -366,7 +361,7 @@ def probe_secrets() -> None:
 # E. byte stability (prompt-cache safety)
 # ===========================================================================================
 def probe_byte_stability() -> None:
-    eng = _engine()
+    _engine()
     chat = [{"role": "system", "content": "s"}, {"role": "user", "content": "fix the flaky test"}]
     for i in range(8):
         chat.append({"role": "assistant", "content": "", "tool_calls": [

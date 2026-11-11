@@ -42,6 +42,10 @@ markers = [
 line-length = 100
 extend-exclude = ["hermes_tameru_plugin/tameru", "tests/hermes_stub"]
 
+[tool.ruff.lint]
+# Explicit, so a new ruff release that widens its defaults cannot turn a green tree red.
+select = ["E4", "E7", "E9", "F"]
+
 [tool.ruff.lint.per-file-ignores]
 # Test code: imports after a sys.path edit (E402), terse generator lambdas (E731), `l` for "line" (E741).
 "tests/**" = ["E402", "E731", "E741"]

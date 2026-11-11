@@ -1,13 +1,11 @@
 """Adaptive summary threshold and protected tail: bounded, explained, never written to config, and safe to switch off."""
 from __future__ import annotations
 
-import json
 import math
 import random
-from pathlib import Path
 
 import pytest
-from engine_support import Chat, demote, make_engine, pytest_failure_with_passes
+from engine_support import make_engine
 from test_autotune_engine import _MetaDB
 
 from hermes_tameru_plugin import host_tuning as ht
@@ -244,7 +242,8 @@ def test_pausing_puts_the_configured_values_back_exactly():
     engine = _engine()
     base, base_n = engine.threshold_percent, engine.protect_last_n
     _grow(engine)
-    engine._host.note_reach(1.0); engine.adapt_host_settings()
+    engine._host.note_reach(1.0)
+    engine.adapt_host_settings()
     assert engine.threshold_percent != base or engine.protect_last_n != base_n
     engine._policy.paused = True
     engine.adapt_host_settings()

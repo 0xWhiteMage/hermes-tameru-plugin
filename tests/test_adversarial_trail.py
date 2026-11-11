@@ -9,7 +9,7 @@ from __future__ import annotations
 import json
 
 import pytest
-from engine_support import Chat, demote, make_engine
+from engine_support import make_engine
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.ledger import ERRORS_TITLE, HEADING, build_ledger, merge_into_summary

@@ -6,68 +6,27 @@ engine's ``self`` state and are mixed in verbatim.
 from __future__ import annotations
 
 from .quiet import swallowed
-from typing import Any
 
 from .activity import (
-    LABELS as ACTIVITY_LABELS,
-    ActivityState,
     Change,
-    SessionRegistry,
     digest as activity_digest,
-    line_key,
-    message_signatures,
-    context_state,
     same_occurrence,
-    proposed_change,
 )
 from .render import (
     HEADER_MAX_LEN,
     TAMERU_TAG,
-    RenderStats,
-    build_header,
-    classify_render,
-    header_only,
-    header_parent,
-    make_ref,
-    make_ref_from_digest,
-    omitted_categories,
     parse_header,
-    render,
-    retarget_rung,
-    true_line_count,
-    for_summary,
 )
 from .session_policy import PolicyError
 from .recovery import (
-    EXPAND_SCHEMA,
-    EXPAND_TOOL_NAME,
-    READ_ORIGINAL_SCHEMA,
-    READ_ORIGINAL_TOOL_NAME,
     SECRET_SOURCE,
-    OriginalStore,
-    expand,
     lookup_original,
     screen_original,
-    session_lookup_factory,
 )
-from .edits import MAX_ENTRIES as _EDIT_MAX, UNCONFIRMED, EditState, held_budget_chars
+from .edits import MAX_ENTRIES as _EDIT_MAX, UNCONFIRMED, held_budget_chars
 from .hermes_compat import (
-    LEAN_STUB_RE,
-    SKILL_PRUNED_MARKER_PREFIX,
-    SeamReport,
-    compression_threshold,
     drop_stale_api_content,
-    elision_marker,
-    has_untrusted_wrapper,
-    is_persisted_block,
-    is_untrusted_tool,
-    marker_artifact_re,
     message_budget_tokens,
-    probe_seams,
-    refused_summary,
-    session_db_usable,
-    summarize_tool_result,
-    tool_calls_by_id,
 )
 
 

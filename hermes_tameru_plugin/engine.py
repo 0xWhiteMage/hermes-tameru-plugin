@@ -78,7 +78,7 @@ from .hermes_compat import (
 from .ledger import build_ledger, merge_into_summary
 from .payload import HermesPayload, content_hint, meta_line, parse_payload
 from .query import build_query, usable_query
-from .edits import MAX_ENTRIES as _EDIT_MAX, UNCONFIRMED, EditState, held_budget_chars
+from .edits import UNCONFIRMED, EditState
 from .engine_edits import EditsMixin
 from .engine_host import HostSettingsMixin
 from .engine_usage import UsageMixin
@@ -86,11 +86,8 @@ from .host_tuning import HostTuning
 from .pins import PinState, merge_pins
 from .quiet import swallowed
 
-REREAD_GAP = 5          # a ref's re-read counts as a signal at most once per this many turns (a forced loop of re-reads cannot widen the tail)
 from .manifest import ManifestState, build_note, written_files
-from .session_policy import PolicyError
 from .recovery import (
-    EXPAND_SCHEMA,
     EXPAND_TOOL_NAME,
     READ_ORIGINAL_SCHEMA,
     READ_ORIGINAL_TOOL_NAME,
@@ -102,7 +99,6 @@ from .recovery import (
     session_lookup_factory,
 )
 from .render import (
-    HEADER_MAX_LEN,
     TAMERU_TAG,
     RenderStats,
     build_header,
@@ -128,6 +124,8 @@ from .tameru.compress_context import (
     extract_evidence_lines,
 )
 from .telemetry import Telemetry
+
+REREAD_GAP = 5          # a ref's re-read counts as a signal at most once per this many turns (a forced loop of re-reads cannot widen the tail)
 
 # A dropped span shorter than Hermes's elision marker is kept verbatim (extract and brief alike).
 _INLINING_ELISION = InliningGapMarker(elision_marker)
