@@ -9,5 +9,7 @@ provides_hooks:
   - api_request_error
   - post_compaction
   - pre_llm_call
+provides_middleware:
+  - llm_request
 license: MIT
 homepage: https://github.com/0xWhiteMage/hermes-tameru-plugin
