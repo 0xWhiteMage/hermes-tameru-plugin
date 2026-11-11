@@ -13,5 +13,20 @@
   "note": "grown holdouts (x20, x50) at 64K/128K/200K, three structural seeds, product vs stock/lazy/legacy: descriptive, nothing tuned from it",
   "again": "",
   "looks_at_this_hash": 1
+ },
+ {
+  "product": "d51f52edc18af8dfd0d2d4b973663b43c7afd8953dd3c82a3a9a9c773350a7fa",
+  "date": "2026-11-11T20:13:08+00:00",
+  "phase": "1.10-phase1",
+  "scenarios": [
+   "longform",
+   "mixedlang",
+   "diagnostics",
+   "rereads",
+   "dense"
+  ],
+  "note": "reproduction of the published 11-shape headline from committed rows (results/headline-matrix.json); nothing tuned from it",
+  "again": "",
+  "looks_at_this_hash": 1
  }
 ]

@@ -46,6 +46,16 @@ def main(argv: list[str]) -> int:
     suites = [run("stub", [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"], {"HERMES_REPO_ROOT": ""})]
     if hermes_root:
         suites.append(run("real_hermes", [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider"]))
+    metrics = None
+    if hermes_root:
+        import tempfile
+
+        target = Path(tempfile.mkdtemp(prefix="tameru-gate-")) / "metrics.json"
+        step = run("metrics", [sys.executable, "-m", "pytest", "-q", "-p", "no:cacheprovider", "tests/eval/test_gate_metrics.py", "-k", "write_gate_metrics"],
+                   {"TAMERU_GATE_METRICS_OUT": str(target)})
+        suites.append(step)
+        if step["passed"] and target.exists():
+            metrics = json.loads(target.read_text(encoding="utf-8"))
     deps = os.environ.get("TAMERU_UI_TEST_DEPS", "").strip()
     if deps:
         suites.append(run("desktop_panel", ["node", "--experimental-vm-modules", "--test", "tests/desktop/activity.test.mjs"]))
@@ -53,10 +63,10 @@ def main(argv: list[str]) -> int:
         "commit": commit, "clean": not dirty, "created": datetime.now(timezone.utc).isoformat(timespec="seconds"),
         "hermes_pin": (ROOT / "HERMES_PIN").read_text(encoding="utf-8").strip(),
         "hermes_checkout": git_head(hermes_root) if hermes_root else None,
-        "stock_canary": stock_canary(), "suites": suites,
+        "stock_canary": stock_canary(), "suites": suites, "metrics": metrics,
         "skipped": [n for n, ran in (("real_hermes", bool(hermes_root)), ("desktop_panel", bool(deps))) if not ran],
     }
-    report["passed"] = all(s["passed"] for s in suites) and report["clean"] and not report["skipped"]
+    report["passed"] = all(s["passed"] for s in suites) and report["clean"] and not report["skipped"] and (metrics is not None or not hermes_root)
     out_dir.mkdir(parents=True, exist_ok=True)
     path = out_dir / f"gate-{commit[:12]}.json"
     path.write_text(json.dumps(report, indent=1) + "\n", encoding="utf-8")

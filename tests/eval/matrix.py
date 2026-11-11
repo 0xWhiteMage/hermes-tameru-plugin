@@ -56,6 +56,28 @@ def dump(result: dict) -> str:
     return json.dumps(result, indent=1, sort_keys=True) + "\n"
 
 
+def scorecard(rows, *, arms=None, windows=None) -> list[dict]:
+    """Per arm and window, the means of every scorecard line (cost, facts, runway, requests, cache breaks, prompt size)."""
+    from collections import defaultdict
+
+    groups: dict[tuple, list] = defaultdict(list)
+    for row in rows:
+        if (arms is None or row["arm"] in arms) and (windows is None or row["window"] in windows):
+            groups[(row["arm"], row["window"])].append(row)
+    out = []
+    for (arm, window), group in sorted(groups.items()):
+        n = len(group)
+        mean = lambda key: round(sum(r[key] for r in group) / n, 3)
+        first = [r["first_compaction_request"] for r in group if r["first_compaction_request"] is not None]
+        out.append({"arm": arm, "window": window, "runs": n, "effective": mean("effective"), "base": mean("base"),
+                    "needed": mean("needed"), "kept": mean("kept"), "recoverable": mean("recoverable"), "lost": mean("lost"),
+                    "host_compactions": mean("compactions"), "requests": mean("requests"), "prune_commits": mean("prune_commits"),
+                    "prefix_breaks": mean("prefix_breaks"), "mean_request_chars": mean("mean_request_chars"),
+                    "first_compaction_request": round(sum(first) / len(first), 2) if first else None,
+                    "sessions_without_compaction": n - len(first)})
+    return out
+
+
 def show(result: dict, base: str = "stock_defaults") -> str:
     import stats
 

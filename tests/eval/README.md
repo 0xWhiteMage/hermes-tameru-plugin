@@ -40,8 +40,8 @@ HERMES_REPO_ROOT=/path/to/hermes-agent python tests/eval/compare.py --json
 
 Use the Python version Hermes needs (3.14 at the pinned SHA `1298c8e74baa73e1a2b90124228d017261ac6bc4`).
 Without `HERMES_REPO_ROOT` the Hermes-dependent tests are skipped; `test_harness_units.py` (fixtures,
-scenario, metric machinery) still runs. A full run takes about 20 s, almost all of it Tameru 1.3.0's own
-extraction (the metric `engine seconds`), which the determinism test pays twice.
+scenario, metric machinery) still runs. The stub suite takes under a minute; the real-Hermes suite about 7 minutes (the gate report
+records both).
 
 Regenerate the saved baselines after an intended change (Hermes bump, scenario or metric change):
 
@@ -389,3 +389,20 @@ stale on purpose (they pin the engine's output): re-record them and read the dif
 - Token pressure uses Hermes' rough character-based estimator plus a fixed overhead, not provider usage.
 - The default scenario is one story at one seed (see the session shapes above for the others). Seeds change the random content (log lines, ids, source filler) but
   not the script; pass `seed=` to `run_session` to check that a result is not an artifact of seed 0.
+
+## Matrices, intervals and the gate's numbers (1.10)
+
+- `matrix.py` runs a replay matrix (`protocol3.measure` rows: effective cost, kept / recoverable / lost facts, requests, prune commits, cache breaks,
+  prompt size, first compaction) and writes byte-reproducible rows. Run it through pytest so the isolated `HERMES_HOME` applies:
+  `TAMERU_MATRIX_OUT=out.json python -m pytest tests/eval/test_matrix_run.py -k write_the_matrix` (real Hermes). `python tests/eval/matrix.py show out.json`
+  prints the comparison with intervals and needs no Hermes.
+- `stats.py` holds the statistics: paired relative differences, a bootstrap and a cluster bootstrap over shapes (read the cluster interval; the
+  naive one treats every cell-seed as independent), and an A/A check that must give exactly zero.
+- `results/headline-matrix.json` is the 11-shape matrix behind the README's cost table (`test_headline_rows.py` regenerates the table from it and
+  fails on drift). `results/dev-matrix.json` is the six-shape development matrix with four arms.
+- Holdouts: five original ones plus the four `blind_*` shapes, written by a separate agent that never saw the product or any result
+  (`scenarios_blind.py`, registered only through `register_blind()`). `bursty` is a development shape. Looks are recorded in `holdout_looks.json`.
+- `gate.py` stores a reduced matrix with intervals, its scorecard and the `directives` instruction probe in the gate report
+  (`test_gate_metrics.py`), so a report holds numbers as well as pass marks.
+- What the replay still does not measure: model latency and think time, real answers, real bills, the real idle mix. Cost is in characters;
+  a global characters-per-token factor cancels in relative cost, so it is not varied (only a content-dependent ratio would matter).
