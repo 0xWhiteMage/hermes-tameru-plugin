@@ -59,7 +59,7 @@ def test_defaults_match_the_contract():
         "enabled": True, "min_tool_chars": 400, "max_extract_chars": 6000, "brief_chars": 1200, "brief_share": 0.0,
         "max_risk": "high", "min_savings": 0.10, "exempt_tools": (), "protect_patterns": (), "anchor_errors": True, "prose_brief": True,
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
-        "policy_mode": "adaptive", "autotune": True, "manifest": True, "edits": True, "pins": True, "adaptive_host": False, "learned_priors": False, "lazy_tool": False, "net_estimate": False, "stats_ledger": False, "preference": "balanced", "activation": "auto", "recent_protection": "auto",
+        "policy_mode": "adaptive", "autotune": True, "manifest": True, "edits": True, "pins": True, "lazy_tool": False, "net_estimate": False, "stats_ledger": False, "preference": "balanced", "activation": "auto", "recent_protection": "auto",
         "input_budget_tokens": None, "output_reserve_tokens": None,
         "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "small_window_threshold_tokens": 54_400, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.75, "small_window_prune_ratio": 0.60,
@@ -90,12 +90,10 @@ ENV_SAMPLES = {
     "expand_tool": ("no", False),
     "expand_grep_timeout": ("0.5", 0.5),
     "expand_grep_line_chars": ("4000", 4000),
-    "policy_mode": ("fixed", "fixed"),
+    "policy_mode": ("legacy", "legacy"),
     "autotune": ("off", False),
     "manifest": ("off", False),
     "edits": ("off", False),
-    "adaptive_host": ("on", True),
-    "learned_priors": ("on", True),
     "net_estimate": ("on", True),
     "stats_ledger": ("on", True),
     "lazy_tool": ("on", True),
@@ -366,6 +364,17 @@ def test_unknown_settings_keys_warn_in_both_sections(hermes_config):
     assert settings.ledger is True
     assert len(warnings) == 2
     assert any("settings.min_tool_char" in w for w in warnings) and any("config.bogus" in w for w in warnings)
+
+
+def test_a_removed_setting_is_named_as_removed_not_unknown(hermes_config):
+    entry = {"settings": {"adaptive_host": True, "learned_priors": True, "policy_mode": "fixed"}}
+    hermes_config({"plugins": {"entries": {"tameru": entry}}})
+    settings, warnings = load_settings(env={})
+    assert settings.policy_mode == "adaptive"                       # "fixed" is no longer a mode: the default applies
+    assert any("adaptive_host" in w and "removed in 1.10.0" in w for w in warnings)
+    assert any("learned_priors" in w and "removed in 1.10.0" in w for w in warnings)
+    assert any("policy_mode" in w for w in warnings)
+    assert not any("unknown setting" in w for w in warnings)
 
 
 def test_a_settings_section_that_is_not_a_mapping_warns(hermes_config):
@@ -930,7 +939,7 @@ def test_documented_short_switches_turn_features_off(name):
     assert getattr(settings, name) is False
 
 
-@pytest.mark.parametrize("name", ["adaptive_host", "learned_priors", "lazy_tool", "net_estimate", "stats_ledger"])
+@pytest.mark.parametrize("name", ["lazy_tool", "net_estimate", "stats_ledger"])
 def test_documented_short_switches_turn_the_off_by_default_features_on(name):
     settings, _warnings = load_settings(env={"TAMERU_" + name.upper(): "on"})
     assert getattr(settings, name) is True

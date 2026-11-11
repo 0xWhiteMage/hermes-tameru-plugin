@@ -81,7 +81,6 @@ class Tuner:
         self._tick = 0
         self._last_applied: dict[str, int] = {}
         self._last_signal_tick = 0
-        self.seeded = False                  # started from what earlier chats learned (see ``learned``)
         self.history: deque[Adjustment] = deque(maxlen=_HISTORY)
         self.set_bias(bias)
 
@@ -94,29 +93,16 @@ class Tuner:
         return tuple(self._offsets)
 
     def pristine(self) -> bool:
-        """Nothing has moved this tuner yet: no signal, no seed, no restored state."""
-        return not self.history and not self.seeded and all(o == 1.0 for o in self._offsets)
-
-    def seed(self, offsets) -> bool:
-        """Start from ``offsets`` (the damped prior of earlier chats). Only a pristine tuner accepts a seed."""
-        try:
-            values = [float(o) for o in offsets]
-        except (TypeError, ValueError):
-            return False
-        if len(values) != 5 or any(v != v for v in values) or not self.pristine():
-            return False
-        self._offsets = [_clamp(v, _OFFSET_BOUNDS) for v in values]
-        self.seeded = True
-        return True
+        """Nothing has moved this tuner yet: no signal, no restored state."""
+        return not self.history and all(o == 1.0 for o in self._offsets)
 
     def reset(self) -> None:
-        """Back to a neutral tuner: no offsets, no history, no seed, bias 0 (the user's ``/tameru reset``)."""
+        """Back to a neutral tuner: no offsets, no history, bias 0 (the user's ``/tameru reset``)."""
         self._bias = 0.0
         self._offsets = [1.0] * 5
         self._tick = 0
         self._last_applied = {}
         self._last_signal_tick = 0
-        self.seeded = False
         self.history.clear()
 
     def tuning(self) -> Tuning:

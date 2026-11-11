@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 SCHEMA = 3
-PANEL_BUILD = 5      # the Desktop panel (desktop/plugin.js) carries the same number; a mismatch means one side is stale
+PANEL_BUILD = 6      # the Desktop panel (desktop/plugin.js) carries the same number; a mismatch means one side is stale
 _TIMELINE = 20
 
 # last_check reason -> plain sentence. Anything unknown falls back to "Watching."
@@ -90,12 +90,11 @@ def build_snapshot(engine) -> dict[str, Any]:
             "shortened": sum(1 for row in rows if row.live),
             "originals": sum(1 for row in rows if row.live and engine._activity.original_check(row.ref) != "unavailable"),
         },
-        "host": engine.host_snapshot() if callable(getattr(engine, "host_snapshot", None)) else None,
         "usage": engine.usage_snapshot() if callable(getattr(engine, "usage_snapshot", None)) else None,
         "diagnosis": _diagnosis(engine, policy, policy.paused),
         "tuner": {
             "enabled": bool(engine._settings.autotune), "posture": tuner.posture() if engine._settings.autotune else "fixed",
-            "bias": round(tuner.bias, 2), "paused": policy.paused, "learned": bool(tuner.seeded),
+            "bias": round(tuner.bias, 2), "paused": policy.paused,
             "adjustments": [{"signal": e.get("signal"), "changed": e.get("changed", []),
                              "reason": e.get("reason", ""), "t": e.get("t")} for e in adjustments],
         },

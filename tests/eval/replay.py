@@ -53,7 +53,6 @@ import re
 import subprocess
 import sys
 import os
-import tempfile
 import time
 from collections.abc import Callable, Iterable
 from contextlib import contextmanager, nullcontext
@@ -599,12 +598,6 @@ class _Session:
         self.user_turns = getattr(self, "user_turns", 0) + 1
         if self.idle_seconds is not None and self.clock is not None and self.user_turns > 1:
             self.clock.advance(float(self.idle_seconds(self.user_turns)))
-        # The plugin's pre_llm_call hook runs once per turn and takes one bounded step of its host-settings tuning.
-        # Only engines built for that comparison (``replay_runs_host_tuning``) do it here, so the older arms and
-        # their saved baselines measure exactly what they always did.
-        step = getattr(self.engine, "adapt_host_settings", None)
-        if callable(step) and getattr(self.engine, "replay_runs_host_tuning", False):
-            step()
 
     def _overflow_gate_reason(self) -> str | None:
         """Why Hermes' ``compress_context`` would no-op an overflow attempt, or None.
@@ -1082,23 +1075,3 @@ def deterministic_part(result: dict) -> dict:
     return {"metrics": result["metrics"], "series": result["series"]}
 
 
-def _isolated(run):
-    """Run each session with an empty learned-prior folder: an engine is measured from scratch, so one run's
-    cross-chat learning (``$TAMERU_LEARNED_DIR/learned.json``) must not leak into the next run of the same engine."""
-    def wrapper(*args, **kwargs):
-        previous = os.environ.get("TAMERU_LEARNED_DIR")
-        with tempfile.TemporaryDirectory(prefix="tameru-eval-learned-") as folder:
-            os.environ["TAMERU_LEARNED_DIR"] = folder
-            try:
-                return run(*args, **kwargs)
-            finally:
-                if previous is None:
-                    os.environ.pop("TAMERU_LEARNED_DIR", None)
-                else:
-                    os.environ["TAMERU_LEARNED_DIR"] = previous
-    wrapper.__doc__ = run.__doc__
-    wrapper.__name__ = run.__name__
-    return wrapper
-
-
-run_session = _isolated(run_session)

@@ -104,12 +104,6 @@ def hermes_mode() -> str:
     return "real" if REAL_HERMES else "stub"
 
 
-@pytest.fixture(autouse=True)
-def _isolated_learned_prior(tmp_path, monkeypatch):
-    """Every test gets its own cross-chat memory, so one test's tuning never seeds another's."""
-    monkeypatch.setenv("TAMERU_LEARNED_DIR", str(tmp_path / "learned"))
-
-
 
 @pytest.fixture
 def log_root():

@@ -3,7 +3,7 @@ from dataclasses import replace
 
 import pytest
 
-from hermes_tameru_plugin.policy import Controls, PlanningInput, RequestBudget, Retention, plans
+from hermes_tameru_plugin.policy import POLICY_MODES, Controls, PlanningInput, RequestBudget, Retention, plans
 
 
 BASE = Retention(6000, 1200, 6000, 8000, 1600, 10_000)
@@ -78,7 +78,7 @@ def test_stages_preserve_more_early_and_keep_fixed_retention_constant():
     assert [p.stage for p in high_plans] == ["standard", "strong"]
     assert low_plans[0].retention.retained_chars == 4500
     assert high_plans[-1].retention.retained_chars == 3000
-    assert plans(Controls(mode="fixed"), low)[0].retention == plans(Controls(mode="fixed"), high)[0].retention
+    assert POLICY_MODES == ("adaptive", "legacy")           # the comparison-only "fixed" mode was removed in 1.10.0
 
 
 def test_preferences_keep_their_detail_tradeoff_even_under_pressure():

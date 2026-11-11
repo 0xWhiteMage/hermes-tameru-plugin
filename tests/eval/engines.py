@@ -112,29 +112,6 @@ def tameru_1_4_product() -> Any:
     return TameruContextEngine(quiet_mode=True)
 
 
-def _host_tuning_arm(enabled: bool) -> Any:
-    """The shipped plugin with the per-turn host-settings step run by the replay, switched on or off.
-
-    The two arms differ only in ``adaptive_host``; everything else is the plugin as shipped, so a difference in the
-    results is what moving Hermes' summary threshold and protected tail did."""
-    from hermes_tameru_plugin.config import TameruSettings
-    from hermes_tameru_plugin.engine import TameruContextEngine
-
-    engine = TameruContextEngine(settings=TameruSettings(adaptive_host=enabled), quiet_mode=True)
-    engine.replay_runs_host_tuning = True
-    return engine
-
-
-@register("tameru_1_9_host_off")
-def tameru_1_9_host_off() -> Any:
-    return _host_tuning_arm(False)
-
-
-@register("tameru_1_9_host_on")
-def tameru_1_9_host_on() -> Any:
-    return _host_tuning_arm(True)
-
-
 @register("tameru_legacy")
 def tameru_legacy() -> Any:
     """The plugin as shipped but in ``policy_mode: legacy`` (the fixed prune gates, no adaptive policy)."""
@@ -146,13 +123,12 @@ def tameru_legacy() -> Any:
 
 @register("tameru_shipped")
 def tameru_shipped() -> Any:
-    """The plugin as a user runs it: default settings, plus the two per-turn steps Hermes' ``pre_llm_call`` hook
-    drives live and the product arm never ran: the host-settings step and the note about shortened results (which
-    is stored in the user message, so it is priced on every later request)."""
+    """The plugin as a user runs it: default settings, plus the per-turn note about shortened results that Hermes'
+    ``pre_llm_call`` hook drives live and the product arm never ran (it is stored in the user message, so it is priced
+    on every later request)."""
     from hermes_tameru_plugin.engine import TameruContextEngine
 
     engine = TameruContextEngine(quiet_mode=True)
-    engine.replay_runs_host_tuning = True
     engine.replay_runs_note = True
     return engine
 

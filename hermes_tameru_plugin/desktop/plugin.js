@@ -2,7 +2,7 @@ import * as sdk from '@hermes/plugin-sdk'
 import { cloneElement, createElement as h, Fragment, isValidElement, useEffect, useId, useRef, useState } from 'react'
 
 const host = sdk.host
-const PANEL_BUILD = 5     // must equal progress.PANEL_BUILD in the backend; a mismatch means Desktop or the plugin is stale
+const PANEL_BUILD = 6     // must equal progress.PANEL_BUILD in the backend; a mismatch means Desktop or the plugin is stale
 const epoch = () => typeof sdk.gatewayActivationEpoch === 'function' ? sdk.gatewayActivationEpoch() : 0
 const muted = { color: 'var(--ui-text-tertiary)' }
 const number = value => Number.isFinite(value) ? value.toLocaleString() : '—'
@@ -677,7 +677,6 @@ function TameruProgress() {
   const memoryTip = [Number.isFinite(used) ? `${fmtTokens(used)}${Number.isFinite(capacity) ? ` of ${fmtTokens(capacity)}` : ''} tokens in use.` : 'Not measured yet.',
     Number.isFinite(gauge.cleanup_at) ? `Tameru starts at ${fmtTokens(gauge.cleanup_at)}.` : '',
     Number.isFinite(gauge.host_at) ? `Hermes compacts at ${fmtTokens(gauge.host_at)}.` : '',
-    progress?.host?.adapted ? `Tuned for this chat: Hermes summarises at ${progress.host.threshold_percent}% (your setting: ${progress.host.base_percent}%), keeping ${progress.host.protect_last_n} recent messages (yours: ${progress.host.base_last_n}).` : '',
     Number.isFinite(progress?.usage?.cache_hit_rate) ? `Reused ${progress.usage.cache_hit_rate}% from the last reply.` : '',
     Number.isFinite(progress?.usage?.fresh_input) ? `${fmtTokens(progress.usage.fresh_input)} tokens were new in the last reply.` : '',
     Number.isFinite(progress?.usage?.api_ms) ? `The last reply took ${ms(progress.usage.api_ms)}${Number.isFinite(progress?.usage?.first_chunk_ms) ? `; the first part arrived after ${ms(progress.usage.first_chunk_ms)}` : ''}.` : '',

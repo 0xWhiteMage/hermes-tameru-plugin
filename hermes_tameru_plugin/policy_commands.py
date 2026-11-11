@@ -5,7 +5,7 @@ from __future__ import annotations
 from .session_policy import PolicyError
 
 _LABELS = {
- 'mode': {'adaptive':'Adaptive','fixed':'Fixed','legacy':'Legacy'},
+ 'mode': {'adaptive':'Adaptive','legacy':'Legacy'},
  'preference': {'save_space':'Save space','balanced':'Balanced','preserve_detail':'Preserve detail'},
  'activation': {'auto':'Auto','earlier':'Earlier','standard':'Standard','later':'Later'},
  'recent': {'auto':'Auto','short':'Short','standard':'Standard','long':'Long'},

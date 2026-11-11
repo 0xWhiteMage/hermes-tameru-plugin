@@ -16,7 +16,7 @@ from .autotune import Tuning
 PREFERENCES = ("save_space", "balanced", "preserve_detail")
 ACTIVATIONS = ("auto", "earlier", "standard", "later")
 RECENT_PROTECTIONS = ("auto", "short", "standard", "long")
-POLICY_MODES = ("adaptive", "fixed", "legacy")
+POLICY_MODES = ("adaptive", "legacy")
 STAGES = ("light", "standard", "strong")
 
 
@@ -196,8 +196,6 @@ def _activation(controls: Controls, current: PlanningInput, host_trigger: int, l
 
 
 def _stages(controls: Controls, current: PlanningInput, limit: int | None, projected: float | None) -> tuple[str, ...]:
-    if controls.mode == "fixed":
-        return ("standard",)
     if current.force:
         return ("strong",)
     # The development matrix showed the standalone light stage never repays its

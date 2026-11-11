@@ -1121,7 +1121,7 @@ test('a panel and a backend from different builds say so in the status line', as
   assert.equal(line.textContent, 'Out of date: reload Desktop')
   assert.equal(line.getAttribute('role'), 'alert')
   const matching = makeSdk()
-  const ok = snapshotPayload('sid'); ok.progress.doctor = { version: '1.9.0', panel_build: 5 }
+  const ok = snapshotPayload('sid'); ok.progress.doctor = { version: '1.10.0', panel_build: 6 }
   const again = await boot(matching.sdk, matching.calls, ok)
   assert.doesNotMatch(doc(again.dom).querySelector('.tameru-statusline').textContent, /Out of date/)
 })
@@ -1151,19 +1151,6 @@ test('the working-memory hint says how much of the last reply came from cache, a
   assert.doesNotMatch([...doc(again.dom).querySelectorAll('.tameru-sr')].map(el => el.textContent).join(' '), /Reused/)
 })
 
-
-test('the working-memory hint shows tuned Hermes settings next to the configured ones, only when they differ', async () => {
-  const hintsOf = async host => {
-    const { sdk, calls } = makeSdk()
-    const payload = snapshotPayload('sid'); payload.progress.host = host
-    const { dom } = await boot(sdk, calls, payload)
-    return [...doc(dom).querySelectorAll('.tameru-sr')].map(el => el.textContent).join(' | ')
-  }
-  const tuned = await hintsOf({ enabled: true, adapted: true, base_percent: 75, threshold_percent: 80, base_last_n: 20, protect_last_n: 26 })
-  assert.match(tuned, /summarises at 80% \(your setting: 75%\), keeping 26 recent messages \(yours: 20\)/)
-  const same = await hintsOf({ enabled: true, adapted: false, base_percent: 75, threshold_percent: 75, base_last_n: 20, protect_last_n: 20 })
-  assert.doesNotMatch(same, /Tuned for this chat/)
-})
 
 test('the working-memory hint gives the new tokens of the last reply and timing, and the first chunk only when reported', async () => {
   const hintsOf = async usage => {

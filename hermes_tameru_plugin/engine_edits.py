@@ -177,7 +177,6 @@ class EditsMixin:
             if change.ref not in self._edits.entries and len(self._edits.entries) >= _EDIT_MAX:
                 raise PolicyError("Too many edits. Cancel or unkeep some first.")
             self._edits.request(change.ref, verb, delta)
-            self._host.note_reach(2.0)
             if verb == "keep":
                 from .session_edits import save
                 save(self)

@@ -3,8 +3,23 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
-## [Unreleased]
+## [1.10.0] - Unreleased
 
+Removes three things that showed no measured benefit, as announced under *Deprecated* in 1.9.0. The engine is unchanged (1.9.0).
+
+### Removed
+- **`adaptive_host`**, the per-chat adjustment of Hermes' summary threshold and protected tail (and its `tameru_host_v1` record, the "Tuned for this chat"
+  line in the Desktop panel, `host_snapshot` and the `host` entry of the progress snapshot). Hermes now always uses the `compression.threshold` and
+  `compression.protect_last_n` you configured. Panel build 6.
+- **`learned_priors`**, the optional cross-chat memory of self-tuning (`$HERMES_HOME/tameru/learned.json`, never read any more and safe to delete).
+  Self-tuning (`autotune`) stays, per chat.
+- **`policy_mode: fixed`**, a comparison aid that was never a product mode. `adaptive` (default) and `legacy` remain; a saved or configured `fixed` is
+  treated as an invalid value and falls back to the default.
+- Their replay arms (`tameru_1_9_host_off`, `tameru_1_9_host_on`) and tests. The stock and product baselines are unchanged.
+
+### Changed
+- A configured `adaptive_host` or `learned_priors` is named in `get_status()["tameru"]["warnings"]` ("removed in 1.10.0; ignored") instead of "unknown setting".
+- The plugin is version 1.10.0 (engine 1.9.0); `/tameru stats` shows both.
 - **Licence: MIT to Apache License 2.0**, matching the engine. `LICENSE` is the Apache-2.0 text, `NOTICE` is new, and `pyproject.toml` and `plugin.yaml` declare `Apache-2.0`. The Hermes-derived test fixtures keep their MIT notice (`THIRD_PARTY_NOTICES.md`).
 - Documentation: the README is rewritten for users with a recording for each feature; six historical docs and the remote-gateway address in the cost notes are removed.
 

@@ -29,7 +29,12 @@ from .policy import ACTIVATIONS, POLICY_MODES, PREFERENCES, RECENT_PROTECTIONS
 PLUGIN_ID = "tameru"
 ENV_PREFIX = "TAMERU_HERMES_"
 SHORT_ENV_PREFIX = "TAMERU_"
-_SHORT_ENV_SWITCHES = frozenset({"edits", "manifest", "autotune", "adaptive_host", "pins", "learned_priors", "lazy_tool", "net_estimate", "stats_ledger"})   # also settable without HERMES_; the long name wins
+_SHORT_ENV_SWITCHES = frozenset({"edits", "manifest", "autotune", "pins", "lazy_tool", "net_estimate", "stats_ledger"})   # also settable without HERMES_; the long name wins
+# Settings that existed in 1.9.0 and are gone; naming them in the warning is kinder than "unknown setting".
+REMOVED_SETTINGS = {
+    "adaptive_host": "removed in 1.10.0 (it showed no measured gain); ignored",
+    "learned_priors": "removed in 1.10.0 (it showed no measured gain); ignored",
+}
 RISK_LEVELS = ("low", "medium", "high")
 PRUNE_TAILS = ("tokens", "count")
 
@@ -42,13 +47,11 @@ class TameruSettings:
     """Every plugin knob; the defaults are what runs when nothing is configured."""
 
     enabled: bool = True                       # kill switch -> pure stock ContextCompressor behaviour
-    policy_mode: str = "adaptive"             # adaptive | fixed (matched comparison) | legacy
+    policy_mode: str = "adaptive"             # adaptive | legacy
     autotune: bool = True                     # adaptive mode retunes itself from live session signals
-    adaptive_host: bool = False               # off by default: adapt Hermes' summary threshold and protected tail per chat, within bounds. Measured no gain above 32K (TAMERU_ADAPTIVE_HOST=on to try it)
     lazy_tool: bool = False                   # off by default: send the recovery tool only once a result has been shortened (needs Hermes' llm_request middleware; TAMERU_LAZY_TOOL=on)
     net_estimate: bool = False                # off by default: /tameru stats adds a signed estimate of what the cleanups saved or cost (TAMERU_NET_ESTIMATE=on)
     stats_ledger: bool = False                # off by default: keep daily totals of cleanups and tokens removed in $HERMES_HOME/tameru/stats-ledger.json, 90 days, shown only in /tameru stats; /tameru reset stats confirm deletes it (TAMERU_STATS_LEDGER=on)
-    learned_priors: bool = False              # off by default: let a new chat start from what earlier chats taught the self-tuner (TAMERU_LEARNED_PRIORS=on)
     pins: bool = True                         # keep the lines you pin word for word in every Hermes summary (TAMERU_PINS=off)
     edits: bool = True                        # Keep and Restore: put a shortened output back in front of the model (TAMERU_EDITS=off turns it off)
     manifest: bool = True                     # tell the model, once per change, how many results are shortened (TAMERU_MANIFEST=0 turns it off)
@@ -229,8 +232,6 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "manifest": _parse_bool,
     "edits": _parse_bool,
     "pins": _parse_bool,
-    "adaptive_host": _parse_bool,
-    "learned_priors": _parse_bool,
     "lazy_tool": _parse_bool,
     "net_estimate": _parse_bool,
     "stats_ledger": _parse_bool,
@@ -333,7 +334,9 @@ def _file_layers(merged: Mapping[str, Any], warnings: list[str]) -> list[tuple[s
         value = entry.get(section)
         if isinstance(value, Mapping):
             layers.append((label, value))
-            warnings.extend(f"{label}.{key}: unknown setting; ignored" for key in value if key not in _SETTING_PARSERS)
+            warnings.extend(
+                f"{label}.{key}: " + (REMOVED_SETTINGS[key] if key in REMOVED_SETTINGS else "unknown setting; ignored")
+                for key in value if key not in _SETTING_PARSERS)
         elif value is not None:
             warnings.append(f"{label}: expected a mapping, got {type(value).__name__}; ignored")
     return layers

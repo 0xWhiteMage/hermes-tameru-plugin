@@ -80,9 +80,7 @@ from .payload import HermesPayload, content_hint, meta_line, parse_payload
 from .query import build_query, usable_query
 from .edits import UNCONFIRMED, EditState
 from .engine_edits import EditsMixin
-from .engine_host import HostSettingsMixin
 from .engine_usage import UsageMixin
-from .host_tuning import HostTuning
 from .pins import PinState, merge_pins
 from .quiet import swallowed
 
@@ -337,7 +335,7 @@ def _plugin_version() -> str:
         return "unknown"
 
 
-class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMixin, _base()):  # type: ignore[misc]
+class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # type: ignore[misc]
     """Hermes' compressor with the Tameru tool-result ladder, recovery tool and artifact ledger."""
 
     name = "tameru"
@@ -386,11 +384,8 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         self._store = OriginalStore(settings.store_max_entries, settings.store_max_chars)
         self._telemetry = Telemetry(settings.telemetry_log)
         self._manifest = ManifestState()
-        self._host = HostTuning()
         self._pins = PinState()
         self._reread_turn: dict[str, int] = {}     # ref -> turn of its last counted re-read
-        self._host_anchor_n: int | None = None
-        self._host_saved: dict | None = None
         self._edits = EditState()
         self._edits_inflight: list[str] = []
         self._edits_digests: dict[str, str] = {}      # ref -> digest of the text the overlay put in the request
@@ -610,8 +605,6 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
             bind_tuner(self, rotation=rotation)
             from .session_edits import bind_edits
             bind_edits(self, rotation=rotation)
-            from .session_host import bind_host
-            bind_host(self, rotation=rotation)
             from .session_pins import bind_pins
             bind_pins(self, rotation=rotation)
             registry = getattr(self, "_activity_registry", None)
@@ -1917,9 +1910,12 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
                     self._reread_turn.clear()
                 self._reread_turn[match] = turn
                 self._signal("original_reread")
-                self._host.note_reach(1.0)
         except Exception:
             return                                   # a bookkeeping hint must never fail the tool call
+
+    def _policy_threshold_tokens(self) -> int:
+        """The summary threshold in tokens that Tameru's own pruning (trigger, budgets, regrowth gap) is sized from."""
+        return int(getattr(self, "threshold_tokens", 0) or 0)
 
     # ---- status -------------------------------------------------------------------------------
     def get_status(self) -> dict[str, Any]:

@@ -177,7 +177,7 @@ summarizer reads stubs instead of raw rows.
 
 ### Compaction policy mode
 
-**Adaptive is the default**, with or without any Tameru configuration. `legacy` (the earlier fixed prune gates) and `fixed` (a comparison aid) stay available:
+**Adaptive is the default**, with or without any Tameru configuration. `legacy` (the earlier fixed prune gates) stays available:
 set `plugins.entries.tameru.settings.policy_mode: legacy`, or switch one chat with `/tameru policy mode=legacy`. Legacy is not cheaper than adaptive
 in the replay once lost and recoverable facts are priced, except by 0.7 points at 32K; it is kept as a fallback and is not tuned further.
 
@@ -189,11 +189,9 @@ from four signals: Hermes summarizing before Tameru acted, repeated checks that 
 the model re-reading a shortened output, and context refilling quickly after cleanup. Calm stretches relax it
 back. The only user choices are a bias (Save space, Balanced, Preserve detail) and Pause; both persist with the chat.
 
-**It can learn across chats (off by default: `learned_priors: on`).** Each chat's adjustments then also move a small profile-wide memory
-(`$HERMES_HOME/tameru/learned.json`, five numbers, a moving average); calm stretches ease it back toward neutral. A new
-chat starts from 60% of what that memory holds, and its own saved state, if it has one, wins. This is online learning
-with small, bounded, explainable steps, not a trained model: it adapts to how your sessions behave, and it can be
-inspected, reset (delete the file) or switched off (`autotune: off`).
+Self-tuning is per chat: it starts from the neutral table in every new chat (1.9.0 had an optional cross-chat memory and an optional
+per-chat adjustment of Hermes' own summary threshold; both showed no measured gain and were removed in 1.10.0). It can be switched off
+with `autotune: off`.
 
 `/tameru` shows compression progress. `/tameru help` lists every verb, `/tameru stats` prints numbers for the chat (context freed,
 outputs shortened, the last reply's cache use, and with the optional settings below a net-cost estimate, a seven-day total and what the
@@ -366,15 +364,13 @@ plugins:
 
 | Setting | Default | Meaning |
 |---|---|---|
-| `policy_mode` | `adaptive` | `adaptive` (self-tuning policy), `legacy` (the earlier fixed gates, kept as a frozen fallback) or `fixed` (a comparison aid, deprecated). |
+| `policy_mode` | `adaptive` | `adaptive` (self-tuning policy) or `legacy` (the earlier fixed gates, kept as a frozen fallback). |
 | `autotune` | `true` | Adaptive mode retunes itself from live signals (see *Self-tuning*). Not shown to help in the replay; deprecated as unproven. |
 | `lazy_tool` | `false` | Send the recovery tool only once a result in this chat has been shortened. Needs Hermes' `llm_request` middleware; chat-completions and Anthropic requests only. `/tameru stats` shows `hidden` / `listed` counts. |
 | `edits` | `true` | Keep and Restore. |
 | `pins` | `true` | Pinned instructions. |
 | `manifest` | `true` | The short per-turn note to the model. Deprecated unless a live comparison shows it raises read-backs. |
 | `preference` | `balanced` | `save_space`, `balanced` or `preserve_detail` (also `/tameru bias`). |
-| `adaptive_host` | `false` | Adapt Hermes' summary threshold and protected tail per chat, within bounds. No measured gain above 32K. Deprecated as unproven. |
-| `learned_priors` | `false` | Let a new chat start from what earlier chats taught the self-tuner. Deprecated as unproven. |
 | `net_estimate` | `false` | `/tameru stats` adds a signed, labelled estimate of what the cleanups saved or cost, in uncached-input-token equivalents. Not a bill. |
 | `stats_ledger` | `false` | Keep daily totals (cleanups and tokens removed, no chat ids or text) for 90 days in `$HERMES_HOME/tameru/stats-ledger.json`. Shown only in `/tameru stats`; never read by policy code; `/tameru reset stats confirm` deletes it. |
 
@@ -498,12 +494,10 @@ Hermes `main` (the `main` job may fail without blocking a release).
 |---|---|---|---|
 | Originals of shortened outputs (never anything that looks like a credential) | the engine's memory (512 entries, 32M characters), and Hermes' own session archive | bounded | ends with the process; Hermes' session delete for the archive |
 | Per-chat self-tuning, pause and lean mode | the chat's session metadata, `tameru_tuner_v1` | a few numbers | goes with the chat; a new chat starts clean |
-| Per-chat host settings (summary threshold and protected tail, adapted within bounds). Off by default | the chat's session metadata, `tameru_host_v1` | two numbers | leave `adaptive_host` off; goes with the chat. Your `config.yaml` is never written |
 | Pinned instructions (your own lines) | the chat's session metadata, `tameru_pins_v1` | up to 5 lines, 1,500 characters | `/tameru unpin N`; goes with the chat |
 | Keeps (pinned outputs) | the chat's session metadata, `tameru_edits_v1` | up to 64 short references | `/tameru unkeep REF`; goes with the chat |
 | Restores | engine memory only | up to 64, five replies each | `/tameru cancel`, or they expire |
 | Daily totals of cleanups and tokens removed. Off by default | `$HERMES_HOME/tameru/stats-ledger.json` | one small record per day, 90 days, no chat ids, text, tool names or paths | `/tameru reset stats confirm`, or delete the file; written only with `stats_ledger: on` |
-| What self-tuning learned across chats. Off by default | `$HERMES_HOME/tameru/learned.json` | five numbers, moving at most 0.12 a day | delete the file; it is written only with `learned_priors: on` |
 | Telemetry log (only if `telemetry_log` is set) | under `$HERMES_HOME` or the temp folder | rotates at 5 MB, keeping one `.1` file | delete the file; it holds counts, tool names, rungs and reference hashes, never text |
 | Desktop hint flag | the browser's `localStorage`, one flag | one flag | clear site data |
 

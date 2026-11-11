@@ -224,9 +224,6 @@ class AdaptiveMixin:
             self._event("adjust", signal=name, changed=list(adjustment.changed), reason=adjustment.reason)
             from .session_tuner import save                 # late: sibling imports this module's package
             save(self)
-            if self._settings.learned_priors:
-                from . import learned
-                learned.record(self._policy.tuner.offsets())
 
     def observe_host_compaction(self, *, session_id: str = "", kind: str = "", reason: str = "",
                                 before_tokens=None, after_tokens=None, **_ignored) -> bool:
@@ -240,7 +237,6 @@ class AdaptiveMixin:
             passive = self._policy.commits_since_host == 0
             self._policy.commits_since_host = 0
             self._manifest.reset_last()      # a Hermes summary may have dropped the earlier notes
-            self._host.note_host_summary()   # the threshold was not early enough: do not push it later for a while
             self._policy.decline_streak = 0
             self._event("host", before=_count(before_tokens), after=_count(after_tokens),
                         compaction=str(kind)[:24], passive=passive)
@@ -356,9 +352,7 @@ class AdaptiveMixin:
                     planning = self._planning_input(messages, current_tokens, body_tokens=body)
                     scope.policy_plans = () if self._policy.paused else plans(
                         self._policy.controls, planning, self._tuning())
-                    if self._policy.tuner.tick() and self._settings.autotune and self._settings.learned_priors:
-                        from . import learned                     # calm time eases what earlier chats taught
-                        learned.relax()
+                    self._policy.tuner.tick()
                     self._policy.checks_since_commit += 1
             except Exception:
                 self._telemetry.count("error", where="policy_plan")

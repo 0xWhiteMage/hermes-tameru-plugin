@@ -624,8 +624,6 @@ def test_accepted_prefix_accounting_includes_host_postprocessed_tail(hermes_home
 @pytest.mark.parametrize("mode,recent,should_prune", [
     ("adaptive", "auto", True),
     ("adaptive", "long", False),
-    ("fixed", "auto", True),
-    ("fixed", "long", False),
     ("legacy", "long", True),
 ])
 def test_configured_count_tail_is_respected_by_adaptive_recent_modes(

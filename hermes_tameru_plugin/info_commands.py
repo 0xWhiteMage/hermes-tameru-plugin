@@ -105,9 +105,6 @@ def reset_plan(engine) -> list[str]:
         lines.append(f"preference: bias {tuner.bias:+.2f} -> balanced (0)")
     if engine._policy.paused:
         lines.append("pause: paused -> running")
-    host = getattr(engine, "_host", None)
-    if host is not None and (host.offset or host.scale != 1.0):
-        lines.append("Hermes settings: summary threshold and protected tail -> the values you configured")
     return lines
 
 

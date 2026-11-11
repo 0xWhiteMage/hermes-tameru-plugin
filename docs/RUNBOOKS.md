@@ -4,9 +4,10 @@ Short, step-by-step answers for when something looks wrong. Everything here uses
 this release. Tameru never edits saved chat history, so every step below is safe to take and undo.
 
 **Where settings live.** `$HERMES_HOME/config.yaml` under `plugins.entries.tameru.settings.<name>`, or an environment
-variable `TAMERU_HERMES_<NAME>` (any setting). The feature switches `edits`, `manifest`, `autotune`, `pins`, `adaptive_host`, `learned_priors`,
-`lazy_tool`, `net_estimate` and `stats_ledger` also answer to the short `TAMERU_<NAME>` (for example `TAMERU_EDITS=off`); the long name wins.
-`adaptive_host`, `learned_priors`, `lazy_tool`, `net_estimate` and `stats_ledger` are off by default. Settings are read when the engine is
+variable `TAMERU_HERMES_<NAME>` (any setting). The feature switches `edits`, `manifest`, `autotune`, `pins`, `lazy_tool`,
+`net_estimate` and `stats_ledger` also answer to the short `TAMERU_<NAME>` (for example `TAMERU_EDITS=off`); the long name wins.
+`lazy_tool`, `net_estimate` and `stats_ledger` are off by default. A setting that was removed (`adaptive_host`, `learned_priors`, gone in 1.10.0) is named in
+`get_status()["tameru"]["warnings"]` and ignored. Settings are read when the engine is
 created: restart the Hermes gateway after changing one.
 **Where to look.** `/tameru` in any client prints compression progress and, at the bottom, a *Health* line that counts
 secrets held back and commands refused (it appears only when something was counted). Desktop shows the same counters
@@ -68,23 +69,21 @@ State per chat lives in Hermes session metadata under two keys, `tameru_tuner_v1
 
 1. `/tameru cancel` and `/tameru unkeep REF` clear edits one by one.
 2. Starting a new chat starts from clean per-chat state.
-3. `/tameru reset` lists what it would clear for this chat (self-tuning offsets, bias, pause, Hermes-setting offsets) and changes nothing until
+3. `/tameru reset` lists what it would clear for this chat (self-tuning offsets, bias, pause) and changes nothing until
    `/tameru reset confirm`; pins and Keeps stay (`/tameru unpin N`, `/tameru unkeep REF`). To clear anything else, use Hermes' session tools, not
    the database by hand.
 
 ## F. Self-tuning seems off (too aggressive or stuck)
 
 1. Set `autotune: off` to freeze the policy, or choose **Preserve detail** in the dropdown.
-2. The profile-wide memory is `$HERMES_HOME/tameru/learned.json` (five numbers). It is read and written only when
-   `learned_priors` is on (off by default). It moves at most 0.12 per setting per day. Delete the file to reset it; a
-   missing or unreadable file means "nothing learned yet".
+2. Each chat starts from the neutral table; nothing is learned across chats (the 1.9.0 cross-chat memory, `learned.json`, was removed in 1.10.0, and a
+   leftover `$HERMES_HOME/tameru/learned.json` is never read and can be deleted). `/tameru reset` puts this chat back to neutral.
 
 ### F2. Hermes summarises earlier or later than `compression.threshold` says
-When `adaptive_host` is on (it is off by default), Tameru moves Hermes' *effective* `compression.threshold` (at most 10 points under and 15 over, never past 85% of the
-window) and `protect_last_n` (half to double, 6 to 60) per chat, from how fast the chat grows, how well the cache is
-reused, and how often old outputs are revisited. It never writes `config.yaml`; the Desktop memory hint shows
-"Tuned for this chat" with both numbers. To put the configured values back at once, set `adaptive_host: off` (or
-`TAMERU_ADAPTIVE_HOST=off`; it is the default), or pause Tameru for the chat. Stored per chat as `tameru_host_v1`.
+Tameru no longer moves Hermes' summary threshold or protected tail (the 1.9.0 `adaptive_host` setting was removed in 1.10.0): Hermes uses exactly
+the `compression.threshold` and `compression.protect_last_n` you configured. If Hermes summarises at a surprising point, check those two keys in
+`$HERMES_HOME/config.yaml` and the model's context window (Hermes applies its own floors and caps). A chat saved by 1.9.0 may carry a leftover
+`tameru_host_v1` record in its metadata; it is ignored.
 
 ## G. The panel says "Out of date: reload Desktop"
 
@@ -108,7 +107,7 @@ pwsh scripts/rollback.ps1 -Apply          # does it
 ```
 
 Then restart the gateway and confirm `compression.threshold` and `compression.protect_last_n` in
-`$HERMES_HOME/config.yaml` are what you expect (Tameru never writes them). Newer per-chat state and `learned.json` are
+`$HERMES_HOME/config.yaml` are what you expect (Tameru never writes them). Newer per-chat state is
 ignored by older releases.
 
 ## I. Desktop's engine list says "Tameru", not "Tameru (ためる)", or the engine vanished after renaming

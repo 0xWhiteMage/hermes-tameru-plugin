@@ -411,7 +411,6 @@ class SessionRegistry:
         engine = self.resolve(session_id)
         if engine is not None:
             engine.begin_turn_edits()                   # what the user queued applies from this turn on
-            engine.adapt_host_settings()                # a small, bounded step for this chat's summary threshold and tail
         note = engine.manifest_for_turn(conversation_history) if engine is not None else None
         return {"context": note} if note else None
 

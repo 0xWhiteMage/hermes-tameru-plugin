@@ -79,12 +79,6 @@ def reset_chat(engine, *, session_id: str, lifecycle_id: str) -> dict:
         state.paused = False
         engine._event("posture", change="reset", bias=0.0, paused=False)
         persisted = _write(db, sid, _record(state)) if _current(engine, owner) else False
-    try:
-        host = getattr(engine, "_host", None)
-        if host is not None and (host.offset or host.scale != 1.0):
-            engine.reset_host_settings()                      # its own lock; the configured values come back
-    except Exception:
-        engine._telemetry.count("error", where="reset_host")
     status = engine.get_policy_status()
     status["persisted"] = persisted
     return status
@@ -100,12 +94,6 @@ def bind_tuner(engine, *, rotation: bool = False) -> None:
         if rotation:
             _write(db, sid, _record(state))
             return
-        if (getattr(engine._settings, "autotune", False) and getattr(engine._settings, "learned_priors", False)
-                and state.tuner.pristine()):
-            from . import learned                            # a new chat starts from what earlier chats learned
-            prior = learned.seed()
-            if prior is not None:
-                state.tuner.seed(prior)                      # a saved record for this chat still overrides it below
         methods = _metadata_methods(db)
         if methods is None:
             return
