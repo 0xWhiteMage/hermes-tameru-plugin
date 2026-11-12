@@ -213,7 +213,8 @@ def test_a_committed_prune_updates_policy_state_but_not_a_clone_or_reset(hermes_
         stored = db.get_session_model_config_value(
             "sess-1", PROACTIVE_PRUNE_REARM_MODEL_CONFIG_KEY)
         assert type(stored) is int
-        assert rearm == stored
+        # Storage holds Hermes' own runway; the plugin's shorter mark lives in memory only and is never written back.
+        assert rearm <= stored
         resumed = _engine(monkeypatch, activation="earlier")
         resumed.bind_session_state(session_db=db, session_id="sess-1")
         assert resumed.get_status()["tameru"]["policy"]["rearm_body_tokens"] == stored
@@ -234,6 +235,22 @@ def test_a_committed_prune_updates_policy_state_but_not_a_clone_or_reset(hermes_
         assert engine._policy.controls == clone._policy.controls
     finally:
         db.close()
+
+
+def test_lowering_the_runway_never_writes_to_hermes_session_storage(hermes_home, monkeypatch):
+    """The shortened re-prune runway stays in memory: no private durable write, no error counted, the mark still lowered."""
+    def refuse(self, *args, **kwargs):
+        raise AssertionError("the plugin must not write Hermes' session storage for the runway")
+
+    monkeypatch.setattr(TameruContextEngine, "_durable_write", refuse, raising=False)
+    engine = _engine(monkeypatch, activation="earlier", preference="balanced")
+    messages = _history()
+    pruned, count = engine.prune_tool_results_only(messages, current_tokens=80_000)
+    assert pruned is not messages and count > 0
+    reclaimed = message_budget_tokens(messages) - message_budget_tokens(pruned)
+    native = message_budget_tokens(pruned) + max(reclaimed, engine._raw_native("proactive_prune_tokens"))
+    assert 0 < engine._proactive_prune_rearm_tokens < native          # shortened below Hermes' own runway, in memory
+    assert engine._telemetry.snapshot().get("errors", {}).get("regrowth", 0) == 0
 
 
 def test_an_adaptive_commit_rearms_at_the_plans_regrowth_floor(hermes_home, monkeypatch):

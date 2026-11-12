@@ -1109,13 +1109,16 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
             return min_reclaim
 
     def _arm_regrowth(self, pruned: list[dict], gap: int = 0) -> None:
-        """After a commit, shorten Hermes' durable rearm runway to the pass's regrowth interval.
+        """After a commit, shorten Hermes' rearm runway to the pass's regrowth interval, in memory only.
 
         Hermes sets the next rearm at the retained body plus ``max(reclaimed, trigger, min_reclaim)``;
         the plugin's regrowth floor shortens it to ``body + max(gap, floor, min_reclaim)`` so the next
         prune follows the configured interval rather than a full trigger-sized runway. Only the plugin's
         own window-scaled trigger may shorten the runway (``_regrowth_active``); a user's or caller's
         explicit trigger leaves Hermes' value alone. ``gap <= 0`` likewise keeps the native runway.
+
+        The lowered mark is never written to Hermes' session storage: after a resume Hermes applies its own native runway,
+        and the plugin shortens it again at the next commit.
         """
         if not self._regrowth_active():
             return
@@ -1129,14 +1132,6 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
                 gap, int(getattr(self, "proactive_prune_min_reclaim_tokens", 0)))
             if lowered < rearm:
                 self._proactive_prune_rearm_tokens = lowered
-                try:
-                    from agent.context_compressor import PROACTIVE_PRUNE_REARM_MODEL_CONFIG_KEY
-                except Exception:
-                    PROACTIVE_PRUNE_REARM_MODEL_CONFIG_KEY = "_proactive_prune_rearm_tokens"
-                # Hermes persists its full runway inside the prune's own durable commit; a resumed
-                # session must reload the same shortened mark the live engine now follows.
-                self._durable_write("patch_session_model_config", "proactive prune rearm floor",
-                                    {PROACTIVE_PRUNE_REARM_MODEL_CONFIG_KEY: lowered})
         except Exception:
             self._telemetry.count("error", where="regrowth")
 
