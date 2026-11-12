@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="docs/assets/hero.png" alt="Tameru (ためる): big tool outputs, kept small." width="100%"><br><br>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-v1.9.0-blue.svg" alt="Version 1.9.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-v1.9.1-blue.svg" alt="Version 1.9.1"></a>
   <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Hermes-v0.23.1-8A2BE2.svg" alt="Tested on Hermes v0.23.1"></a>
   <a href="https://github.com/0xWhiteMage/tameru-compaction-system"><img src="https://img.shields.io/badge/engine-tameru-orange.svg" alt="Tameru engine"></a>
   <a href="https://x.com/0xWhiteMage"><img src="https://img.shields.io/badge/X-@0xWhiteMage-000000?logo=x&logoColor=white" alt="Follow 0xWhiteMage on X"></a>
@@ -22,7 +22,13 @@ changes) uses the [Tameru engine](https://github.com/0xWhiteMage/tameru-compacti
 
 *A real run in Hermes Desktop (Claude Haiku 4.5): sixteen commands of about 25,000 characters each; ten outputs shortened, about 65K tokens freed, answers correct. Sped up and cropped to the chat and panel.*
 
-## What's new in 1.9.0
+## What's new in 1.9.1
+
+- **Per-chat records live in Hermes' public plugin state**, not in its private session storage: pins, Keeps, policy choices and self-tuning survive a restart through `ctx.state`. A chat unused for 90 days is cleared and only the newest 400 are kept. Records from 1.9.0 are not migrated: re-add pins and Keeps.
+- **The panel's hints use Hermes' own tooltip** when the app provides one (Hermes 0.23.0 and later); older apps keep the panel's own card.
+- **Apache-2.0**, matching the engine. The engine itself is unchanged (1.9.0).
+
+Everything below was introduced in 1.9.0 and works the same way:
 
 - **Pinned instructions**, word for word in every summary (up to 5 lines).
 - **Keep and Restore**, so the model sees a shortened output in full again. Saved history is never edited.
@@ -53,7 +59,7 @@ Hermes still decides when to prune, which rows, and whether a pass commits; the 
 back in the model's context: **Restore** and **Keep** (Desktop, or `/tameru restore|keep REF`) do that on the next requests and never edit saved history.
 
 Measurements: [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md) (the current replay results, what was tried and rejected, and the live checks).
-Release state: [docs/RELEASE-1.9.0-READINESS.md](docs/RELEASE-1.9.0-READINESS.md); steps: [docs/RELEASING.md](docs/RELEASING.md). When something looks wrong:
+Release state: [docs/RELEASE-1.9.1.md](docs/RELEASE-1.9.1.md); steps: [docs/RELEASING.md](docs/RELEASING.md). When something looks wrong:
 [docs/RUNBOOKS.md](docs/RUNBOOKS.md).
 
 ## Two repositories
@@ -481,7 +487,7 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
 
 ## Compatibility
 
-Version 1.9.0 is tested on Hermes v0.23.1 (`3b421578`, the commit in `HERMES_PIN`): the stub suite, the real-Hermes suite, the replay harness
+Version 1.9.1 is tested on Hermes v0.23.1 (`3b421578`, the commit in `HERMES_PIN`): the stub suite, the real-Hermes suite, the replay harness
 with its saved baselines and the Desktop panel tests all pass, and the per-commit gate report
 ([docs/gate-reports/](docs/gate-reports/)) records the commit, the Hermes commit and each result. It was also run live in Hermes Desktop on
 Windows (local backend) with Claude Haiku 4.5: the `/tameru` commands, the recovery-tool filter (hidden, then listed after the first
@@ -533,7 +539,7 @@ Then update `VENDORED_FROM`, run both test modes and review the replay baselines
 
 ## More
 
-- [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md): the current measurements, rejected ideas and live checks. [docs/RELEASE-1.9.0-READINESS.md](docs/RELEASE-1.9.0-READINESS.md): release state. [docs/UPSTREAM-REQUESTS-DRAFT.md](docs/UPSTREAM-REQUESTS-DRAFT.md): requests to Hermes, none filed.
+- [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md): the current measurements, rejected ideas and live checks. [docs/RELEASE-1.9.1.md](docs/RELEASE-1.9.1.md): release state. [docs/UPSTREAM-REQUESTS-DRAFT.md](docs/UPSTREAM-REQUESTS-DRAFT.md): requests to Hermes, none filed.
 - [docs/REPOSITORIES.md](docs/REPOSITORIES.md): what the engine repository and this plugin repository each own.
 - [docs/RELEASING.md](docs/RELEASING.md): engine, plugin and catalogue release steps. [docs/RUNBOOKS.md](docs/RUNBOOKS.md): incidents and rollback.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, real-Hermes setup, replay harness, CI.

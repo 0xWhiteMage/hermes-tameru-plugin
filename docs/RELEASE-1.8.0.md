@@ -1,6 +1,6 @@
 # Tameru 1.8.0: release record
 
-> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.1.md](RELEASE-1.9.1.md).
 
 Recorded 2026-11-09. This is the honest account of what was checked for 1.8.0, what was not, and what to say in the
 catalogue pull request. [CHANGELOG.md](../CHANGELOG.md) says what changed.

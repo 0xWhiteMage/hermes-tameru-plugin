@@ -44,7 +44,7 @@ every module of `hermes_tameru_plugin/tameru/` with the engine repository's `src
 endings. CI runs it in the `vendored` job against the engine's public repository, so the engine commit must be pushed before the plugin that
 names it. The Desktop panel tests run in the `desktop-panel` job; locally: `TAMERU_UI_TEST_DEPS=<a node_modules with jsdom, react and react-dom>
 node --experimental-vm-modules --test tests/desktop/activity.test.mjs` (since Hermes 0.23.1 those packages are in
-`hermes-agent/apps/desktop/node_modules`). Both jobs ran green on GitHub's runners for 1.9.0.
+`hermes-agent/apps/desktop/node_modules`). Both jobs ran green on GitHub's runners for 1.9.1.
 
 ## Looking at the holdouts
 

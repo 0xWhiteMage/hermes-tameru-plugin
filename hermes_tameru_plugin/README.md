@@ -110,7 +110,9 @@ many sessions can lower `store_max_chars`. See the
 - Use the default `plugins.isolation: in_process`. Under `host` isolation,
   archive-backed recovery after restart is limited.
 
-## What was measured (version 1.9.0)
+## What was measured (version 1.9.1)
+
+The numbers were recorded on 1.9.0; 1.9.1 changes where per-chat records are stored and the panel's tooltip, not what is pruned, and the replay baselines are unchanged.
 
 A replay of scripted agent sessions against real Hermes v0.23.1 (11 session shapes, six varied sessions per cell, Hermes' measured tool block, a deliberately
 lossy fake summarizer, prefix-cache pricing; a fact an arm dropped is priced as a re-run of the tool) gives these costs against Hermes as shipped:
