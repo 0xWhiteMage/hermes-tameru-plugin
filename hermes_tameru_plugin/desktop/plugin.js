@@ -2,7 +2,7 @@ import * as sdk from '@hermes/plugin-sdk'
 import { cloneElement, createElement as h, Fragment, isValidElement, useEffect, useId, useRef, useState } from 'react'
 
 const host = sdk.host
-const PANEL_BUILD = 5     // must equal progress.PANEL_BUILD in the backend; a mismatch means Desktop or the plugin is stale
+const PANEL_BUILD = 6     // must equal progress.PANEL_BUILD in the backend; a mismatch means Desktop or the plugin is stale
 const epoch = () => typeof sdk.gatewayActivationEpoch === 'function' ? sdk.gatewayActivationEpoch() : 0
 const muted = { color: 'var(--ui-text-tertiary)' }
 const number = value => Number.isFinite(value) ? value.toLocaleString() : '—'
@@ -131,6 +131,9 @@ const CSS = `.tameru-changes { container-type: inline-size; position: relative; 
 .tameru-hintcard { position: fixed; z-index: 2147483000; max-width: 260px; padding: 6px 9px; border-radius: 7px; font-size: 11.5px; line-height: 1.4; pointer-events: none;
   color: #f2f2f3; background: #0b0b0c; border: 1px solid #3a3a3d; box-shadow: 0 6px 18px rgba(0,0,0,.5) }
 .tameru-hintcard b { display: block; font-weight: 600; margin-bottom: 1px }
+.tameru-sdktip { max-width: 260px; font-size: 11.5px; line-height: 1.4 }
+.tameru-sdktip strong { display: block; font-weight: 600; margin-bottom: 1px }
+.tameru-sdktip .tameru-key { margin-left: 6px; padding: 0 4px; border: 1px solid currentColor; border-radius: 4px; font: inherit; font-size: 10.5px; opacity: .8 }
 .tameru-hintcard kbd { margin-left: 6px; padding: 0 4px; border: 1px solid currentColor; border-radius: 4px; font: inherit; font-size: 10.5px; opacity: .8 }
 .tameru-changes .tameru-body { display: grid; grid-template-rows: 176px 20px; height: 196px; contain: size layout; scrollbar-gutter: stable }
 .tameru-changes .tameru-panes { display: grid; grid-template-columns: minmax(0, 1fr); min-height: 0; min-width: 0 }
@@ -240,7 +243,7 @@ function drawHintCard(box, title, keys, lines) {
 
 // Hover for 350ms or focus shows a short explanation; Esc or leaving hides it. The same text is always in the page
 // (visually hidden) and linked with aria-describedby, so screen readers read it without the card.
-function Tip({ title, text, keys, extra, help = false, children }) {
+function CardTip({ title, text, keys, extra, help = false, children }) {
   const id = useId()
   const wrapper = useRef(null)
   const timer = useRef(null)
@@ -273,6 +276,31 @@ function Tip({ title, text, keys, extra, help = false, children }) {
     described,
     h('span', { id, className: 'tameru-sr' }, [title, ...lines].filter(Boolean).join('. ')))
 }
+
+// Hermes' own tooltip (the SDK's ``Tip``, available from Hermes 0.23.0) matches the app's look. It takes one label node, so the title, the
+// keys and the first-hover extra line go inside it; the card above stays as the fallback for an SDK that has no ``Tip``.
+const sdkTip = typeof sdk.Tip === 'function' ? sdk.Tip : null
+
+function HintLabel({ title, keys, text, extra }) {
+  // The label mounts when the tooltip opens: the extra line shows until it has been shown once, and is fixed for this opening.
+  const [lines] = useState(() => [text, extra && !seenRowHint() ? extra : ''].filter(Boolean))
+  useEffect(() => { if (extra) markRowHintSeen() }, [])
+  return h('div', { className: 'tameru-sdktip' },
+    title && h('strong', null, title, keys && h('kbd', { className: 'tameru-key' }, keys)),
+    lines.map((line, index) => h('div', { key: index }, line)))
+}
+
+function SdkTip({ title, text, keys, extra, help = false, children }) {
+  const id = useId()
+  const only = Array.isArray(children) ? children[0] : children
+  const described = isValidElement(only) ? cloneElement(only, { 'aria-describedby': id }) : only
+  const shown = isValidElement(described) ? h(sdkTip, { label: h(HintLabel, { title, keys, text, extra }) }, described) : described
+  // The wrapper keeps the old layout hooks (``.tameru-tip``, the help underline); the screen-reader text is always in the page.
+  return h('span', { className: 'tameru-tip', 'data-help': help ? 'true' : undefined }, shown,
+    h('span', { id, className: 'tameru-sr' }, [title, text, extra].filter(Boolean).join('. ')))
+}
+
+const Tip = props => sdkTip ? h(SdkTip, props) : h(CardTip, props)
 
 function Gauge({ gauge, used }) {
   const scale = gaugeScale(gauge, used)

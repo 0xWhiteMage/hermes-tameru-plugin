@@ -14,7 +14,7 @@ Answers the Hermes plugin-catalogue review of 1.9.0 (two blocking items and two 
 
 ### Changed
 - **Per-chat records no longer go through Hermes' private session storage.** The policy, self-tuning, Keeps, pinned lines and host offsets are kept in the plugin's own
-  durable state, Hermes' public `ctx.state` (`$HERMES_HOME/plugin-data/<plugin>/state.json`), under one key per chat, `chat:<session id>` (a hash of the id when it is not a
+  durable state, Hermes' public `ctx.state` (`$HERMES_HOME/plugin-data/<folder Hermes names for the plugin>/state.json`), under one key per chat, `chat:<session id>` (a hash of the id when it is not a
   legal key). The plugin no longer reads or writes `model_config` through the private `_session_db` handle; a test with a session database that refuses those calls proves it.
   Without `ctx.state` (a directory install) records stay in memory, and the status says so. A new module, `chat_store.py`, is the only place that touches it.
 - **Retention.** `ctx.state` has no delete, so a chat's record outlives the chat. A chat unused for 90 days is cleared, and only the newest 400 chats are kept (checked at most once a day).
@@ -25,11 +25,13 @@ Answers the Hermes plugin-catalogue review of 1.9.0 (two blocking items and two 
 - **Hermes home.** The stats ledger, the learned-priors file, the telemetry log's allowed folder and the stub's `config.yaml` read the Hermes home through
   `hermes_constants.get_hermes_home()` (the active profile, and `%LOCALAPPDATA%\hermes` on Windows), falling back to `$HERMES_HOME` and `~/.hermes` only when Hermes is not importable.
 
+- **The panel's hint tooltip uses Hermes' own `Tip`** (the SDK component, available from Hermes 0.23.0), so hints match the app's look. The title, keys and the first-hover extra line go inside its label;
+  the screen-reader description stays in the page. A Desktop whose SDK has no `Tip` keeps the panel's own card. Panel build 6 (the backend and the panel must be updated together).
+
 ### Not changed
-- The panel's hint tooltip still draws its own card (a recommendation, not a blocker). The SDK's `Tip` is available from Hermes 0.23.0, but it takes a single label, while the panel's
-  hint carries a title, keys, an extra line and a screen-reader description, so switching changes the panel's markup and needs its hover-card tests and a visual check in Desktop.
-  It is left for a panel build of its own.
 - The plugin still reads the session archive (`_session_db`) to rebuild the changes table after a restart and to read archived originals. These are reads only.
+- A known limit of `ctx.state`: it has no multi-step transaction, so if two Hermes processes on one profile save different parts of the same chat at the same instant, one of the two updates can be lost.
+  It affects only that chat's own record and is rare.
 
 ## [1.9.0] - 2026-11-11
 

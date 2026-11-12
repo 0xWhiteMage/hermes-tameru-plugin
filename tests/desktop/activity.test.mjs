@@ -40,7 +40,7 @@ function atom(value) {
   }
 }
 
-function makeSdk(owner = { connectionId: 'source-a', profile: 'main' }, { events = false, usage = null } = {}) {
+function makeSdk(owner = { connectionId: 'source-a', profile: 'main' }, { events = false, usage = null, tip = false } = {}) {
   const state = {
     focusedSessionId: atom('runtime-sid'),
     focusedSessionOwner: atom(owner),
@@ -94,6 +94,16 @@ function makeSdk(owner = { connectionId: 'source-a', profile: 'main' }, { events
     __epoch: () => epoch.set(epoch.get() + 1),
   }
   sdk.useGatewayActivationEpoch = () => sdk.useValue(epoch)
+  if (tip) {
+    // Hermes' own Tip: one label node, opened on hover (asChild: the child is the trigger).
+    sdk.Tip = ({ label, children }) => {
+      const [open, setOpen] = React.useState(false)
+      const only = React.Children.only(children)
+      return React.createElement(React.Fragment, null,
+        React.cloneElement(only, { onMouseEnter: () => setOpen(true), onMouseLeave: () => setOpen(false) }),
+        open && React.createElement('div', { className: 'sdk-tip-label', role: 'tooltip' }, label))
+    }
+  }
   sdk.__sockets = sockets
   return { sdk, host, calls, state, sockets }
 }
@@ -118,9 +128,9 @@ async function mount(sdk) {
   })
   const mod = new vm.SourceTextModule(source, { identifier: 'plugin.js', context })
   const sdkMod = new vm.SyntheticModule(
-    ['host', 'useValue', 'COMPOSER_AREAS', 'gatewayActivationEpoch', 'useGatewayActivationEpoch', 'default'],
+    ['host', 'useValue', 'COMPOSER_AREAS', 'gatewayActivationEpoch', 'useGatewayActivationEpoch', 'Tip', 'default'],
     function () {
-      for (const k of ['host', 'useValue', 'COMPOSER_AREAS', 'gatewayActivationEpoch', 'useGatewayActivationEpoch']) this.setExport(k, sdk[k])
+      for (const k of ['host', 'useValue', 'COMPOSER_AREAS', 'gatewayActivationEpoch', 'useGatewayActivationEpoch', 'Tip']) this.setExport(k, sdk[k])
       this.setExport('default', sdk)
     }, { identifier: 'sdk', context })
   const reactMod = new vm.SyntheticModule(['default', ...Object.keys(React)], function () {
@@ -1121,7 +1131,7 @@ test('a panel and a backend from different builds say so in the status line', as
   assert.equal(line.textContent, 'Out of date: reload Desktop')
   assert.equal(line.getAttribute('role'), 'alert')
   const matching = makeSdk()
-  const ok = snapshotPayload('sid'); ok.progress.doctor = { version: '1.9.0', panel_build: 5 }
+  const ok = snapshotPayload('sid'); ok.progress.doctor = { version: '1.9.1', panel_build: 6 }
   const again = await boot(matching.sdk, matching.calls, ok)
   assert.doesNotMatch(doc(again.dom).querySelector('.tameru-statusline').textContent, /Out of date/)
 })
@@ -1382,4 +1392,53 @@ test('the pin box has no form, so nothing can submit or reload the page, and Ent
   typeInto(pinInput(dom), 'use short answers')
   pressEnter(pinInput(dom)); await flush()
   assert.equal(calls.at(-1).payload.arg, `--json pin 'use short answers' --lifecycle 'life-1'`)
+})
+
+
+// ------------------------------------------------------------------------------------------------ Hermes' own Tip (1.9.1)
+const sdkTips = dom => [...doc(dom).querySelectorAll('.sdk-tip-label')]
+const enter = (dom, el) => act(() => el.dispatchEvent(new window.MouseEvent('mouseover', { bubbles: true })))
+
+test('with the SDK Tip the panel uses it: title, text and keys go in its label and no custom card is drawn', async () => {
+  const { sdk, calls } = makeSdk(undefined, { tip: true })
+  const { dom, timeouts } = await boot(sdk, calls, snapshotPayload('sid'))
+  assert.equal(sdkTips(dom).length, 0)
+  enter(dom, pauseButton(dom))
+  assert.equal(sdkTips(dom).length, 1)
+  assert.equal(sdkTips(dom)[0].getAttribute('role'), 'tooltip')
+  assert.match(sdkTips(dom)[0].textContent, /Pause/)
+  assert.match(sdkTips(dom)[0].textContent, /stops changing this chat until you resume/)
+  assert.equal(cards(dom).length, 0, 'the fallback card is not drawn when the SDK has a Tip')
+  act(() => pauseButton(dom).dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true })))
+  assert.equal(sdkTips(dom).length, 0, 'leaving closes it')
+  void timeouts
+})
+
+test('with the SDK Tip the screen-reader description is still in the page and linked to the control', async () => {
+  const { sdk, calls } = makeSdk(undefined, { tip: true })
+  const { dom } = await boot(sdk, calls, snapshotPayload('sid'))
+  const button = pauseButton(dom)
+  const id = button.getAttribute('aria-describedby')
+  assert.ok(id, 'the control points at its description')
+  assert.match(doc(dom).getElementById(id).textContent, /Pause.*stops changing this chat until you resume/)
+})
+
+test('the extra first-hover line shows once with the SDK Tip, then not again', async () => {
+  const { sdk, calls } = makeSdk(undefined, { tip: true })
+  const { dom } = await boot(sdk, calls, snapshotPayload('sid', { items: items(1) }))
+  const compare = eye(dom, 0)
+  assert.ok(compare, 'the open table has a row with a Compare (review) control')
+  enter(dom, compare)
+  assert.match(sdkTips(dom)[0].textContent, /Click to see what was hidden/)
+  act(() => compare.dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true })))
+  enter(dom, compare)
+  assert.doesNotMatch(sdkTips(dom)[0].textContent, /Click to see what was hidden/)
+})
+
+test('without an SDK Tip the panel keeps drawing its own card', async () => {
+  const { sdk, calls } = makeSdk()
+  assert.equal(sdk.Tip, undefined)
+  const { dom, timeouts } = await boot(sdk, calls, snapshotPayload('sid'))
+  hover(dom, pauseButton(dom), timeouts)
+  assert.equal(cards(dom).length, 1)
 })

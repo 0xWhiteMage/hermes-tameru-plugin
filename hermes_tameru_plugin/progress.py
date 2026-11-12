@@ -10,7 +10,7 @@ import time
 from typing import Any
 
 SCHEMA = 3
-PANEL_BUILD = 5      # the Desktop panel (desktop/plugin.js) carries the same number; a mismatch means one side is stale
+PANEL_BUILD = 6      # the Desktop panel (desktop/plugin.js) carries the same number; a mismatch means one side is stale
 _TIMELINE = 20
 
 # last_check reason -> plain sentence. Anything unknown falls back to "Watching."
