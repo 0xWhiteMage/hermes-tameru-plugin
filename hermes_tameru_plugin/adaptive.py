@@ -584,7 +584,7 @@ class AdaptiveMixin:
         ``payback``); an urgent plan (the host is about to compact) keeps the waiver the share rule has, whatever the rule.
         """
         rule = self._settings.decision_rule
-        if plan.reason == "frontier":             # the unsent rows are written whether or not anything is pruned: price the cached part only
+        if getattr(plan, "reason", None) == "frontier":   # the unsent rows are written whether or not anything is pruned: price the cached part only
             rule = "share_cached"
         if rule == "share" or plan.urgent:
             return plan.required_reclaim(suffix)
