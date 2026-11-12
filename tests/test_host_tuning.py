@@ -6,7 +6,7 @@ import random
 
 import pytest
 from engine_support import make_engine
-from test_autotune_engine import _MetaDB
+from test_autotune_engine import _MetaDB, bind_meta, saved
 
 from hermes_tameru_plugin import host_tuning as ht
 from hermes_tameru_plugin.config import TameruSettings
@@ -172,7 +172,7 @@ def test_saved_numbers_round_trip_and_are_clamped_on_load():
 def _engine(db=None, **settings):
     settings.setdefault("adaptive_host", True)           # off by default; these tests are about the feature
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **settings))
-    engine.bind_session_state(session_db=db or _MetaDB(), session_id="s1")
+    bind_meta(engine, db, "s1")
     _ = engine.context_length          # real Hermes applies its small-window floor when the window is first read
     return engine
 
@@ -231,7 +231,7 @@ def test_switched_off_means_the_values_never_move(setting):
 
 def test_other_policy_modes_are_left_alone():
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="legacy"))
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     _ = engine.context_length
     base = engine.threshold_percent
     _grow(engine)
@@ -264,7 +264,7 @@ def test_the_numbers_are_saved_per_chat_and_come_back_after_a_restart():
     db = _MetaDB()
     engine = _engine(db)
     _grow(engine)
-    assert db.config.get(("s1", "tameru_host_v1")), "saved under the chat's own metadata"
+    assert saved(db, "s1", "host"), "saved in the plugin's own chat store"
     restarted = _engine(db)
     assert restarted._host.offset == pytest.approx(engine._host.offset, abs=1e-3)
 

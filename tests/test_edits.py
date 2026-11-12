@@ -8,7 +8,7 @@ import random
 
 import pytest
 from engine_support import Chat, demote, make_engine, pytest_failure_with_passes
-from test_autotune_engine import _MetaDB
+from test_autotune_engine import _MetaDB, bind_meta
 
 from hermes_tameru_plugin import engine as engine_module
 from hermes_tameru_plugin import engine_edits as edits_module   # the Keep/Restore code lives here
@@ -22,7 +22,7 @@ from hermes_tameru_plugin.session_policy import PolicyError
 
 def _build(db=None, **settings):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **settings))
-    engine.bind_session_state(session_db=db or _MetaDB(), session_id="s1")
+    bind_meta(engine, db, "s1")
     return engine
 
 

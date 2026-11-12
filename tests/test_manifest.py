@@ -6,7 +6,7 @@ import re
 
 import pytest
 from engine_support import Chat, demote, make_engine, pytest_failure_with_passes
-from test_autotune_engine import _MetaDB
+from test_autotune_engine import _MetaDB, bind_meta
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.manifest import (
@@ -110,7 +110,7 @@ def test_only_writes_and_patches_count_and_a_file_touched_again_moves_to_the_end
 
 def _engine_with_one_shortened_output(**settings):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **settings))
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     chat = Chat("why did the gateway time out?")
     idx = chat.tool("terminal", {"command": "pytest -q"}, pytest_failure_with_passes())
     changed, out = demote(engine, chat.finish(), idx)

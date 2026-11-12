@@ -9,6 +9,7 @@ from __future__ import annotations
 import contextlib
 import json
 import random
+import re
 from typing import Any
 
 from fixtures import hermes_payloads as hp
@@ -34,9 +35,11 @@ def make_engine(settings: TameruSettings | None = None, **kwargs: Any) -> Tameru
         "proactive_prune_min_reclaim_tokens": 0, "proactive_prune_min_result_chars": MIN_PRUNE_CHARS,
         "protect_last_n": PROTECT_LAST_N,
     }
-    return TameruContextEngine(
+    engine = TameruContextEngine(
         settings=settings or TameruSettings(small_window_threshold_tokens=0, policy_mode="legacy"),
         **{**options, **kwargs})
+    engine.attach_chat_state(FakeState())
+    return engine
 
 
 class Chat:
@@ -177,3 +180,26 @@ def use_archive_commit(monkeypatch, engine) -> None:
     has no in-place rewrite, so there is nothing to switch off."""
     if hasattr(engine, "_rewrite_pruned_rows_in_place"):
         monkeypatch.setattr(engine, "_rewrite_pruned_rows_in_place", lambda *args, **kwargs: None)
+
+
+class FakeState:
+    """A stand-in for Hermes' ``ctx.state`` (``PluginState``): JSON values by key, atomic ``set``, the same key rules, ``None`` kept as null."""
+
+    _KEY = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:-]{0,127}$")
+
+    def __init__(self):
+        self.data: dict[str, Any] = {}
+        self.writes = 0
+
+    def _check(self, key):
+        if not isinstance(key, str) or not self._KEY.fullmatch(key) or ".." in key:
+            raise ValueError(f"bad plugin state key {key!r}")
+
+    def get(self, key, default=None):
+        self._check(key)
+        return json.loads(json.dumps(self.data[key])) if key in self.data else default
+
+    def set(self, key, value):
+        self._check(key)
+        self.data[key] = json.loads(json.dumps(value))
+        self.writes += 1

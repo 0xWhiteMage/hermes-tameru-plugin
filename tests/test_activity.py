@@ -818,6 +818,7 @@ def test_a_reset_during_plan_publishes_nothing(monkeypatch):
 
 def test_policy_command_changes_controls_and_reports_memory_storage():
     engine = _bound_engine("s1")
+    engine.attach_chat_state(None)          # no durable state (a directory install): the choice lives in memory
     out = engine._activity_registry.command(
         "policy preserve-detail activation=earlier recent=long", session_id="s1")
     assert "Policy: Adaptive · Preserve detail" in out

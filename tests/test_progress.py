@@ -8,12 +8,12 @@ from engine_support import Chat, demote, make_engine, pytest_failure_with_passes
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.progress import SCHEMA, build_snapshot, fmt_tokens, gauge_bar, render_text
-from test_autotune_engine import _MetaDB
+from test_autotune_engine import _MetaDB, bind_meta
 
 
 def _bound(db=None, sid="s1"):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive"))
-    engine.bind_session_state(session_db=db or _MetaDB(), session_id=sid)
+    bind_meta(engine, db, sid)
     return engine
 
 

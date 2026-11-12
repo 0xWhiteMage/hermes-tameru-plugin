@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from engine_support import make_engine
-from test_autotune_engine import _MetaDB
+from test_autotune_engine import _MetaDB, bind_meta
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.net_estimate import describe, estimate
@@ -35,7 +35,7 @@ def test_the_credit_per_cleanup_is_capped():
 
 def _stats(**settings):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **settings))
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     engine._policy.cost_events.append((8_000, 1_000, 0))
     engine._responses = 10
     return engine, engine._activity_registry.command("stats", session_id="s1", platform="desktop")

@@ -5,7 +5,7 @@ import json
 
 import pytest
 from engine_support import make_engine
-from test_autotune_engine import _MetaDB
+from test_autotune_engine import _MetaDB, bind_meta
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.pins import HEADING, MAX_PINS, PIN_CHARS, TOTAL_CHARS, PinState, clean_pin, merge_pins
@@ -16,7 +16,7 @@ SECRET = "gh" + "p_" + "A1b2C3d4E5" * 3
 
 def _engine(**kw):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **kw))
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     return engine
 
 
@@ -127,10 +127,10 @@ def test_a_secret_is_refused_over_the_command():
 def test_pins_survive_a_rebind_of_the_same_chat():
     db = _MetaDB()
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive"))
-    engine.bind_session_state(session_db=db, session_id="s1")
+    bind_meta(engine, db, "s1")
     _run(engine, "pin keep the API stable")
     fresh = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive"))
-    fresh.bind_session_state(session_db=db, session_id="s1")
+    bind_meta(fresh, db, "s1")
     assert fresh._pins.items == ["keep the API stable"]
 
 

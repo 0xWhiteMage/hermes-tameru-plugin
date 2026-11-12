@@ -1,6 +1,6 @@
 """Per-chat persistence of the self-tuner and the user's two choices: bias and pause.
 
-Mirrors ``session_policy``: the chat's own metadata holds a small versioned record, a rebind or a
+Mirrors ``session_policy``: the plugin's own chat store (``chat_store``) holds a small versioned record, a rebind or a
 host-compression rotation carries it over, and a record that does not parse is ignored (defaults apply).
 Only scalars are stored. Persisting is best effort: the in-memory state always applies.
 """
@@ -8,25 +8,17 @@ from __future__ import annotations
 
 from typing import Any
 
-from .session_policy import PolicyError, _binding, _current, _metadata_methods
+from .session_policy import PolicyError, _binding, _current
 
-TUNER_KEY = "tameru_tuner_v1"
+PART = "tuner"
 
 
 def _record(state) -> dict[str, Any]:
     return {"version": 1, "paused": bool(state.paused), "tuner": state.tuner.state()}
 
 
-def _write(db, sid, record) -> bool:
-    methods = _metadata_methods(db)
-    if methods is None:
-        return False
-    read, patch, session = methods
-    if session(sid) is None:
-        return False
-    if read(sid, TUNER_KEY) != record:
-        patch(sid, {TUNER_KEY: record})
-    return read(sid, TUNER_KEY) == record
+def _write(store, sid, record) -> bool:
+    return store is not None and store.write(sid, PART, record)
 
 
 def save(engine) -> bool:
@@ -106,10 +98,9 @@ def bind_tuner(engine, *, rotation: bool = False) -> None:
             prior = learned.seed()
             if prior is not None:
                 state.tuner.seed(prior)                      # a saved record for this chat still overrides it below
-        methods = _metadata_methods(db)
-        if methods is None:
+        if db is None:
             return
-        record = methods[0](sid, TUNER_KEY)
+        record = db.read(sid, PART)
         if not _current(engine, owner) or not isinstance(record, dict) or record.get("version") != 1:
             return
         paused = record.get("paused")

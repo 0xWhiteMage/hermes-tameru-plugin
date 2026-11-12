@@ -392,6 +392,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
         self._host_anchor_n: int | None = None
         self._host_saved: dict | None = None
         self._edits = EditState()
+        self._chat_store = None            # per-chat records live in the plugin's own durable state (chat_store); None means memory only
         self._edits_inflight: list[str] = []
         self._edits_digests: dict[str, str] = {}      # ref -> digest of the text the overlay put in the request
         self._edits_staged: dict[str, list[str]] = {}  # api request id -> refs its request carried, until the provider answers
@@ -516,6 +517,13 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, HostSettingsMixin, UsageMix
             return scaled_error_budget(settings, self._policy_threshold_tokens())
         except Exception:
             return settings.retained_error_budget_chars
+
+    def attach_chat_state(self, state) -> bool:
+        """Use the plugin's durable state (``ctx.state``) for per-chat records. False, and memory only, when it is not usable."""
+        from .chat_store import ChatStore, usable
+
+        self._chat_store = ChatStore(state) if usable(state) else None
+        return self._chat_store is not None
 
     def clone_for_agent(self) -> TameruContextEngine:
         """A per-agent copy; the store, memo and telemetry copy as fresh empty objects."""

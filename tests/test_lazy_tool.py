@@ -7,7 +7,7 @@ import time
 
 import pytest
 from engine_support import make_engine
-from test_autotune_engine import _MetaDB
+from test_autotune_engine import _MetaDB, bind_meta
 
 from hermes_tameru_plugin import register
 from hermes_tameru_plugin.config import TameruSettings
@@ -88,7 +88,7 @@ def test_stripping_a_realistic_request_is_fast():
 # ---- the decision, from engine state only ---------------------------------------------------------------------------
 def _engine(**settings):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", lazy_tool=True, **settings))
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     return engine
 
 
@@ -126,7 +126,7 @@ def test_the_middleware_hides_then_reveals_as_the_chat_changes():
 
 def test_with_the_setting_off_the_middleware_never_changes_anything():
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive"))
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     assert engine._activity_registry.llm_request_middleware(request=chat_request(), session_id="s1", api_mode="chat_completions") is None
 
 
@@ -201,5 +201,5 @@ def test_stats_show_what_the_middleware_did():
 
 def test_stats_say_nothing_about_the_tool_when_the_setting_is_off():
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive"))
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     assert "Recovery tool" not in _stats(engine)

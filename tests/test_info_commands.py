@@ -5,7 +5,7 @@ import json
 
 import pytest
 from engine_support import make_engine
-from test_autotune_engine import _MetaDB
+from test_autotune_engine import _MetaDB, bind_meta
 
 from hermes_tameru_plugin.activity import SURFACE_REFUSAL
 from hermes_tameru_plugin.config import TameruSettings
@@ -14,7 +14,7 @@ from hermes_tameru_plugin.info_commands import HELP_LINES, help_text
 
 def _live(**settings):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **settings))
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     return engine
 
 
