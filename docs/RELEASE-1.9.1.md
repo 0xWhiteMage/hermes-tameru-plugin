@@ -8,7 +8,7 @@
 | Engine | 1.9.0, unchanged; the vendored copy still matches it |
 | Hermes tested on | `3b421578` (v0.23.1) |
 | Gate report | [gate-d71b7e46310c.json](gate-reports/gate-d71b7e46310c.json): stub 2149 passed, real Hermes 3346 passed (55 expected failures), Desktop panel tests passed, clean tree |
-| Catalogue | [NousResearch/hermes-agent#153033](https://github.com/NousResearch/hermes-agent/pull/153033) pins `b4429d7` / 1.9.1; open, awaiting review |
+| Catalogue | [NousResearch/hermes-agent#153033](https://github.com/NousResearch/hermes-agent/pull/153033) pins `b4429d7` / 1.9.1; merged 2026-11-12 (Hermes commit `302f89e`), so 1.9.1 is the listed version. Tag and GitHub release `v1.9.1` point at `b4429d7` |
 
 ## What changed
 
