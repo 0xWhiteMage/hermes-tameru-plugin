@@ -7,6 +7,13 @@ All notable changes to this project are documented here. The format follows
 
 Removes three things that showed no measured benefit, as announced under *Deprecated* in 1.9.0. The engine is unchanged (1.9.0).
 
+### Added
+- **`decision_rule`** (`share` | `share_cached` | `payback_early` | `payback` | `accrual`, default `share`) and the cache prices it uses (`cache_write_multiplier`, `cache_read_multiplier`): computed alternatives
+  to the fixed 35% pay-back share, from measured quantities (`payback.py`). None beat the shipped rule on the replay, so the default is unchanged; the measurement and the reasons are in
+  [docs/DECISION-RULE-1.10.md](docs/DECISION-RULE-1.10.md). The extra rules are experimental.
+- **Benchmarks you can reproduce:** `tests/eval/stats.py` (paired differences, bootstrap and cluster-bootstrap intervals), `matrix.py` (byte-reproducible result rows and a fixed promotion gate), committed result rows
+  under `tests/eval/results/`, a README headline regenerated from them (and a test that fails on drift), four blind holdout scenarios, and a gate report that carries a reduced matrix with intervals.
+
 ### Removed
 - **`adaptive_host`**, the per-chat adjustment of Hermes' summary threshold and protected tail (and its `tameru_host_v1` record, the "Tuned for this chat"
   line in the Desktop panel, `host_snapshot` and the `host` entry of the progress snapshot). Hermes now always uses the `compression.threshold` and
