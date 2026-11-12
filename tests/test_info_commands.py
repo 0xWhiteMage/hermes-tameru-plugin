@@ -5,7 +5,7 @@ import json
 
 import pytest
 from engine_support import make_engine
-from test_autotune_engine import _MetaDB, bind_meta
+from test_autotune_engine import bind_meta
 
 from hermes_tameru_plugin.activity import SURFACE_REFUSAL
 from hermes_tameru_plugin.config import TameruSettings

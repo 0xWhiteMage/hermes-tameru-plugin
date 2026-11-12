@@ -8,7 +8,6 @@ import pytest
 from engine_support import FakeState, make_engine
 from test_autotune_engine import _MetaDB
 
-from hermes_tameru_plugin import chat_store as cs
 from hermes_tameru_plugin.chat_store import MAX_AGE_DAYS, MAX_CHATS, ChatStore, chat_key
 from hermes_tameru_plugin.config import TameruSettings
 

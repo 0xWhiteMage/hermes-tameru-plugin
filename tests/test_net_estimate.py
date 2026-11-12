@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 from engine_support import make_engine
-from test_autotune_engine import _MetaDB, bind_meta
+from test_autotune_engine import bind_meta
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.net_estimate import describe, estimate

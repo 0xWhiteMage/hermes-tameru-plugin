@@ -7,7 +7,7 @@ import time
 
 import pytest
 from engine_support import make_engine
-from test_autotune_engine import _MetaDB, bind_meta
+from test_autotune_engine import bind_meta
 
 from hermes_tameru_plugin import register
 from hermes_tameru_plugin.config import TameruSettings

@@ -6,7 +6,7 @@ import re
 
 import pytest
 from engine_support import Chat, demote, make_engine, pytest_failure_with_passes
-from test_autotune_engine import _MetaDB, bind_meta
+from test_autotune_engine import bind_meta
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.manifest import (

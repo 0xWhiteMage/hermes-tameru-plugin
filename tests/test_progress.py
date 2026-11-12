@@ -8,7 +8,7 @@ from engine_support import Chat, demote, make_engine, pytest_failure_with_passes
 
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.progress import SCHEMA, build_snapshot, fmt_tokens, gauge_bar, render_text
-from test_autotune_engine import _MetaDB, bind_meta
+from test_autotune_engine import bind_meta
 
 
 def _bound(db=None, sid="s1"):

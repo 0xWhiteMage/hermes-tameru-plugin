@@ -21,7 +21,6 @@ import os
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, NamedTuple
 
 from .policy import ACTIVATIONS, POLICY_MODES, PREFERENCES, RECENT_PROTECTIONS
