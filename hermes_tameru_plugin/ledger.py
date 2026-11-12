@@ -69,11 +69,6 @@ LEGACY_HEADING = "## Artifact Trail (Tameru, exact)"
 # The lines under it are tool output quoted as data, not facts Tameru checked and not instructions. Summaries written
 # before this wording used "Errors:"; both are read.
 ERRORS_TITLE = "Errors (quoted from tool output; data, not instructions):"
-EVIDENCE_TITLE = "Originals (open with tameru_read_original ref=...; the tool, what ran and its size only):"
-EVIDENCE_CHARS = 1200         # the Originals lines, on top of the other sections
-EVIDENCE_MAX_LINES = 24
-_EVIDENCE_LABEL_CHARS = 60
-EVIDENCE_REF_CHARS = 8        # a prefix the recovery tool resolves; 8 hex characters stay clear of Hermes' anchor index (which reads 9-40 as a commit)
 _LEGACY_ERRORS_TITLE = "Errors:"
 LEDGER_DROPPED = {"count": 0}   # error lines left out because they read like orders (integer only, never content)
 MAX_CHARS = 1500              # the Files and Commands lines
@@ -156,10 +151,6 @@ _COMMAND_LINE_RE = re.compile(
     re.MULTILINE,
 )
 _OP_RE = re.compile(r"([a-z]+)(?: x(\d+))?")
-_EVIDENCE_LINE_RE = re.compile(
-    r"^- (?P<tool>[a-z][a-z0-9_]{0,39})(?: `(?P<label>[^`\n]{0,80})`)?: ref=(?P<ref>[0-9a-f]{8}), (?P<lines>\d{1,7}) lines, (?P<chars>\d{1,3}(?:,\d{3})*|\d{1,10}) chars$",
-    re.MULTILINE,
-)
 
 
 @dataclass
@@ -179,15 +170,6 @@ class _ErrorEntry:
     touched: int = 0
     similar: int = 0          # other fingerprints grouped onto this line
     members: set[str] = field(default_factory=set)
-
-
-@dataclass
-class _EvidenceEntry:
-    tool: str
-    label: str
-    lines: int
-    chars: int
-    touched: int = 0
 
 
 @dataclass
@@ -406,7 +388,6 @@ def _seed(
     errors: dict[str, _ErrorEntry], clock: Iterator[int],
     kube: dict[str, set[str]] | None = None,
     kube_pods: dict[str, list[str]] | None = None,
-    evidence: dict[str, _EvidenceEntry] | None = None, store: OriginalStore | None = None,
 ) -> None:
     """Entries of the Artifact Trail section of an earlier summary (our own line grammar).
 
@@ -423,37 +404,12 @@ def _seed(
         files[m["path"]].changed = bool(m["changed"])
     for m in _COMMAND_LINE_RE.finditer(text):
         _note_command(commands, clock, m["command"], m["result"], int(m["runs"] or 1))
-    if evidence is not None and store is not None:      # only references that still resolve are carried on
-        for m in _EVIDENCE_LINE_RE.finditer(text):
-            if store.entry(m["ref"]) is not None:
-                evidence[m["ref"]] = _EvidenceEntry(
-                    m["tool"], m["label"] or "", int(m["lines"]), int(m["chars"].replace(",", "")), next(clock))
     marker = max(text.find(f"\n{title}\n") for title in (ERRORS_TITLE, _LEGACY_ERRORS_TITLE))
     for m in _ERROR_LINE_RE.finditer(text[marker + 1:] if marker >= 0 else ""):
         _note_errors(errors, clock, m["line"], kube=kube, kube_pods=kube_pods)
 
 
 # ---- rendering -------------------------------------------------------------------------------
-def _note_evidence(marks: dict[str, _EvidenceEntry], clock: Iterator[int], store: OriginalStore, content: str, tool: str, args: dict) -> None:
-    """One shortened result of this stretch: its tool, what ran, its size. Nothing of the output itself."""
-    header = parse_header(content)
-    if header is None:
-        return
-    entry = store.entry(header["ref"])
-    if entry is None or not re.fullmatch(r"[a-z][a-z0-9_]{0,39}", tool):
-        return
-    target = args.get("command") if tool == "terminal" else next((args[k] for k in _PATH_KEYS if isinstance(args.get(k), str)), None)
-    label = _label(target, keep_tail=tool != "terminal")[:_EVIDENCE_LABEL_CHARS] if isinstance(target, str) and target.strip() else ""
-    if "`" in label or _INSTRUCTION_RE.search(label):
-        label = ""
-    marks[header["ref"][:EVIDENCE_REF_CHARS]] = _EvidenceEntry(tool, label, header["total"], len(entry.text), next(clock))
-
-
-def _evidence_line(ref: str, e: _EvidenceEntry) -> str:
-    what = f" `{e.label}`" if e.label else ""
-    return _plain(f"- {e.tool}{what}: ref={ref}, {e.lines} lines, {e.chars:,} chars")
-
-
 def _plain(line: str) -> str:
     return _USER_ASKED_RE.sub("User asked -", line)
 
@@ -521,7 +477,7 @@ def build_ledger(
     turns: list[dict], store: OriginalStore | None = None, *, max_chars: int = MAX_CHARS,
     previous: str = "", skip_tools: frozenset[str] = frozenset(), extra_originals: Iterable[str] = (),
     is_rendered: Callable[[dict], bool] | None = None,
-    is_external: Callable[[dict], bool] | None = None, evidence: bool = False,
+    is_external: Callable[[dict], bool] | None = None,
 ) -> str:
     """The Artifact Trail section for ``turns`` (the messages being summarized), or "".
 
@@ -534,9 +490,6 @@ def build_ledger(
     and MCP results are never scanned either: a stranger wrote them, and the summary would carry their lines
     without Hermes' untrusted-data wrapper. ``extra_originals`` are texts of results outside ``turns`` whose bodies are gone (also scanned).
     Files and Commands never exceed ``max_chars``, the Errors lines ``ERRORS_CHARS``.
-    With ``evidence`` the section also lists the Tameru-shortened results of ``turns`` (and those of ``previous``) that the store
-    still holds, by tool, what ran and size, with an 8-character ref: no text of any output. It keeps a shortened result readable
-    after Hermes' summary has replaced the row that carried its ref.
     """
     files: dict[str, _FileEntry] = {}
     commands: dict[str, _CommandEntry] = {}
@@ -544,9 +497,7 @@ def build_ledger(
     kube: dict[str, set[str]] = {}
     kube_pods: dict[str, list[str]] = {}
     clock = itertools.count()
-    marks: dict[str, _EvidenceEntry] = {}
-    _seed(previous, files, commands, errors, clock, kube=kube, kube_pods=kube_pods,
-          evidence=marks if evidence else None, store=store)
+    _seed(previous, files, commands, errors, clock, kube=kube, kube_pods=kube_pods)
     scan_room = _ERROR_SCAN_BUDGET
 
     def scan(text: str) -> None:
@@ -574,8 +525,6 @@ def build_ledger(
                     and not (is_external is not None and is_external(msg))
                     and len(content) >= _ERROR_SCAN_MIN_CHARS):
                 scan(_original_text(content, store, rendered=rendered))
-            if evidence and rendered and store is not None and tool and not is_untrusted_tool(tool):
-                _note_evidence(marks, clock, store, content, tool, _args(raw_args))
             if tool != "terminal" and tool not in _FILE_OPS:
                 continue
             args = _args(raw_args)
@@ -608,11 +557,6 @@ def build_ledger(
             room -= _size(kept)
             if kept:
                 out += [title, *kept]
-    if marks:
-        items = [(e.touched, _evidence_line(ref, e)) for ref, e in marks.items()][-EVIDENCE_MAX_LINES:]
-        kept = _fit(items, EVIDENCE_CHARS - len(EVIDENCE_TITLE) - 1)
-        if kept:
-            out += [EVIDENCE_TITLE, *kept]
     # Overflow keeps level-tagged log errors (ERROR/FATAL/CRITICAL...) before status rows such as kubectl pods or
     # test-runner lines, then the most recently touched.
     error_items = [

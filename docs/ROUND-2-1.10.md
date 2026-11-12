@@ -23,4 +23,4 @@ References put 0.5 more facts per session within reach of a model that knows whe
 
 ## Decision
 
-None of the round-2 ideas is added to the release. The shipped rule and settings stay as they are; the experimental code for A and B is removed from the product (the rows and this write-up stay).
+None of the round-2 ideas is added to the release. The shipped rule and settings stay as they are; the experimental code for A and B is removed from the product (the rows and this write-up stay; the code and the replay arms that produced them are in commit `5ce21ae`).

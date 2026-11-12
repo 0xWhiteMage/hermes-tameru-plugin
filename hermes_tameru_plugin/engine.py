@@ -232,7 +232,6 @@ class _Pass:
     focus: str | None = None                      # ``/compress <topic>``
     degrade: bool = False                         # escalation re-run: header-only rungs only
     pressure: bool = False                        # inside Hermes' pass 4
-    frontier: bool = False                        # a frontier pass: shorten what the model has just seen, touch nothing older
     full: bool = False                            # inside compress(): a full compaction, not the proactive prune
     renders: int = 0                              # rows rewritten into a Tameru row
     parent_lines: int = 0                         # rows shortened by Hermes' own one-liner (no original kept)
@@ -1823,7 +1822,6 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                     extra_originals=self._bodyless_originals(),
                     is_rendered=lambda msg: self._known_render(msg) is not None,
                     is_external=lambda msg: bool((change := self._known_render(msg)) and change.external),
-                    evidence=self._settings.trail_evidence,
                 ),
             )
         except Exception:
