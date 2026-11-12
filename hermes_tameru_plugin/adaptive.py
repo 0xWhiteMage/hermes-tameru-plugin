@@ -14,6 +14,8 @@ from dataclasses import asdict, dataclass
 from typing import Any
 
 from .autotune import PREFERENCE_BIAS, Tuner, Tuning
+from .payback import Pricing, avoided_compaction_per_token
+from .payback import required_reclaim as payback_required
 from .config import TameruSettings, scaled_error_budget, scaled_retained_budget
 from .hermes_compat import message_budget_tokens
 from .request_observation import RequestObservation, observe_request
@@ -104,6 +106,8 @@ class PolicyRuntime:
         self.last_commit: _Commit | None = None
         self.last_request: RequestObservation | None = None
         self.request_observed_after = self.clock()
+        self.carry = 0.0                    # the accrual rule's carried cost since the last commit (tokens, priced)
+        self.host_after_tokens: int | None = None   # what Hermes' last compaction left in the prompt (for the payback rule's kappa)
         self.tuner = Tuner()
         # With self-tuning on the planner reads the tuner, not the preference row, so the configured preference seeds the
         # tuner's starting bias (a bias saved with the chat still wins when the chat binds).
@@ -258,6 +262,9 @@ class AdaptiveMixin:
             self._policy.commits_since_host = 0
             self._manifest.reset_last()      # a Hermes summary may have dropped the earlier notes
             self._policy.decline_streak = 0
+            after = _count(after_tokens)
+            if after:
+                self._policy.host_after_tokens = after
             self._event("host", before=_count(before_tokens), after=_count(after_tokens),
                         compaction=str(kind)[:24], passive=passive)
             self._policy.host_notice = passive
@@ -470,6 +477,7 @@ class AdaptiveMixin:
 
         urgent = permitted[0].urgent if permitted else False
         last_qualifying = None
+        first_gain = None
         for index, plan in enumerate(permitted):
             if not self._pass_is_current(base_scope):
                 return messages, 0                       # lifecycle changed mid-plan: discard
@@ -502,7 +510,8 @@ class AdaptiveMixin:
             stage_scope.policy_unsent_tokens = message_budget_tokens(messages[max(first_changed, unsent_at):])
             stage_scope.policy_rewritten_tokens = (message_budget_tokens(messages[first_changed:unsent_at])
                                                    if unsent_at > first_changed else 0)
-            required = plan.required_reclaim(suffix)
+            first_gain = gain if first_gain is None else first_gain
+            required = self._required_reclaim(plan, suffix, stage_scope.policy_rewritten_tokens)
             stage_scope.native_options["proactive_prune_min_reclaim_tokens"] = required
             stage_scope.policy_after_tokens = after
             stage_scope.policy_suffix_tokens = suffix
@@ -516,9 +525,38 @@ class AdaptiveMixin:
                 return self._select_policy_stage(base_scope, entry)
             last_qualifying = entry
         if last_qualifying is None:
+            if first_gain and self._settings.decision_rule == "accrual":
+                with self._activity.lifecycle_lock:      # the text stayed in the prompt another request: it carries its read cost
+                    self._policy.carry += self._pricing().read * first_gain
             _SCOPE.set(base_scope)
             return messages, 0
         return self._select_policy_stage(base_scope, last_qualifying)
+
+    def _pricing(self) -> Pricing:
+        try:
+            return Pricing(write=self._settings.cache_write_multiplier, read=self._settings.cache_read_multiplier)
+        except ValueError:
+            return Pricing()
+
+    def _required_reclaim(self, plan, suffix: int, rewritten: int | None) -> int:
+        """The least a prune must remove to be worth its cache rewrite, under the configured ``decision_rule``.
+
+        ``share`` is the fixed share of the whole rewritten suffix the plugin has always used. The other rules price the rewrite (see
+        ``payback``); an urgent plan (the host is about to compact) keeps the waiver the share rule has, whatever the rule.
+        """
+        rule = self._settings.decision_rule
+        if rule == "share" or plan.urgent:
+            return plan.required_reclaim(suffix)
+        pricing = self._pricing()
+        threshold = int(self._policy_threshold_tokens() or 0)
+        with self._activity.lifecycle_lock:
+            growth = sorted(g for g in self._policy.growth if g > 0)
+            carried, host_after = self._policy.carry, self._policy.host_after_tokens
+        median = growth[len(growth) // 2] if growth else None
+        return payback_required(
+            rule, suffix=suffix, rewritten=rewritten, share=plan.minimum_reclaim_share, minimum=plan.minimum_reclaim_tokens, pricing=pricing,
+            headroom_tokens=max(0, threshold - plan.input_tokens) if threshold else None, growth_per_request=median,
+            kappa=avoided_compaction_per_token(threshold, host_after, pricing) if threshold else None, carried=carried)
 
     def _select_policy_stage(self, anchor, entry):
         from .engine import _SCOPE
@@ -548,6 +586,7 @@ class AdaptiveMixin:
             self._policy.decline_streak = 0
             self._policy.commits_since_host += 1
             self._policy.checks_since_commit = 0
+            self._policy.carry = 0.0
             self._policy.host_notice = False
             self._policy.saved_tokens += max(0, reclaim)
             self._policy.commit_count += 1

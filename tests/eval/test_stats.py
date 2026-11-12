@@ -63,3 +63,26 @@ def test_empty_input_is_handled():
     assert stats.bootstrap_ci([])["n"] == 0
     assert stats.cluster_bootstrap_ci({})["clusters"] == 0
     assert stats.compare([], "a", "b")["cells"] == 0
+
+
+def test_the_promotion_gate_passes_a_clear_win_and_names_each_way_a_rule_can_fail():
+    import matrix
+
+    def rows(cost_rel, held_drop=0, worse_shape=None):
+        out = []
+        for scenario in ("a", "b", "c", "d", "e", "f"):
+            for window in matrix.PROMOTION["windows"]:
+                for seed in range(3):
+                    base = {"scenario": scenario, "window": window, "seed": seed, "kept": 10, "recoverable": 2, "errors_kept": 5}
+                    out.append({**base, "arm": "base", "effective": 100.0 + seed})
+                    rel = 0.2 if scenario == worse_shape else cost_rel
+                    out.append({**base, "arm": "rule", "effective": (100.0 + seed) * (1 + rel), "kept": 10 - held_drop})
+        return out
+
+    assert matrix.promote(rows(-0.05), "base", "rule", resamples=300)["promote"] is True
+    no_win = matrix.promote(rows(0.0), "base", "rule", resamples=300)
+    assert not no_win["promote"] and "does not exclude zero" in no_win["failures"][0]
+    fewer_facts = matrix.promote(rows(-0.05, held_drop=2), "base", "rule", resamples=300)
+    assert not fewer_facts["promote"] and any("held is lower" in f for f in fewer_facts["failures"])
+    worse = matrix.promote(rows(-0.05, worse_shape="a"), "base", "rule", resamples=300)
+    assert not worse["promote"] and any("a:" in f or " a:" in f or "K a" in f for f in worse["failures"])

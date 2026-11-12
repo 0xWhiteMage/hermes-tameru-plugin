@@ -165,7 +165,7 @@ def test_grow_makes_outputs_longer_and_keeps_every_planted_fact():
 def test_a_row_carries_the_scorecard_and_is_still_deterministic():
     one = protocol3.measure("tameru_1_4_product", "oncall", 32_000, 0)
     assert one == protocol3.measure("tameru_1_4_product", "oncall", 32_000, 0)
-    for key in ("requests", "prune_commits", "prefix_breaks", "mean_request_chars", "first_compaction_request"):
+    for key in ("requests", "prune_commits", "prefix_breaks", "mean_request_chars", "first_compaction_request", "errors_total", "errors_kept"):
         assert key in one
     assert one["requests"] > 0 and one["mean_request_chars"] > 0 and "timing" not in one
     timed = protocol3.measure("tameru_1_4_product", "oncall", 32_000, 0, timing=True)

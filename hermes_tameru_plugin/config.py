@@ -23,6 +23,7 @@ from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from typing import Any, NamedTuple
 
+from .payback import RULES as DECISION_RULES
 from .policy import ACTIVATIONS, POLICY_MODES, PREFERENCES, RECENT_PROTECTIONS
 
 PLUGIN_ID = "tameru"
@@ -55,6 +56,9 @@ class TameruSettings:
     edits: bool = True                        # Keep and Restore: put a shortened output back in front of the model (TAMERU_EDITS=off turns it off)
     manifest: bool = True                     # tell the model, once per change, how many results are shortened (TAMERU_MANIFEST=0 turns it off)
     preference: str = "balanced"              # save_space | balanced | preserve_detail
+    decision_rule: str = "share"              # share | share_cached | payback_early | payback | accrual: when a prune pays for its cache rewrite
+    cache_write_multiplier: float = 1.25      # the provider's cache write price against uncached input (Anthropic's 5-minute tier)
+    cache_read_multiplier: float = 0.10       # the provider's cache read price against uncached input
     activation: str = "auto"                  # auto | earlier | standard | later
     recent_protection: str = "auto"           # auto | short | standard | long
     input_budget_tokens: int | None = None    # already usable input, not a combined window
@@ -224,6 +228,16 @@ def _parse_patterns(raw: Any) -> tuple[str, ...]:
     return patterns
 
 
+def _parse_multiplier(raw: Any) -> float:
+    """A cache price against the uncached input price: a finite number above 0 and at most 10."""
+    if isinstance(raw, bool) or not isinstance(raw, (int, float, str)):
+        raise ValueError("expected a number")
+    value = float(raw)
+    if not math.isfinite(value) or not 0 < value <= 10:
+        raise ValueError("expected a number above 0 and at most 10")
+    return value
+
+
 _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "enabled": _parse_bool,
     "policy_mode": _choice(POLICY_MODES),
@@ -235,6 +249,9 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "net_estimate": _parse_bool,
     "stats_ledger": _parse_bool,
     "preference": _choice(PREFERENCES),
+    "decision_rule": _choice(DECISION_RULES),
+    "cache_write_multiplier": _parse_multiplier,
+    "cache_read_multiplier": _parse_multiplier,
     "activation": _choice(ACTIVATIONS),
     "recent_protection": _choice(RECENT_PROTECTIONS),
     "input_budget_tokens": _optional_int(1),

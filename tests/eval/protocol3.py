@@ -301,6 +301,7 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
         "requests": metrics["requests"], "prune_commits": metrics["prune_commits"], "prefix_breaks": metrics["prefix_break_events"],
         "mean_request_chars": round(metrics["input_chars_total"] / max(1, metrics["requests"]), 1),
         "first_compaction_request": compress_at[0] if compress_at else None,
+        "errors_total": metrics["error_fingerprints"]["total"], "errors_kept": metrics["error_fingerprints"]["retained"],
     }
     if timing:       # wall-clock seconds spent inside the engine: informative, never part of an identity check
         row["timing"] = {"engine_seconds": result["timing"]["engine_seconds"]}
