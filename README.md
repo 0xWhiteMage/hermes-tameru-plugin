@@ -225,8 +225,8 @@ original, `/tameru ask REF [START-END | term]` gives the exact instruction that 
   word for word in every Hermes summary of this chat, under `## Pinned by you (Tameru, verbatim)`, so a rule such as
   "never touch production config" cannot be softened by the summarizer. `/tameru pins` lists them and
   `/tameru unpin N` removes one. Nothing is ever pinned for you, text that looks like a credential is refused, the
-  verbs work on your own clients only, and `pins: off` / `TAMERU_PINS=off` switches it off. In Desktop the 📌 button in the panel header opens the same list. Saved per chat as
-  `tameru_pins_v1`.
+  verbs work on your own clients only, and `pins: off` / `TAMERU_PINS=off` switches it off. In Desktop the 📌 button in the panel header opens the same list. Saved per chat in the
+  plugin's own state (see *What Tameru stores*).
 - **What the model is told:** each turn, only when something changed, Tameru adds a short `<tameru_note>` to your message
   for the model: how many tool results are shortened and which files it wrote or patched (base names only). It says
   it is data, not instructions, never repeats itself, is capped per session and can be switched off with
@@ -497,10 +497,7 @@ Hermes `main` (the `main` job may fail without blocking a release).
 | What | Where | Size | How to remove it |
 |---|---|---|---|
 | Originals of shortened outputs (never anything that looks like a credential) | the engine's memory (512 entries, 32M characters), and Hermes' own session archive | bounded | ends with the process; Hermes' session delete for the archive |
-| Per-chat self-tuning, pause and lean mode | the chat's session metadata, `tameru_tuner_v1` | a few numbers | goes with the chat; a new chat starts clean |
-| Per-chat host settings (summary threshold and protected tail, adapted within bounds). Off by default | the chat's session metadata, `tameru_host_v1` | two numbers | leave `adaptive_host` off; goes with the chat. Your `config.yaml` is never written |
-| Pinned instructions (your own lines) | the chat's session metadata, `tameru_pins_v1` | up to 5 lines, 1,500 characters | `/tameru unpin N`; goes with the chat |
-| Keeps (pinned outputs) | the chat's session metadata, `tameru_edits_v1` | up to 64 short references | `/tameru unkeep REF`; goes with the chat |
+| Per-chat records: self-tuning, pause and lean mode, policy choices, Keeps, pinned lines (and host offsets when `adaptive_host` is on) | the plugin's own state, `$HERMES_HOME/plugin-data/<plugin>/state.json`, key `chat:<session id>` (Hermes' public `ctx.state`; nothing is written to Hermes' session storage) | a few numbers, up to 5 pinned lines (1,500 characters) and 64 short references per chat | `/tameru unpin N`, `/tameru unkeep REF`, `/tameru reset`; a chat's record is dropped after 90 days unused, and only the newest 400 chats are kept |
 | Restores | engine memory only | up to 64, five replies each | `/tameru cancel`, or they expire |
 | Daily totals of cleanups and tokens removed. Off by default | `$HERMES_HOME/tameru/stats-ledger.json` | one small record per day, 90 days, no chat ids, text, tool names or paths | `/tameru reset stats confirm`, or delete the file; written only with `stats_ledger: on` |
 | What self-tuning learned across chats. Off by default | `$HERMES_HOME/tameru/learned.json` | five numbers, moving at most 0.12 a day | delete the file; it is written only with `learned_priors: on` |

@@ -31,8 +31,9 @@ _COUNT = 5
 def _path() -> Path:
     base = os.environ.get("TAMERU_LEARNED_DIR", "").strip()
     if not base:
-        home = os.environ.get("HERMES_HOME", "").strip() or "~/.hermes"
-        base = str(Path(home).expanduser() / "tameru")
+        from .home import hermes_home
+
+        base = str(hermes_home() / "tameru")
     return Path(base) / "learned.json"
 
 

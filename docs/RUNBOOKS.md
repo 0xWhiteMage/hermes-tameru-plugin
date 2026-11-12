@@ -63,8 +63,10 @@ switch edits off for the chat. If a provider still returns errors:
 
 ## E. A chat's saved Tameru state looks wrong
 
-State per chat lives in Hermes session metadata under two keys, `tameru_tuner_v1` (self-tuning, pause, bias) and
-`tameru_edits_v1` (Keeps). Both are validated and clamped on load, and a record that does not parse is ignored.
+State per chat lives in the plugin's own state (`$HERMES_HOME/plugin-data/<plugin>/state.json`, one key `chat:<session id>` per chat, plus a `chats` index),
+not in Hermes' session storage. Each part (policy, tuner, edits, pins, host) is validated and clamped on load, and a record that does not parse is ignored.
+Records do not disappear when a chat is deleted: a chat unused for 90 days is cleared, and only the newest 400 are kept. To start one chat clean, use
+`/tameru reset`, `/tameru unpin N` and `/tameru unkeep REF`; to clear everything, delete that `state.json` while Hermes is stopped.
 
 1. `/tameru cancel` and `/tameru unkeep REF` clear edits one by one.
 2. Starting a new chat starts from clean per-chat state.
@@ -84,7 +86,7 @@ When `adaptive_host` is on (it is off by default), Tameru moves Hermes' *effecti
 window) and `protect_last_n` (half to double, 6 to 60) per chat, from how fast the chat grows, how well the cache is
 reused, and how often old outputs are revisited. It never writes `config.yaml`; the Desktop memory hint shows
 "Tuned for this chat" with both numbers. To put the configured values back at once, set `adaptive_host: off` (or
-`TAMERU_ADAPTIVE_HOST=off`; it is the default), or pause Tameru for the chat. Stored per chat as `tameru_host_v1`.
+`TAMERU_ADAPTIVE_HOST=off`; it is the default), or pause Tameru for the chat. Stored per chat in the plugin's own state.
 
 ## G. The panel says "Out of date: reload Desktop"
 

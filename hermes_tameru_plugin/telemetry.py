@@ -37,7 +37,9 @@ def safe_log_path(raw: str) -> Path | None:
         if not text or "\0" in text or text.startswith(("\\\\", "//")):
             return None
         path = Path(text).expanduser().resolve()
-        roots = [Path(os.environ.get("HERMES_HOME", "").strip() or "~/.hermes").expanduser(), Path(tempfile.gettempdir())]
+        from .home import hermes_home
+
+        roots = [hermes_home(), Path(tempfile.gettempdir())]
         for root in roots:
             try:
                 path.relative_to(root.resolve())

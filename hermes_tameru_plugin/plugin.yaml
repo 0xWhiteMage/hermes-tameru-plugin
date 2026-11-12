@@ -1,7 +1,7 @@
 name: tameru
 label: Tameru (ためる)
 description: "Tameru (ためる) is adaptive context compaction: pin lines of your own so they stay word for word in every Hermes summary, and shorten old tool outputs locally while a Desktop panel shows what changed. You can Restore or Keep a shortened output so the model sees it in full, and view or re-read any original with tameru_read_original (tameru_expand remains supported). Extraction adds no LLM or network calls (engine: Tameru 1.9.0); Hermes may still summarize."
-version: 1.9.0
+version: 1.9.1
 requires_hermes: ">=0.23.0"
 provides_hooks:
   - pre_api_request
