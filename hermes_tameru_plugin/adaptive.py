@@ -10,7 +10,7 @@ from __future__ import annotations
 import inspect
 import time
 from collections import deque
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from typing import Any
 
 from .autotune import PREFERENCE_BIAS, Tuner, Tuning
@@ -85,6 +85,15 @@ def _unsent_start(messages) -> int:
     return index
 
 
+def _pending_round(messages) -> int:
+    """How many trailing messages are the round the model has not answered yet: the last assistant call and the results after it (at least 2)."""
+    for index in range(len(messages) - 1, -1, -1):
+        msg = messages[index]
+        if isinstance(msg, dict) and msg.get("role") == "assistant" and msg.get("tool_calls"):
+            return max(2, len(messages) - index)
+    return 2
+
+
 class PolicyRuntime:
     """Observed policy state: controls plus a small bounded growth history.
 
@@ -106,6 +115,7 @@ class PolicyRuntime:
         self.last_commit: _Commit | None = None
         self.last_request: RequestObservation | None = None
         self.request_observed_after = self.clock()
+        self.frontier_commits = 0           # prunes made by the frontier setting (1.10)
         self.carry = 0.0                    # the accrual rule's carried cost since the last commit (tokens, priced)
         self.host_after_tokens: int | None = None   # what Hermes' last compaction left in the prompt (for the payback rule's kappa)
         self.tuner = Tuner()
@@ -388,6 +398,11 @@ class AdaptiveMixin:
                 self._telemetry.count("error", where="policy_plan")
                 return messages, 0
             first = scope.policy_plans[0] if scope.policy_plans else None
+            frontier = self._frontier_plan(first)
+            if frontier is not None:                  # below the activation point: only the row the model has just seen
+                first = frontier
+                scope.policy_plans = (frontier,)
+                scope.frontier = True
             if first is None or not first.consider or not self._pass_is_current(scope):
                 self._record_check("decline", planning, body,
                                    "paused" if self._policy.paused else (first.reason if first else "not_considered"),
@@ -397,8 +412,15 @@ class AdaptiveMixin:
             # Activation uses the full request above; native persistence must price
             # its next runway with the smaller, independently chosen regrowth floor.
             scope.native_options["proactive_prune_tokens"] = first.regrowth_tokens
-            with self._telemetry.hold() as held:
-                res = parent(messages, planning.current_tokens, *args, **kwargs)
+            saved_rearm = getattr(self, "_proactive_prune_rearm_tokens", 0)
+            if scope.frontier:                        # Hermes' re-arm mark belongs to the normal pass: open the gate, restore it after
+                self._proactive_prune_rearm_tokens = 0
+            try:
+                with self._telemetry.hold() as held:
+                    res = parent(messages, planning.current_tokens, *args, **kwargs)
+            finally:
+                if scope.frontier:
+                    self._proactive_prune_rearm_tokens = saved_rearm
             final_scope = _SCOPE.get()
             if res[0] is messages or res[1] <= 0:
                 self._record_check("decline", planning, body, "no_commit", scope, first)
@@ -412,12 +434,21 @@ class AdaptiveMixin:
                         self._activity.refresh(res[0])
                 self._activity_registry.notify(self, count)
             committed = getattr(final_scope, "plan", None) or first
-            self._arm_regrowth(res[0], getattr(committed, "regrowth_tokens", 0))
+            if not scope.frontier:
+                self._arm_regrowth(res[0], getattr(committed, "regrowth_tokens", 0))
             return res
         finally:
             self._close_pass(scope)
             _SCOPE.reset(token)
             self._telemetry.time(time.perf_counter() - started)
+
+    def _frontier_plan(self, first):
+        """The plan for a frontier pass, or None: only below the activation point, never while paused, only with ``frontier`` on."""
+        if (first is None or first.consider or not self._settings.frontier or first.reason != "ample_room"
+                or first.input_tokens <= 0 or self._policy.paused):
+            return None
+        return replace(first, consider=True, reason="frontier", urgent=False, minimum_reclaim_tokens=0,
+                       minimum_result_chars=max(first.minimum_result_chars, self._settings.frontier_min_chars))
 
     def _observe_policy_body(self, body: int) -> None:
         """Called once under the lifecycle lock, before choosing this attempt's plans."""
@@ -472,6 +503,9 @@ class AdaptiveMixin:
             call = sig.bind(messages, protect_tail_count, protect_tail_tokens, *args, **kwargs)
             tail = (plan.retention.recent_tokens
                     if self._uses_token_tail(plan.controls, full=base_scope.full) else None)
+            if base_scope.frontier:                   # protect the pending round only, by count: the row before it is the one to shorten
+                tail = None
+                call.arguments["protect_tail_count"] = _pending_round(messages)
             for key, value in (("protect_tail_tokens", tail),
                                ("min_prune_chars", _FULL_PRUNE_MIN_CHARS if base_scope.full else plan.minimum_result_chars)):
                 if key in sig.parameters:
@@ -488,6 +522,8 @@ class AdaptiveMixin:
             if stage_scope is None:
                 return messages, 0
             _SCOPE.set(stage_scope)
+            if base_scope.frontier:                   # no retained-extract budget and no room cap: older rows stay exactly as they are
+                stage_scope.age_demote, stage_scope.room, stage_scope.err_room = set(), 10 ** 9, 10 ** 9
             stage_scope.native_options["proactive_prune_min_reclaim_tokens"] = plan.minimum_reclaim_tokens
             stage_scope.native_options["proactive_prune_min_result_chars"] = plan.minimum_result_chars
             stage_scope.native_options["proactive_prune_tokens"] = plan.regrowth_tokens
@@ -548,6 +584,8 @@ class AdaptiveMixin:
         ``payback``); an urgent plan (the host is about to compact) keeps the waiver the share rule has, whatever the rule.
         """
         rule = self._settings.decision_rule
+        if plan.reason == "frontier":             # the unsent rows are written whether or not anything is pruned: price the cached part only
+            rule = "share_cached"
         if rule == "share" or plan.urgent:
             return plan.required_reclaim(suffix)
         pricing = self._pricing()
@@ -578,6 +616,17 @@ class AdaptiveMixin:
         plan = scope.plan
         after = scope.policy_after_tokens if scope.policy_after_tokens is not None else scope.policy_before_tokens
         reclaim = scope.policy_before_tokens - after if scope.policy_after_tokens is not None else 0
+        if plan.reason == "frontier":
+            # a frontier commit is bookkeeping only: it must not reset the normal pass's timing or feed the self-tuner's regrowth signal
+            with self._activity.lifecycle_lock:
+                self._policy.last_body_tokens = after
+                self._policy.growth.clear()
+                self._policy.saved_tokens += max(0, reclaim)
+                self._policy.commit_count += 1
+                self._policy.frontier_commits += 1
+                self._event("commit", before=scope.policy_before_tokens, after=after, stage="frontier", method="proactive",
+                            mode=self._policy.tuner.mode(), refs=[], tools=[], ms=self._pass_ms(), parent_lines=0)
+            return
         method = 'local_full' if scope.full_local else ('full' if scope.full else 'proactive')
         with self._activity.lifecycle_lock:
             self._policy.last_commit = _Commit(plan.stage, reclaim, plan, method)

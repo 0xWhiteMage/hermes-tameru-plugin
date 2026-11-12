@@ -144,6 +144,15 @@ def tameru_lazy() -> Any:
     return engine
 
 
+@register("tameru_frontier")
+def tameru_frontier() -> Any:
+    """The product arm with ``frontier`` on: a large result is shortened one request after the model has seen it, at any fill."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(settings=TameruSettings(frontier=True), quiet_mode=True)
+
+
 @register("tameru_autotune_off")
 def tameru_autotune_off() -> Any:
     """The product arm with self-tuning off (the fixed balanced table): what ``autotune`` adds or costs."""

@@ -232,6 +232,7 @@ class _Pass:
     focus: str | None = None                      # ``/compress <topic>``
     degrade: bool = False                         # escalation re-run: header-only rungs only
     pressure: bool = False                        # inside Hermes' pass 4
+    frontier: bool = False                        # a frontier pass: shorten what the model has just seen, touch nothing older
     full: bool = False                            # inside compress(): a full compaction, not the proactive prune
     renders: int = 0                              # rows rewritten into a Tameru row
     parent_lines: int = 0                         # rows shortened by Hermes' own one-liner (no original kept)

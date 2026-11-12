@@ -50,6 +50,8 @@ class TameruSettings:
     policy_mode: str = "adaptive"             # adaptive | legacy
     autotune: bool = True                     # adaptive mode retunes itself from live session signals
     lazy_tool: bool = False                   # off by default: send the recovery tool only once a result has been shortened (needs Hermes' llm_request middleware; TAMERU_LAZY_TOOL=on)
+    frontier: bool = False                    # experimental, off: shorten a large tool result one request after the model has seen it, at any fill (1.10)
+    frontier_min_chars: int = 12000           # the smallest result a frontier pass touches (about where shortening pays for its cache rewrite)
     net_estimate: bool = False                # off by default: /tameru stats adds a signed estimate of what the cleanups saved or cost (TAMERU_NET_ESTIMATE=on)
     stats_ledger: bool = False                # off by default: keep daily totals of cleanups and tokens removed in $HERMES_HOME/tameru/stats-ledger.json, 90 days, shown only in /tameru stats; /tameru reset stats confirm deletes it (TAMERU_STATS_LEDGER=on)
     pins: bool = True                         # keep the lines you pin word for word in every Hermes summary (TAMERU_PINS=off)
@@ -246,6 +248,8 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "edits": _parse_bool,
     "pins": _parse_bool,
     "lazy_tool": _parse_bool,
+    "frontier": _parse_bool,
+    "frontier_min_chars": _parse_int,
     "net_estimate": _parse_bool,
     "stats_ledger": _parse_bool,
     "preference": _choice(PREFERENCES),
