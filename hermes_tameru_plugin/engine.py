@@ -1823,6 +1823,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                     extra_originals=self._bodyless_originals(),
                     is_rendered=lambda msg: self._known_render(msg) is not None,
                     is_external=lambda msg: bool((change := self._known_render(msg)) and change.external),
+                    evidence=self._settings.trail_evidence,
                 ),
             )
         except Exception:

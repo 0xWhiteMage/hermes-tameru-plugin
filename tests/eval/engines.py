@@ -112,6 +112,14 @@ def tameru_1_4_product() -> Any:
     return TameruContextEngine(quiet_mode=True)
 
 
+@register("tameru_floor1000")
+def tameru_floor1000() -> Any:
+    """The product with the minimum result size of a prune lowered from 2000 to 1000 characters (small results, ``smallrows``)."""
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(proactive_prune_min_result_chars=1000, quiet_mode=True)
+
+
 @register("tameru_legacy")
 def tameru_legacy() -> Any:
     """The plugin as shipped but in ``policy_mode: legacy`` (the fixed prune gates, no adaptive policy)."""
@@ -151,6 +159,15 @@ def tameru_frontier() -> Any:
     from hermes_tameru_plugin.engine import TameruContextEngine
 
     return TameruContextEngine(settings=TameruSettings(frontier=True), quiet_mode=True)
+
+
+@register("tameru_evidence")
+def tameru_evidence() -> Any:
+    """The product arm with ``trail_evidence`` on: the Artifact Trail lists the shortened results by tool, command and size, with a ref."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(settings=TameruSettings(trail_evidence=True), quiet_mode=True)
 
 
 @register("tameru_autotune_off")
