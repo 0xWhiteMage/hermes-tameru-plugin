@@ -273,8 +273,11 @@ class AdaptiveMixin:
         return passive
 
     def _tuning(self) -> Tuning | None:
-        """The self-tuner's live numbers, or None when autotune is off (the preference's fixed row applies)."""
-        return self._policy.tuner.tuning() if self._settings.autotune else None
+        """The self-tuner's live numbers; with autotune off, the bias's fixed row (None while the bias is 0, where the preference's row applies)."""
+        tuner = self._policy.tuner
+        if self._settings.autotune:
+            return tuner.tuning()
+        return tuner.baseline() if tuner.bias else None
 
     def _clear_policy_observations(self) -> None:
         """Model/window change: drop estimates, never an in-flight plan's validity."""

@@ -113,6 +113,10 @@ class Tuner:
         values = [_clamp(b * o, bounds) for b, o, bounds in zip(base, self._offsets, _BOUNDS)]
         return Tuning(*values)
 
+    def baseline(self) -> Tuning:
+        """The bias's own row with no self-tuning offsets: what applies when self-tuning is off."""
+        return Tuning(*(_clamp(b, bounds) for b, bounds in zip(_base(self._bias), _BOUNDS)))
+
     def mode(self) -> str:
         """The user's bias as one word: ``save``, ``balanced`` or ``detail``."""
         return "save" if self._bias < -0.33 else "detail" if self._bias > 0.33 else "balanced"

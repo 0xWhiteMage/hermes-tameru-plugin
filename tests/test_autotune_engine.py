@@ -229,3 +229,27 @@ def test_a_reread_of_a_shortened_output_keeps_more_detail():
     start = astuple(engine2._policy.tuner.tuning())
     engine2.handle_tool_call("tameru_read_original", {"ref": "0" * 16})
     assert astuple(engine2._policy.tuner.tuning()) == start, "a reference that is not a shortened output sends no signal"
+
+
+# ---- the lean-mode bias applies with self-tuning off, and a chosen preference sets it (1.10) -----------------
+def test_with_autotune_off_the_bias_row_applies_and_a_zero_bias_keeps_the_preference_row():
+    engine = _bound(autotune=False)
+    assert engine._tuning() is None
+    engine._policy.tuner.set_bias(-1.0)
+    row = engine._tuning()
+    assert row is not None and astuple(row) == astuple(engine._policy.tuner.baseline())
+    assert astuple(row) != astuple(Tuner().tuning())             # the save-space row is not the balanced one
+    engine.observe_host_compaction(session_id="s1", kind="auto")
+    assert astuple(engine._tuning()) == astuple(row)             # off means no signal moves it
+
+
+def test_choosing_a_preference_sets_the_bias_with_self_tuning_on_or_off():
+    for autotune in (True, False):
+        engine = _bound(autotune=autotune)
+        life = engine._activity.lifecycle_id
+        engine.set_policy_controls({"preference": "save_space"}, session_id="s1", lifecycle_id=life)
+        assert engine._policy.tuner.bias == -1.0
+        engine.set_policy_controls({"preference": "preserve_detail"}, session_id="s1", lifecycle_id=life)
+        assert engine._policy.tuner.bias == 1.0
+        engine.set_policy_controls({}, session_id="s1", lifecycle_id=life, reset=True)
+        assert engine._policy.tuner.bias == 0.0

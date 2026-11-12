@@ -1,5 +1,6 @@
 from __future__ import annotations
 from dataclasses import asdict, replace
+from .autotune import PREFERENCE_BIAS
 from .policy import Controls
 
 PART = 'policy'
@@ -75,6 +76,8 @@ def set_controls(engine, updates, *, session_id, lifecycle_id, reset=False):
         if not _current(engine, owner):
             raise PolicyError('The active session changed. Open context details again.')
         state.controls = candidate
+        if reset or 'preference' in updates:     # the planner reads the tuner's bias, so a chosen preference sets it (with self-tuning on or off)
+            state.tuner.set_bias(PREFERENCE_BIAS.get(candidate.preference, 0.0))
         state.has_override = not reset
         state.controls_source = ('default' if reset else 'session') if durable else 'memory'
         state.controls_issue = None
