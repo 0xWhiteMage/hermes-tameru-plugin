@@ -32,10 +32,8 @@ Removes three things that showed no measured benefit, as announced under *Deprec
 ### Changed
 - A configured `adaptive_host` or `learned_priors` is named in `get_status()["tameru"]["warnings"]` ("removed in 1.10.0; ignored") instead of "unknown setting".
 - The plugin is version 1.10.0 (engine 1.9.0); `/tameru stats` shows both.
-- **Licence: MIT to Apache License 2.0**, matching the engine. `LICENSE` is the Apache-2.0 text, `NOTICE` is new, and `pyproject.toml` and `plugin.yaml` declare `Apache-2.0`. The Hermes-derived test fixtures keep their MIT notice (`THIRD_PARTY_NOTICES.md`).
-- Documentation: the README is rewritten for users with a recording for each feature; six historical docs and the remote-gateway address in the cost notes are removed.
 
-## [1.9.1] - Unreleased
+## [1.9.1] - 2026-11-12
 
 Answers the Hermes plugin-catalogue review of 1.9.0 (two blocking items and two recommendations). The engine is unchanged (1.9.0).
 
@@ -54,6 +52,10 @@ Answers the Hermes plugin-catalogue review of 1.9.0 (two blocking items and two 
 
 - **The panel's hint tooltip uses Hermes' own `Tip`** (the SDK component, available from Hermes 0.23.0), so hints match the app's look. The title, keys and the first-hover extra line go inside its label;
   the screen-reader description stays in the page. A Desktop whose SDK has no `Tip` keeps the panel's own card. Panel build 6 (the backend and the panel must be updated together).
+
+- **Licence and documentation** (also in this release):
+  - **Licence: MIT to Apache License 2.0**, matching the engine. `LICENSE` is the Apache-2.0 text, `NOTICE` is new, and `pyproject.toml` and `plugin.yaml` declare `Apache-2.0`. The Hermes-derived test fixtures keep their MIT notice (`THIRD_PARTY_NOTICES.md`).
+  - Documentation: the README is rewritten for users with a recording for each feature; six historical docs and the remote-gateway address in the cost notes are removed.
 
 ### Not changed
 - The plugin still reads the session archive (`_session_db`) to rebuild the changes table after a restart and to read archived originals. These are reads only.

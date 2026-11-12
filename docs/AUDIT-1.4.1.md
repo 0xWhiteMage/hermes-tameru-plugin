@@ -1,6 +1,6 @@
 # Tameru plugin 1.4.1 source audit — 12 October 2026
 
-> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.1.md](RELEASE-1.9.1.md).
 
 ## Scope and identity
 

@@ -1,6 +1,6 @@
 # Tameru 1.4.0 for Hermes: what changed, what improved, and what it cost
 
-> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.0-READINESS.md](RELEASE-1.9.0-READINESS.md).
+> **Historical record.** Written for an earlier version; its numbers and claims are not updated. Current measurements: [COST-TUNING-2026-11-10.md](COST-TUNING-2026-11-10.md); current state: [RELEASE-1.9.1.md](RELEASE-1.9.1.md).
 
 Report date: 2026-10-06. It covers the plugin (`hermes-tameru-plugin`, branch `claude/funny-albattani-gac36w`)
 and the engine it vendors (`tameru-compaction-system`, local commits `4d43819`, `fd8c5b0`, `11b9e5e`, exported in
