@@ -1,7 +1,7 @@
 # 1.10.0: does a computed "pays back" rule beat the fixed 35% share?
 
 **Short answer: no.** Four computed rules were built behind `decision_rule` and measured against the shipped rule (`share`) on the development replay. None passed the
-promotion gate that was fixed before any of them was looked at, so `share` stays the default. The rules stay available as experimental settings; they are not tuned further.
+promotion gate that was fixed before any of them was looked at, so `share` stays the default. The rules were removed from the product after the round-2 review (the code is in commit `5ce21ae`); only the measurement stays.
 
 ## The question
 

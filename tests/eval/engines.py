@@ -151,18 +151,3 @@ def tameru_autotune_off() -> Any:
     from hermes_tameru_plugin.engine import TameruContextEngine
 
     return TameruContextEngine(settings=TameruSettings(autotune=False), quiet_mode=True)
-
-
-def _rule_arm(rule: str):
-    def factory() -> Any:
-        from hermes_tameru_plugin.config import TameruSettings
-        from hermes_tameru_plugin.engine import TameruContextEngine
-
-        return TameruContextEngine(settings=TameruSettings(decision_rule=rule), quiet_mode=True)
-
-    factory.__doc__ = f"The product arm with ``decision_rule: {rule}`` (when a prune pays for its cache rewrite; ``share`` is the shipped rule)."
-    return factory
-
-
-for _rule in ("share_cached", "payback_early", "payback", "accrual"):
-    register(f"tameru_{_rule}", _rule_arm(_rule))

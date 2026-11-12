@@ -8,11 +8,10 @@ All notable changes to this project are documented here. The format follows
 Removes three things that showed no measured benefit, as announced under *Deprecated* in 1.9.0. The engine is unchanged (1.9.0).
 
 ### Added
-- **`decision_rule`** (`share` | `share_cached` | `payback_early` | `payback` | `accrual`, default `share`) and the cache prices it uses (`cache_write_multiplier`, `cache_read_multiplier`): computed alternatives
-  to the fixed 35% pay-back share, from measured quantities (`payback.py`). None beat the shipped rule on the replay, so the default is unchanged; the measurement and the reasons are in
-  [docs/DECISION-RULE-1.10.md](docs/DECISION-RULE-1.10.md). The extra rules are experimental.
 - **Benchmarks you can reproduce:** `tests/eval/stats.py` (paired differences, bootstrap and cluster-bootstrap intervals), `matrix.py` (byte-reproducible result rows and a fixed promotion gate), committed result rows
   under `tests/eval/results/`, a README headline regenerated from them (and a test that fails on drift), four blind holdout scenarios, and a gate report that carries a reduced matrix with intervals.
+- **An honest price in the benchmark:** a read-back or re-run is charged as the extra request it is (`effective_real`), a weaker finder that does not know the answer is reported separately (`effective_finder`), result rows carry rewritten characters and cache breaks, a `dependent` shape checks details needed in the next three requests, and the promotion gate has margins on facts kept outright, cache breaks, rewritten characters and request counts. Re-scored round-1 results: [docs/HONEST-PRICE-1.10.md](docs/HONEST-PRICE-1.10.md).
+- **Ideas tried and not shipped, with their numbers:** computed pay-back rules ([docs/DECISION-RULE-1.10.md](docs/DECISION-RULE-1.10.md)), frontier shortening ([docs/FRONTIER-1.10.md](docs/FRONTIER-1.10.md)), evidence references in the trail, `lazy_tool` by default and a lower result floor ([docs/ROUND-2-1.10.md](docs/ROUND-2-1.10.md)). None passed the gate, so none is in the product.
 
 ### Removed
 - **`adaptive_host`**, the per-chat adjustment of Hermes' summary threshold and protected tail (and its `tameru_host_v1` record, the "Tuned for this chat"
@@ -25,7 +24,7 @@ Removes three things that showed no measured benefit, as announced under *Deprec
 - Their replay arms (`tameru_1_9_host_off`, `tameru_1_9_host_on`) and tests. The stock and product baselines are unchanged.
 
 ### Fixed
-- **The `preference` setting now does something.** With self-tuning on (the default) the planner read only the tuner, so `preference: save_space` or `preserve_detail` had no effect; it now sets the chat's starting bias (a bias saved with the chat still wins).
+- **The `preference` setting now does something.** With self-tuning on (the default) the planner read only the tuner, so `preference: save_space` or `preserve_detail` had no effect; it now sets the chat's starting bias (a bias saved with the chat still wins). Choosing a preference in a chat (`/tameru policy` or the panel) sets the bias too, and with self-tuning off the lean-mode bias now applies instead of being ignored.
 - **The net-cost estimate no longer overstates the rewrite cost:** the tokens a cleanup removes are not rewritten into the cache, so they come off its cost (`net_estimate`).
 - **The policy's wall clock is injectable** (`PolicyRuntime(clock=...)`), so request-ordering decisions can be replayed deterministically; live behaviour is unchanged.
 - **README:** "When it prunes" now describes the adaptive mode (0.60 start, 85% target, 35% pay-back, 15% runway) instead of the legacy trigger.

@@ -24,7 +24,6 @@ TOOL_BLOCK_CHARS = 39_993          # Hermes' tool block, measured (docs/COST-TUN
 DEVELOPMENT = ("default", "oncall", "refactor", "smallrows", "i18n", "bursty")
 DEPENDENT = ("dependent",)         # round 2: the next requests need the large output just shown (run with --scenarios; not in the default set)
 ARMS = ("stock_defaults", "tameru_1_4_product", "tameru_lazy", "tameru_autotune_off")
-RULE_ARMS = ("tameru_share_cached", "tameru_payback_early", "tameru_payback", "tameru_accrual")   # decision-rule arms (1.10)
 WINDOWS = (64_000, 128_000, 200_000)
 SEEDS = (0, 1, 2, 3, 4, 5)
 
