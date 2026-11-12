@@ -46,6 +46,7 @@ def run(arms, scenarios, windows, seeds, *, write: float | None = None, read: fl
                     for scenario in scenarios for window in windows for arm in arms for seed in seeds]
     finally:
         replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS = saved
+        scenarios_blind.unregister_blind()
     meta = {"product": product_hash(), "tool_block_chars": TOOL_BLOCK_CHARS, "structural": True,
             "write": replay.CACHE_WRITE if write is None else write, "read": replay.CACHE_READ if read is None else read,
             "arms": list(arms), "scenarios": list(scenarios), "windows": list(windows), "seeds": list(seeds)}

@@ -99,12 +99,19 @@ def test_error_lines(name):
     assert all(line in blob for line in sc.error_lines)
 
 
-def test_register_is_lazy_and_idempotent(monkeypatch):
+def test_register_is_lazy_idempotent_and_reversible(monkeypatch):
     calls = []
     fake = types.ModuleType("scenario_registry")
-    fake.register_scenario = lambda spec: calls.append(spec.name)
+    fake.SCENARIOS = {}
+
+    def register(spec):
+        calls.append(spec.name)
+        fake.SCENARIOS[spec.name] = spec
+
+    fake.register_scenario = register
     monkeypatch.setitem(sys.modules, "scenario_registry", fake)
-    monkeypatch.setattr(scenarios_blind, "_REGISTERED", False)
     register_blind()
     register_blind()
-    assert calls == list(NAMES)
+    assert calls == list(NAMES) and set(fake.SCENARIOS) == set(NAMES)
+    scenarios_blind.unregister_blind()
+    assert fake.SCENARIOS == {}, "unregistering leaves the registry as it was"

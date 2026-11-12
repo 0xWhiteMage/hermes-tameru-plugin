@@ -544,16 +544,18 @@ BLIND_SPECS = (
                  "support triage; logs, bilingual chats, JSON exports, ids needed at the end"),
 )
 
-_REGISTERED = False
-
-
 def register_blind() -> None:
     """Add the blind specs to the scenario registry (idempotent; never called at import time)."""
-    global _REGISTERED
-    if _REGISTERED:
-        return
     import scenario_registry  # lazy: avoids an import cycle
 
     for spec in BLIND_SPECS:
-        scenario_registry.register_scenario(spec)
-    _REGISTERED = True
+        if spec.name not in scenario_registry.SCENARIOS:
+            scenario_registry.register_scenario(spec)
+
+
+def unregister_blind() -> None:
+    """Take the blind specs out again, so the registered list (and every test that pins it) is as it was."""
+    import scenario_registry
+
+    for spec in BLIND_SPECS:
+        scenario_registry.SCENARIOS.pop(spec.name, None)

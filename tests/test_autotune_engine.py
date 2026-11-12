@@ -6,14 +6,14 @@ import json
 
 import pytest
 
-from engine_support import Chat, make_engine, pytest_failure_with_passes
+from engine_support import Chat, FakeState, make_engine, pytest_failure_with_passes
 
 from hermes_tameru_plugin.autotune import astuple
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.policy import Controls, PlanningInput, Retention, RequestBudget, plans
 from hermes_tameru_plugin.autotune import Tuner
 from hermes_tameru_plugin.session_policy import PolicyError
-from hermes_tameru_plugin.session_tuner import TUNER_KEY
+from hermes_tameru_plugin.chat_store import ChatStore
 
 
 class _MetaDB:
@@ -21,6 +21,7 @@ class _MetaDB:
 
     def __init__(self):
         self.config = {}
+        self.state = FakeState()          # the plugin's own durable state: per-chat records go here, never into the session db
         self.sessions = {"s1", "s2"}
 
     def get_messages(self, session_id, include_compacted=False, **kwargs):
@@ -40,6 +41,19 @@ class _MetaDB:
             self.config[(sid, key)] = json.loads(json.dumps(value))
 
 
+def bind_meta(engine, db=None, sid="s1"):
+    """Bind ``engine`` to ``sid`` with ``db`` as the session db and ``db.state`` as the plugin's durable state."""
+    db = db or _MetaDB()
+    engine.attach_chat_state(db.state)
+    engine.bind_session_state(session_db=db, session_id=sid)
+    return db
+
+
+def saved(db, sid="s1", part="tuner"):
+    """The record the plugin saved for one part of a chat."""
+    return ChatStore(db.state).read(sid, part)
+
+
 def _engine(**settings):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, policy_mode="adaptive", **settings))
     return engine
@@ -47,7 +61,7 @@ def _engine(**settings):
 
 def _bound(db=None, sid="s1", **settings):
     engine = _engine(**settings)
-    engine.bind_session_state(session_db=db or _MetaDB(), session_id=sid)
+    bind_meta(engine, db, sid)
     return engine
 
 
@@ -140,7 +154,7 @@ def test_posture_persists_and_a_new_engine_restores_it():
     db = _MetaDB()
     engine = _bound(db)
     set_posture(engine, session_id="s1", lifecycle_id=engine._activity.lifecycle_id, bias=-0.6, paused=True)
-    assert db.config[("s1", TUNER_KEY)]["paused"] is True
+    assert saved(db)["paused"] is True
     restarted = _bound(db)
     assert restarted._policy.tuner.bias == pytest.approx(-0.6) and restarted._policy.paused is True
     other = _bound(db, sid="s2")
@@ -157,7 +171,7 @@ def test_an_adjustment_is_saved_and_restored():
 
 def test_a_corrupt_saved_record_leaves_defaults():
     db = _MetaDB()
-    db.config[("s1", TUNER_KEY)] = {"version": 1, "paused": "maybe", "tuner": {"version": 1, "bias": 9, "offsets": [1]}}
+    ChatStore(db.state).write("s1", "tuner", {"version": 1, "paused": "maybe", "tuner": {"version": 1, "bias": 9, "offsets": [1]}})
     engine = _bound(db)
     assert engine._policy.tuner.bias == 0.0 and engine._policy.paused is False
 
@@ -191,7 +205,7 @@ def test_the_hook_is_registered_and_routes_to_the_session_engine():
     register(Ctx())
     assert "post_compaction" in calls and "pre_api_request" in calls
     engine = calls["engine"]
-    engine.bind_session_state(session_db=_MetaDB(), session_id="s1")
+    bind_meta(engine, None, "s1")
     calls["post_compaction"](session_id="s1", old_session_id="s0", kind="auto", reason="r",
                              before_tokens=10, after_tokens=5, messages_removed=3)
     assert [e["kind"] for e in engine._policy.events][:1] == ["host"]

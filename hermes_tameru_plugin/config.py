@@ -21,7 +21,6 @@ import os
 import re
 from collections.abc import Callable, Mapping
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, NamedTuple
 
 from .policy import ACTIVATIONS, POLICY_MODES, PREFERENCES, RECENT_PROTECTIONS
@@ -288,8 +287,9 @@ def _read_yaml_config() -> dict:
     try:
         import yaml
 
-        home = os.environ.get("HERMES_HOME", "").strip() or "~/.hermes"
-        path = Path(os.path.expanduser(os.path.expandvars(home))) / "config.yaml"
+        from .home import hermes_home
+
+        path = hermes_home() / "config.yaml"
         with open(path, encoding="utf-8-sig") as handle:
             data = yaml.safe_load(handle)
     except Exception:

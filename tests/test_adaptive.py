@@ -213,7 +213,8 @@ def test_a_committed_prune_updates_policy_state_but_not_a_clone_or_reset(hermes_
         stored = db.get_session_model_config_value(
             "sess-1", PROACTIVE_PRUNE_REARM_MODEL_CONFIG_KEY)
         assert type(stored) is int
-        assert rearm == stored
+        # Storage holds Hermes' own runway; the plugin's shorter mark lives in memory only and is never written back.
+        assert rearm <= stored
         resumed = _engine(monkeypatch, activation="earlier")
         resumed.bind_session_state(session_db=db, session_id="sess-1")
         assert resumed.get_status()["tameru"]["policy"]["rearm_body_tokens"] == stored
@@ -234,6 +235,22 @@ def test_a_committed_prune_updates_policy_state_but_not_a_clone_or_reset(hermes_
         assert engine._policy.controls == clone._policy.controls
     finally:
         db.close()
+
+
+def test_lowering_the_runway_never_writes_to_hermes_session_storage(hermes_home, monkeypatch):
+    """The shortened re-prune runway stays in memory: no private durable write, no error counted, the mark still lowered."""
+    def refuse(self, *args, **kwargs):
+        raise AssertionError("the plugin must not write Hermes' session storage for the runway")
+
+    monkeypatch.setattr(TameruContextEngine, "_durable_write", refuse, raising=False)
+    engine = _engine(monkeypatch, activation="earlier", preference="balanced")
+    messages = _history()
+    pruned, count = engine.prune_tool_results_only(messages, current_tokens=80_000)
+    assert pruned is not messages and count > 0
+    reclaimed = message_budget_tokens(messages) - message_budget_tokens(pruned)
+    native = message_budget_tokens(pruned) + max(reclaimed, engine._raw_native("proactive_prune_tokens"))
+    assert 0 < engine._proactive_prune_rearm_tokens < native          # shortened below Hermes' own runway, in memory
+    assert engine._telemetry.snapshot().get("errors", {}).get("regrowth", 0) == 0
 
 
 def test_an_adaptive_commit_rearms_at_the_plans_regrowth_floor(hermes_home, monkeypatch):
@@ -842,12 +859,21 @@ def _session_policy_db(tmp_path):
     return db
 
 
+def _with_state(engine, state):
+    """Give ``engine`` the plugin's durable state (a ``ctx.state`` stand-in), as ``register(ctx)`` does."""
+    assert engine.attach_chat_state(state)
+    return engine
+
+
 def test_persisted_policy_controls_roundtrip_and_reset(hermes_home, monkeypatch, tmp_path):
-    from hermes_tameru_plugin.session_policy import POLICY_KEY
+    from engine_support import FakeState
+    from hermes_tameru_plugin.chat_store import ChatStore
     db = _session_policy_db(tmp_path)
+    state = FakeState()
+    store = ChatStore(state)
     try:
-        db.patch_session_model_config("s1", {"foreign_plugin": {"nested": "keep-me"}})
-        engine = _engine(monkeypatch)
+        state.set("foreign_plugin", {"nested": "keep-me"})
+        engine = _with_state(_engine(monkeypatch), state)
         engine.bind_session_state(session_db=db, session_id="s1")
         life = engine._activity.lifecycle_id
         history = _history()
@@ -867,9 +893,9 @@ def test_persisted_policy_controls_roundtrip_and_reset(hermes_home, monkeypatch,
         assert engine.get_tool_schemas() == schemas
         assert (engine.max_tokens, engine.threshold_tokens,
                 engine.tail_token_budget, engine.proactive_prune_tokens) == native
-        assert db.get_session_model_config_value("s1", "foreign_plugin") == {"nested": "keep-me"}
+        assert state.get("foreign_plugin") == {"nested": "keep-me"}, "another plugin's key is never touched"
 
-        fresh = _engine(monkeypatch)
+        fresh = _with_state(_engine(monkeypatch), state)
         fresh.bind_session_state(session_db=db, session_id="s1")
         assert fresh.get_policy_status()["controls_source"] == "session"
         assert fresh.get_policy_status()["controls"]["preference"] == "preserve_detail"
@@ -899,8 +925,8 @@ def test_persisted_policy_controls_roundtrip_and_reset(hermes_home, monkeypatch,
         assert status["controls"] == {"mode": "adaptive", "preference": "balanced",
                                       "activation": "auto", "recent": "auto"}
         assert status["controls_source"] == "default"
-        assert db.get_session_model_config_value("s1", POLICY_KEY) is None
-        reopened = _engine(monkeypatch)
+        assert store.read("s1", "policy") is None
+        reopened = _with_state(_engine(monkeypatch), state)
         reopened.bind_session_state(session_db=db, session_id="s1")
         assert reopened.get_policy_status()["controls"]["preference"] == "balanced"
     finally:
@@ -908,10 +934,14 @@ def test_persisted_policy_controls_roundtrip_and_reset(hermes_home, monkeypatch,
 
 
 def test_policy_setter_fencing_and_write_failures(hermes_home, monkeypatch, tmp_path):
-    from hermes_tameru_plugin.session_policy import POLICY_KEY, PolicyError
+    from engine_support import FakeState
+    from hermes_tameru_plugin.chat_store import ChatStore
+    from hermes_tameru_plugin.session_policy import PolicyError
     db = _session_policy_db(tmp_path)
+    state = FakeState()
+    store = ChatStore(state)
     try:
-        engine = _engine(monkeypatch)
+        engine = _with_state(_engine(monkeypatch), state)
         engine.bind_session_state(session_db=db, session_id="s1")
         life = engine._activity.lifecycle_id
         with pytest.raises(PolicyError):
@@ -921,37 +951,35 @@ def test_policy_setter_fencing_and_write_failures(hermes_home, monkeypatch, tmp_
             engine.set_policy_controls({"preference": "save_space"},
                                        session_id="other", lifecycle_id=life)
         assert engine.get_policy_status()["controls"]["preference"] == "balanced"
-        assert db.get_session_model_config_value("s1", POLICY_KEY) is None
+        assert store.read("s1", "policy") is None
 
-        real_patch = db.patch_session_model_config
+        real_set = state.set
+
         def raise_private(*a, **k):
             raise OSError("PRIVATE_SENTINEL")
-        monkeypatch.setattr(db, "patch_session_model_config", raise_private)
+        monkeypatch.setattr(state, "set", raise_private)
         with pytest.raises(PolicyError) as excinfo:
             engine.set_policy_controls({"preference": "save_space"},
                                        session_id="s1", lifecycle_id=life)
         assert "PRIVATE_SENTINEL" not in str(excinfo.value)
-        monkeypatch.setattr(db, "patch_session_model_config", real_patch)
+        monkeypatch.setattr(state, "set", real_set)
         assert engine.get_policy_status()["controls"]["preference"] == "balanced"
-        assert db.get_session_model_config_value("s1", POLICY_KEY) is None
+        assert store.read("s1", "policy") is None
 
-        # A session row that does not exist cannot carry a durable override.
-        orphan = _engine(monkeypatch)
-        orphan.bind_session_state(session_db=db, session_id="missing-chat")
-        with pytest.raises(PolicyError):
-            orphan.set_policy_controls({"preference": "save_space"},
-                                       session_id="missing-chat",
-                                       lifecycle_id=orphan._activity.lifecycle_id)
-        with pytest.raises(PolicyError):
-            orphan.set_policy_controls({}, reset=True, session_id="missing-chat",
-                                       lifecycle_id=orphan._activity.lifecycle_id)
-        assert orphan.get_policy_status()["controls"]["preference"] == "balanced"
+        # With no durable state at all a choice still applies, in memory, and says so.
+        volatile = _engine(monkeypatch)
+        volatile.bind_session_state(session_db=db, session_id="s2")
+        status = volatile.set_policy_controls({"preference": "save_space"}, session_id="s2",
+                                              lifecycle_id=volatile._activity.lifecycle_id)
+        assert status["controls_source"] == "memory" and status["controls"]["preference"] == "save_space"
     finally:
         db.close()
 
 
 def test_policy_change_during_full_staging_flows_to_rotated_session(hermes_home, monkeypatch, tmp_path):
-    from hermes_tameru_plugin.session_policy import POLICY_KEY, PolicyError
+    from engine_support import FakeState
+    from hermes_tameru_plugin.chat_store import ChatStore
+    from hermes_tameru_plugin.session_policy import PolicyError
     fake_summary_llm(monkeypatch)
     import agent.context_compressor as cc
     calls = []
@@ -959,12 +987,14 @@ def test_policy_change_during_full_staging_flows_to_rotated_session(hermes_home,
     monkeypatch.setattr(cc, "call_llm",
                         lambda *a, **k: calls.append(True) or fake_call(*a, **k))
     db = _session_policy_db(tmp_path)
+    state = FakeState()
+    store = ChatStore(state)
     try:
         db.create_session("child", "cli")
-        db.patch_session_model_config("child", {POLICY_KEY: {
+        store.write("child", "policy", {
             "version": 1, "controls": {"mode": "adaptive", "preference": "preserve_detail",
-                                       "activation": "auto", "recent": "auto"}}})
-        engine = _engine(monkeypatch)
+                                       "activation": "auto", "recent": "auto"}})
+        engine = _with_state(_engine(monkeypatch), state)
         engine.bind_session_state(session_db=db, session_id="s1")
         db.append_messages_batch("s1", _history())
         messages = db.get_messages_as_conversation("s1")
@@ -985,8 +1015,8 @@ def test_policy_change_during_full_staging_flows_to_rotated_session(hermes_home,
         assert status["last_commit"]["method"] == "local_full"
         assert status["last_commit"]["plan"]["controls"]["preference"] == "preserve_detail"
         assert status["controls"]["preference"] == "save_space"
-        assert db.get_session_model_config_value("child", POLICY_KEY)["controls"]["preference"] == "save_space"
-        child = _engine(monkeypatch)
+        assert store.read("child", "policy")["controls"]["preference"] == "save_space"
+        child = _with_state(_engine(monkeypatch), state)
         child.bind_session_state(session_db=db, session_id="child")
         assert child.get_policy_status()["controls"]["preference"] == "save_space"
         assert engine.get_status()["tameru"]["store"]["entries"] > 0
@@ -995,14 +1025,17 @@ def test_policy_change_during_full_staging_flows_to_rotated_session(hermes_home,
                                        session_id="s1",
                                        lifecycle_id=engine._activity.lifecycle_id)
         assert engine.get_policy_status()["controls"]["preference"] == "save_space"
-        assert db.get_session_model_config_value("child", POLICY_KEY)["controls"]["preference"] == "save_space"
+        assert store.read("child", "policy")["controls"]["preference"] == "save_space"
     finally:
         db.close()
 
 
 def test_malformed_policy_records_fall_back_to_defaults(hermes_home, monkeypatch, tmp_path):
-    from hermes_tameru_plugin.session_policy import POLICY_KEY
+    from engine_support import FakeState
+    from hermes_tameru_plugin.chat_store import ChatStore
     db = _session_policy_db(tmp_path)
+    state = FakeState()
+    store = ChatStore(state)
     try:
         valid = {"mode": "adaptive", "preference": "save_space",
                  "activation": "earlier", "recent": "short"}
@@ -1014,35 +1047,40 @@ def test_malformed_policy_records_fall_back_to_defaults(hermes_home, monkeypatch
         ]):
             sid = f"bad{i}"
             db.create_session(sid, "cli")
-            db.patch_session_model_config(sid, {POLICY_KEY: record})
-            engine = _engine(monkeypatch)
+            store.write(sid, "policy", record)
+            engine = _with_state(_engine(monkeypatch), state)
             engine.bind_session_state(session_db=db, session_id=sid)
             status = engine.get_policy_status()
             assert status["controls"]["preference"] == "balanced"
             assert status["controls_source"] == "default"
             assert status["controls_issue"]
-            assert db.get_session_model_config_value(sid, POLICY_KEY) == record
+            assert store.read(sid, "policy") == record
     finally:
         db.close()
 
 
-def test_reentrant_bind_during_policy_patch_fails_the_fence(hermes_home, monkeypatch, tmp_path):
-    from hermes_tameru_plugin.session_policy import POLICY_KEY, PolicyError
+def test_reentrant_bind_during_policy_write_fails_the_fence(hermes_home, monkeypatch, tmp_path):
+    from engine_support import FakeState
+    from hermes_tameru_plugin.chat_store import ChatStore
+    from hermes_tameru_plugin.session_policy import PolicyError
     db = _session_policy_db(tmp_path)
+    state = FakeState()
     try:
-        engine = _engine(monkeypatch)
+        engine = _with_state(_engine(monkeypatch), state)
         engine.bind_session_state(session_db=db, session_id="s1")
         life = engine._activity.lifecycle_id
-        real_patch = db.patch_session_model_config
-        def patch_then_rebind(sid, patch):
-            real_patch(sid, patch)
+        real_set = state.set
+
+        def set_then_rebind(key, value):
+            real_set(key, value)
             engine.bind_session_state(session_db=db, session_id="s2")
-        monkeypatch.setattr(db, "patch_session_model_config", patch_then_rebind)
+        monkeypatch.setattr(state, "set", set_then_rebind)
         with pytest.raises(PolicyError):
             engine.set_policy_controls({"preference": "save_space"},
                                        session_id="s1", lifecycle_id=life)
+        monkeypatch.setattr(state, "set", real_set)
         assert engine.get_policy_status()["controls"]["preference"] == "balanced"
-        assert db.get_session_model_config_value("s2", POLICY_KEY) is None
+        assert ChatStore(state).read("s2", "policy") is None
     finally:
         db.close()
 

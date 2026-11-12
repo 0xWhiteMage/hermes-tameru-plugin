@@ -64,8 +64,10 @@ switch edits off for the chat. If a provider still returns errors:
 
 ## E. A chat's saved Tameru state looks wrong
 
-State per chat lives in Hermes session metadata under two keys, `tameru_tuner_v1` (self-tuning, pause, bias) and
-`tameru_edits_v1` (Keeps). Both are validated and clamped on load, and a record that does not parse is ignored.
+State per chat lives in the plugin's own state (`$HERMES_HOME/plugin-data/<folder Hermes names for the plugin>/state.json`, one key `chat:<session id>` per chat, plus a `chats` index),
+not in Hermes' session storage. Each part (policy, tuner, edits, pins, host) is validated and clamped on load, and a record that does not parse is ignored.
+Records do not disappear when a chat is deleted: a chat unused for 90 days is cleared, and only the newest 400 are kept. To start one chat clean, use
+`/tameru reset`, `/tameru unpin N` and `/tameru unkeep REF`; to clear everything, delete that `state.json` while Hermes is stopped.
 
 1. `/tameru cancel` and `/tameru unkeep REF` clear edits one by one.
 2. Starting a new chat starts from clean per-chat state.
@@ -82,8 +84,8 @@ State per chat lives in Hermes session metadata under two keys, `tameru_tuner_v1
 ### F2. Hermes summarises earlier or later than `compression.threshold` says
 Tameru no longer moves Hermes' summary threshold or protected tail (the 1.9.0 `adaptive_host` setting was removed in 1.10.0): Hermes uses exactly
 the `compression.threshold` and `compression.protect_last_n` you configured. If Hermes summarises at a surprising point, check those two keys in
-`$HERMES_HOME/config.yaml` and the model's context window (Hermes applies its own floors and caps). A chat saved by 1.9.0 may carry a leftover
-`tameru_host_v1` record in its metadata; it is ignored.
+`$HERMES_HOME/config.yaml` and the model's context window (Hermes applies its own floors and caps). A chat saved by 1.9.x may carry a leftover
+`host` part in its record in the plugin's own state; it is ignored.
 
 ## G. The panel says "Out of date: reload Desktop"
 

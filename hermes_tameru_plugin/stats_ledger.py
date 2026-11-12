@@ -26,8 +26,9 @@ def _dir() -> Path:
     base = os.environ.get("TAMERU_STATS_DIR", "").strip()
     if base:
         return Path(base)
-    home = os.environ.get("HERMES_HOME", "").strip() or "~/.hermes"
-    return Path(home).expanduser() / "tameru"
+    from .home import hermes_home
+
+    return hermes_home() / "tameru"
 
 
 def _path() -> Path:

@@ -1,9 +1,8 @@
 from __future__ import annotations
 from dataclasses import asdict, replace
-from .hermes_compat import session_db_usable
 from .policy import Controls
 
-POLICY_KEY = 'tameru_policy_v1'
+PART = 'policy'
 _FIELDS = frozenset(('mode', 'preference', 'activation', 'recent'))
 
 class PolicyError(ValueError):
@@ -11,23 +10,16 @@ class PolicyError(ValueError):
 
 
 def _binding(engine):
-    return (engine._policy, getattr(engine, '_session_db', None),
+    """(policy state, the chat store or None, session id, lifecycle id)."""
+    return (engine._policy, getattr(engine, '_chat_store', None),
             getattr(engine, '_session_id', '') or '', engine._activity.lifecycle_id)
 
 
 def _current(engine, owner):
     state, db, sid, life = owner
-    return (engine._policy is state and getattr(engine, '_session_db', None) is db
+    return (engine._policy is state and getattr(engine, '_chat_store', None) is db
             and (getattr(engine, '_session_id', '') or '') == sid
             and engine._activity.lifecycle_id == life)
-
-
-def _metadata_methods(db):
-    if not session_db_usable(db):
-        return None
-    methods = tuple(getattr(db, name, None) for name in
-                    ('get_session_model_config_value', 'patch_session_model_config', 'get_session'))
-    return methods if all(callable(method) for method in methods) else None
 
 
 def _record(controls):
@@ -46,16 +38,11 @@ def _decode(record):
         return None
 
 
-def _persist(db, sid, record):
-    methods = _metadata_methods(db)
-    if methods is None:
+def _persist(store, sid, record):
+    """True when the chat's policy is saved (``None`` clears it); False with no store; PolicyError when the store did not confirm it."""
+    if store is None:
         return False
-    read, patch, session = methods
-    if session(sid) is None:
-        raise PolicyError('This chat is not available in session storage. Start a turn and try again.')
-    if read(sid, POLICY_KEY) != record:
-        patch(sid, {POLICY_KEY: record})
-    if read(sid, POLICY_KEY) != record or session(sid) is None:
+    if not store.write(sid, PART, record):
         raise PolicyError('Preferences could not be confirmed. Refresh before retrying.')
     return True
 
@@ -110,10 +97,9 @@ def bind_controls(engine, *, rotation=False):
                 state.controls_source = ('session' if state.has_override else 'default') if durable else 'memory'
                 state.controls_issue = None
             return
-        methods = _metadata_methods(db)
-        if methods is None:
+        if db is None:
             return
-        record = methods[0](sid, POLICY_KEY)
+        record = db.read(sid, PART)
         parsed = _decode(record) if record is not None else None
         if not _current(engine, owner):
             return

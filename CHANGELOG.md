@@ -29,6 +29,31 @@ Removes three things that showed no measured benefit, as announced under *Deprec
 - **Licence: MIT to Apache License 2.0**, matching the engine. `LICENSE` is the Apache-2.0 text, `NOTICE` is new, and `pyproject.toml` and `plugin.yaml` declare `Apache-2.0`. The Hermes-derived test fixtures keep their MIT notice (`THIRD_PARTY_NOTICES.md`).
 - Documentation: the README is rewritten for users with a recording for each feature; six historical docs and the remote-gateway address in the cost notes are removed.
 
+## [1.9.1] - Unreleased
+
+Answers the Hermes plugin-catalogue review of 1.9.0 (two blocking items and two recommendations). The engine is unchanged (1.9.0).
+
+### Changed
+- **Per-chat records no longer go through Hermes' private session storage.** The policy, self-tuning, Keeps, pinned lines and host offsets are kept in the plugin's own
+  durable state, Hermes' public `ctx.state` (`$HERMES_HOME/plugin-data/<folder Hermes names for the plugin>/state.json`), under one key per chat, `chat:<session id>` (a hash of the id when it is not a
+  legal key). The plugin no longer reads or writes `model_config` through the private `_session_db` handle; a test with a session database that refuses those calls proves it.
+  Without `ctx.state` (a directory install) records stay in memory, and the status says so. A new module, `chat_store.py`, is the only place that touches it.
+- **Retention.** `ctx.state` has no delete, so a chat's record outlives the chat. A chat unused for 90 days is cleared, and only the newest 400 chats are kept (checked at most once a day).
+- **Records from 1.9.0 are not migrated.** Reading them back would mean using the private handle again; 1.9.0 was never listed in the catalogue. A chat's pins, Keeps and bias set under
+  1.9.0 are not carried over (re-add them).
+- **The shortened re-prune runway stays in memory.** The plugin no longer saves it through the private `ContextCompressor._durable_write`. After a resume Hermes applies its own native
+  runway, so the first prune after a resume can come a little later; the plugin shortens it again at the next commit.
+- **Hermes home.** The stats ledger, the learned-priors file, the telemetry log's allowed folder and the stub's `config.yaml` read the Hermes home through
+  `hermes_constants.get_hermes_home()` (the active profile, and `%LOCALAPPDATA%\hermes` on Windows), falling back to `$HERMES_HOME` and `~/.hermes` only when Hermes is not importable.
+
+- **The panel's hint tooltip uses Hermes' own `Tip`** (the SDK component, available from Hermes 0.23.0), so hints match the app's look. The title, keys and the first-hover extra line go inside its label;
+  the screen-reader description stays in the page. A Desktop whose SDK has no `Tip` keeps the panel's own card. Panel build 6 (the backend and the panel must be updated together).
+
+### Not changed
+- The plugin still reads the session archive (`_session_db`) to rebuild the changes table after a restart and to read archived originals. These are reads only.
+- A known limit of `ctx.state`: it has no multi-step transaction, so if two Hermes processes on one profile save different parts of the same chat at the same instant, one of the two updates can be lost.
+  It affects only that chat's own record and is rare.
+
 ## [1.9.0] - 2026-11-11
 
 One release: the first candidate of 2026-11-09 (the second block below), then the cost-tuning and trust work of 2026-11-10 and 11. The plugin and the

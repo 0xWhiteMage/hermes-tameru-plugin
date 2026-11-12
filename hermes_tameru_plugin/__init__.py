@@ -71,6 +71,10 @@ def register(ctx: Any) -> None:
             return
     active = bool(settings.enabled)
     try:
+        engine.attach_chat_state(getattr(ctx, "state", None))
+    except Exception as exc:        # the store is optional: without it records stay in memory
+        logger.warning("tameru: durable state unavailable (%r); per-chat records stay in memory", exc)
+    try:
         ctx.register_context_engine(engine)
     except Exception as exc:
         logger.warning("tameru: could not register the engine: %r", exc)
