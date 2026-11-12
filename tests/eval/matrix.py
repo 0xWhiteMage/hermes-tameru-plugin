@@ -22,6 +22,7 @@ sys.path[:0] = [str(HERE), str(HERE.parent)]
 
 TOOL_BLOCK_CHARS = 39_993          # Hermes' tool block, measured (docs/COST-TUNING-2026-11-10.md)
 DEVELOPMENT = ("default", "oncall", "refactor", "smallrows", "i18n", "bursty")
+DEPENDENT = ("dependent",)         # round 2: the next requests need the large output just shown (run with --scenarios; not in the default set)
 ARMS = ("stock_defaults", "tameru_1_4_product", "tameru_lazy", "tameru_autotune_off")
 RULE_ARMS = ("tameru_share_cached", "tameru_payback_early", "tameru_payback", "tameru_accrual")   # decision-rule arms (1.10)
 WINDOWS = (64_000, 128_000, 200_000)
@@ -36,9 +37,11 @@ def run(arms, scenarios, windows, seeds, *, write: float | None = None, read: fl
     import protocol3
     import replay
     import scenarios_blind
+    import scenarios_dependent
     from holdout_register import product_hash
 
     scenarios_blind.register_blind()
+    scenarios_dependent.register_dependent()
     saved = (replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS)
     replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS = TOOL_BLOCK_CHARS, TOOL_BLOCK_CHARS // 4
     try:
@@ -48,6 +51,7 @@ def run(arms, scenarios, windows, seeds, *, write: float | None = None, read: fl
     finally:
         replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS = saved
         scenarios_blind.unregister_blind()
+        scenarios_dependent.unregister_dependent()
     meta = {"product": product_hash(), "tool_block_chars": TOOL_BLOCK_CHARS, "structural": True,
             "write": replay.CACHE_WRITE if write is None else write, "read": replay.CACHE_READ if read is None else read,
             "arms": list(arms), "scenarios": list(scenarios), "windows": list(windows), "seeds": list(seeds)}
@@ -101,7 +105,58 @@ PROMOTION = {
     "no_cell_worse_than": 0.02,        # no scenario and window with a mean change above +2% whose interval excludes zero
     "guards": ("held", "errors_kept"),  # needed facts held (kept + recoverable) and error templates kept must not be lower
     "windows": (64_000, 128_000, 200_000),
+    # Round 2 (fixed before any round-2 result was read; panel review of the round-1 gate):
+    "price_fields": ("effective", "effective_real"),   # the old price and the one that charges a read-back as the extra request it is
+    "facts_margin_window": 0.3,        # needed facts kept outright (and kept + recoverable) may fall by at most this many per session on the mean...
+    "facts_margin_shape": 1.0,         # ...and by at most this many in any one shape and window (a margin, not an interval test)
+    "dependent_ceiling": 0.5,          # needed detail missing in the 1-3 requests after a shortened output, per session, at most
+    "rise_margin": {"prefix_breaks": 0.10, "rewritten_chars": 0.10, "requests": 0.05},   # relative rise of the mean allowed
+    "primary_idea": "frontier",        # the one idea named in advance; every other arm is secondary and reported with the number tried
+    "blind_looks": 1,                  # one look at the blind shapes per idea; a code change after it makes those shapes development for that idea
 }
+
+
+def _paired(rows, base: str, arm: str, field: str, window: int):
+    """Per (scenario, seed): arm minus base on ``field`` for rows at ``window``; rows without the field are skipped."""
+    index = {(r["scenario"], r["window"], r["seed"]): r for r in rows if r["arm"] == base and field in r}
+    out: dict[str, list[float]] = {}
+    for r in rows:
+        if r["arm"] != arm or r["window"] != window or field not in r:
+            continue
+        other = index.get((r["scenario"], window, r["seed"]))
+        if other is not None:
+            out.setdefault(r["scenario"], []).append(r[field] - other[field])
+    return out
+
+
+def margin_failures(rows, base: str, arm: str) -> list[str]:
+    """The round-2 guards that are margins on means: facts kept outright, facts held, dependent-use misses, cache breaks, rewrites, requests."""
+    failures: list[str] = []
+    for window in PROMOTION["windows"]:
+        tag = f"{window // 1000}K"
+        for field in ("kept", "held"):
+            work = [dict(r, held=r["kept"] + r["recoverable"]) for r in rows]
+            by_shape = _paired(work, base, arm, field, window)
+            if not by_shape:
+                continue
+            every = [d for ds in by_shape.values() for d in ds]
+            mean = sum(every) / len(every)
+            if mean < -PROMOTION["facts_margin_window"]:
+                failures.append(f"{tag}: {field} facts fall by {-mean:.2f} per session (margin {PROMOTION['facts_margin_window']})")
+            for shape, ds in sorted(by_shape.items()):
+                if sum(ds) / len(ds) < -PROMOTION["facts_margin_shape"]:
+                    failures.append(f"{tag} {shape}: {field} facts fall by {-sum(ds) / len(ds):.2f} per session (margin {PROMOTION['facts_margin_shape']})")
+        arm_missing = [r["dependent_missing"] for r in rows if r["arm"] == arm and r["window"] == window and "dependent_missing" in r]
+        if arm_missing and sum(arm_missing) / len(arm_missing) > PROMOTION["dependent_ceiling"]:      # an absolute ceiling: the base scores 0 by construction
+            failures.append(f"{tag}: needed detail missing after a shortened output {sum(arm_missing) / len(arm_missing):.2f} per session (ceiling {PROMOTION['dependent_ceiling']})")
+        for field, rise in PROMOTION["rise_margin"].items():
+            base_rows = [r[field] for r in rows if r["arm"] == base and r["window"] == window and field in r]
+            arm_rows = [r[field] for r in rows if r["arm"] == arm and r["window"] == window and field in r]
+            if base_rows and arm_rows:
+                b, a = sum(base_rows) / len(base_rows), sum(arm_rows) / len(arm_rows)
+                if b > 0 and a > b * (1 + rise):
+                    failures.append(f"{tag}: {field} rises {(a / b - 1) * 100:+.1f}% (margin {rise * 100:.0f}%)")
+    return failures
 
 
 def promote(rows, base: str, arm: str, *, resamples: int = 4_000) -> dict:
@@ -115,6 +170,11 @@ def promote(rows, base: str, arm: str, *, resamples: int = 4_000) -> dict:
         entry = {"cost": {k: cost[k] for k in ("cells", "cluster", "excludes_zero")}}
         if not (cost["excludes_zero"] and cost["cluster"]["mean"] < 0):
             verdict["failures"].append(f"{window // 1000}K: cost change {cost['cluster']['mean'] * 100:+.1f}% does not exclude zero on the cheaper side")
+        if any("effective_real" in r for r in rows):      # rows written before round 2 have no realistic price
+            real = stats.compare(rows, base, arm, field="effective_real", window=window, resamples=resamples)
+            entry["cost_real"] = {k: real[k] for k in ("cells", "cluster", "excludes_zero")}
+            if not (real["excludes_zero"] and real["cluster"]["mean"] < 0):
+                verdict["failures"].append(f"{window // 1000}K: cost change at the realistic read-back price {real['cluster']['mean'] * 100:+.1f}% does not exclude zero on the cheaper side")
         for field in PROMOTION["guards"]:
             g = stats.compare(rows, base, arm, field=field, window=window, resamples=resamples)
             entry[field] = {k: g[k] for k in ("cells", "cluster", "excludes_zero")}
@@ -126,6 +186,7 @@ def promote(rows, base: str, arm: str, *, resamples: int = 4_000) -> dict:
         for c in worst:
             verdict["failures"].append(f"{window // 1000}K {c['scenario']}: {c['mean'] * 100:+.1f}% dearer, interval excludes zero")
         verdict["windows"][str(window)] = entry
+    verdict["failures"].extend(margin_failures(rows, base, arm))
     verdict["promote"] = not verdict["failures"]
     return verdict
 

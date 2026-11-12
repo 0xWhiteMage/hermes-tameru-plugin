@@ -169,6 +169,57 @@ def _tool_results(script) -> dict[str, int]:
     return sizes
 
 
+_WORD_RE = re.compile(r"[A-Za-z0-9_]{4,}")
+
+
+def _finder_pattern(question: str) -> str:
+    """The grep a model could write from the question alone: its words (4+ characters), as alternatives."""
+    words = list(dict.fromkeys(w.lower() for w in _WORD_RE.findall(question)))
+    return "|".join(re.escape(w) for w in words[:12]) or "."
+
+
+def _weak_find(engine: Any, text: str, refs: list[str], tool: str, question: str, needle: str) -> tuple[int, int | None]:
+    """A finder that does not know the answer: it tries the refs whose header line names ``tool`` in order of appearance,
+    grepping the question's words. Returns (read-backs attempted, characters of the one that held ``needle`` or None)."""
+    call = getattr(engine, "handle_tool_call", None)
+    if not callable(call):
+        return 0, None
+    pattern = _finder_pattern(question)
+    candidates = []
+    for ref in refs:
+        at = text.find(f"ref={ref}")
+        window = text[max(0, at - 240):at + 40] if at >= 0 else ""
+        if tool and tool in window:
+            candidates.append(ref)
+    attempts = 0
+    for ref in candidates:
+        attempts += 1
+        try:
+            answer = call(READ_TOOL, {"ref": ref, "grep": pattern})
+            body = json.loads(answer)
+        except Exception:
+            continue
+        if isinstance(body, dict) and needle in str(body.get("content", "")):
+            return attempts, len(answer)
+    return attempts, None
+
+
+DEPENDENT_REQUESTS = 3
+
+
+def dependent_missing(log: list, needles: list[str]) -> int:
+    """Over a session's request log: for each detail, the requests among the 3 right after the first one that carried it in which it is
+    no longer visible. A detail that never appeared (a failed turn) counts nothing."""
+    texts = [replay.visible_text(entry["messages"]) for entry in log]
+    missing = 0
+    for needle in needles:
+        first = next((i for i, text in enumerate(texts) if needle in text), None)
+        if first is None:
+            continue
+        missing += sum(1 for text in texts[first + 1:first + 1 + DEPENDENT_REQUESTS] if needle not in text)
+    return missing
+
+
 def _read_back(engine: Any, refs: list[str], needle: str) -> int | None:
     """Characters returned by the first read-back that contains ``needle``, or None when none does."""
     call = getattr(engine, "handle_tool_call", None)
@@ -252,6 +303,9 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
             idle: str = "none", grow: float = 1.0, timing: bool = False) -> dict:
     """One replay of ``arm`` on ``scenario`` at ``window``, with the needed facts sorted and priced."""
     made: list[Any] = []
+    spec0 = registry.get_spec(scenario)
+    dependent = [g for g in spec0.build(seed, spec0.turns).gold if g.id.startswith("dep_")]
+    log: list | None = [] if dependent else None      # the per-request record is kept only where there are dependent details to check
 
     def factory():
         made.append(engines.make_engine(arm))
@@ -259,7 +313,7 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
 
     result = replay.run_session(factory, scenario=scenario, context_length=window, seed=seed, keep_final_request=True,
                                 summarizer_factory=_summarizer_factory(summarizer),
-                                script_transform=_transform(structural, grow), **idle_options(idle))
+                                request_log=log, script_transform=_transform(structural, grow), **idle_options(idle))
     metrics = result["metrics"]
     final = result.get("final_request") or []
     spec = registry.get_spec(scenario)
@@ -274,6 +328,13 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
 
     kept, recoverable, lost, unrecoverable = [], [], [], []
     extra = 0.0
+    # the honest price: a read-back or re-run is an extra request, so the whole prompt is read from the cache again (mean prompt
+    # as the stand-in) on top of the text that comes back; and a finder that does not know the answer may need several tries
+    row_prompt = metrics["input_chars_total"] / max(1, metrics["requests"])
+    per_request = replay.CACHE_READ * row_prompt
+    question = script.turns[-1].user if script.turns else ""
+    extra_real = extra_finder = 0.0
+    finder_found: list[str] = []
     for fact in (g for g in script.gold if g.needed):
         if fact.needle in text:
             kept.append(fact.id)
@@ -282,9 +343,21 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
         if returned is not None:
             recoverable.append(fact.id)
             extra += replay.CACHE_WRITE * (returned + CALL_OVERHEAD_CHARS)
+            extra_real += per_request + replay.CACHE_WRITE * (returned + CALL_OVERHEAD_CHARS)
+            tool = (fact.call_key or "").split(":", 1)[0]
+            attempts, got = _weak_find(engine, text, refs, tool, question, fact.needle)
+            if got is not None:
+                finder_found.append(fact.id)
+                extra_finder += (attempts - 1) * (per_request + replay.CACHE_WRITE * CALL_OVERHEAD_CHARS)                     + per_request + replay.CACHE_WRITE * (got + CALL_OVERHEAD_CHARS)
+            else:       # the finder gives up after its tries and the model re-runs the command
+                rerun = sizes.get(fact.call_key, returned)
+                extra_finder += attempts * (per_request + replay.CACHE_WRITE * CALL_OVERHEAD_CHARS)                     + per_request + replay.CACHE_WRITE * (rerun + CALL_OVERHEAD_CHARS)
         elif fact.source == "tool" and fact.call_key in sizes:
             lost.append(fact.id)
             extra += replay.CACHE_WRITE * (sizes[fact.call_key] + CALL_OVERHEAD_CHARS)
+            rerun_cost = per_request + replay.CACHE_WRITE * (sizes[fact.call_key] + CALL_OVERHEAD_CHARS)
+            extra_real += rerun_cost
+            extra_finder += rerun_cost
         else:
             lost.append(fact.id)
             unrecoverable.append(fact.id)
@@ -294,6 +367,8 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
     row = {
         "arm": arm, "scenario": scenario, "window": window, "seed": seed, "summarizer": summarizer, "structural": structural, "idle": idle, "grow": grow,
         "compactions": metrics["compactions"], "failed_turns": metrics["failed_turns"], "base": round(base / answered, 1), "effective": round((base + extra) / answered, 1),
+        "effective_real": round((base + extra_real) / answered, 1), "effective_finder": round((base + extra_finder) / answered, 1),
+        "finder_found": len(finder_found), "rewritten_chars": metrics["prefix_invalidated_chars"],
         "needed": len(kept) + len(recoverable) + len(lost),
         "kept": len(kept), "recoverable": len(recoverable), "lost": len(lost), "lost_unrecoverable": len(unrecoverable),
         "kept_ids": kept, "recoverable_ids": recoverable, "lost_ids": lost,
@@ -303,6 +378,9 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
         "first_compaction_request": compress_at[0] if compress_at else None,
         "errors_total": metrics["error_fingerprints"]["total"], "errors_kept": metrics["error_fingerprints"]["retained"],
     }
+    if dependent:
+        row["dependent_missing"] = dependent_missing(log or [], [g.needle for g in dependent])
+        row["dependent_checked"] = len(dependent) * DEPENDENT_REQUESTS
     if timing:       # wall-clock seconds spent inside the engine: informative, never part of an identity check
         row["timing"] = {"engine_seconds": result["timing"]["engine_seconds"]}
     return row
