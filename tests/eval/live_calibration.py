@@ -160,8 +160,10 @@ class Client:
             if status in (429, 500, 502, 503, 529) and attempt < 5:
                 self._sleep(min(60, 4 * 2 ** attempt))
                 continue
-            kind = (payload.get("error") or {}).get("type", "error") if isinstance(payload, dict) else "error"
-            raise RuntimeError(f"provider returned HTTP {status} ({kind})")      # never echo the request: it may hold the key header
+            error = (payload.get("error") or {}) if isinstance(payload, dict) else {}
+            kind, reason = error.get("type", "error"), str(error.get("message", "")).replace(self._headers["x-api-key"], "[key]")[:200]
+            # the provider's own error text (for example an empty credit balance) helps; the request never goes in: it may hold the key header
+            raise RuntimeError(f"provider returned HTTP {status} ({kind}){': ' + reason if reason else ''}")
         raise RuntimeError("provider kept failing")
 
 
