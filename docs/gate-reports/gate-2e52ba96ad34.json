@@ -1,0 +1,295 @@
+{
+ "commit": "2e52ba96ad3449c3d89e1197055e53d6a5d380bb",
+ "clean": true,
+ "created": "2026-11-17T15:51:09+00:00",
+ "hermes_pin": "3b421578588243f920886e6fe79a6faa87ea026e",
+ "hermes_checkout": "3b421578588243f920886e6fe79a6faa87ea026e",
+ "stock_canary": "332e21928e64809318ee456a0caa182c6bac50915496a93d0a684c963d933c14",
+ "suites": [
+  {
+   "name": "stub",
+   "exit_code": 0,
+   "summary": "2138 passed, 1234 skipped, 4 warnings in 58.95s",
+   "passed": true
+  },
+  {
+   "name": "real_hermes",
+   "exit_code": 0,
+   "summary": "3317 passed, 10 skipped, 55 xfailed, 47 warnings in 565.20s (0:09:25)",
+   "passed": true
+  },
+  {
+   "name": "metrics",
+   "exit_code": 0,
+   "summary": "1 passed, 1 deselected, 1 warning in 43.14s",
+   "passed": true
+  },
+  {
+   "name": "desktop_panel",
+   "exit_code": 0,
+   "summary": "\u00e2\u201e\u00b9 duration_ms 6845.9209",
+   "passed": true
+  }
+ ],
+ "metrics": {
+  "matrix": {
+   "comparisons": [
+    {
+     "cells": 6,
+     "cluster": {
+      "clusters": 3,
+      "hi": 0.07471358708455121,
+      "lo": -0.05526090196077871,
+      "mean": 0.0027927899528026393,
+      "n": 6
+     },
+     "excludes_zero": false,
+     "naive": {
+      "hi": 0.05344110402974972,
+      "lo": -0.04448140637437046,
+      "mean": 0.0027927899528026397,
+      "n": 6
+     },
+     "window": 64000
+    },
+    {
+     "cells": 6,
+     "cluster": {
+      "clusters": 3,
+      "hi": -0.167885538597226,
+      "lo": -0.20260333215250026,
+      "mean": -0.18098808414835044,
+      "n": 6
+     },
+     "excludes_zero": true,
+     "naive": {
+      "hi": -0.16839109540840438,
+      "lo": -0.19834698092598757,
+      "mean": -0.18098808414835044,
+      "n": 6
+     },
+     "window": 128000
+    }
+   ],
+   "meta": {
+    "arms": [
+     "stock_defaults",
+     "tameru_1_4_product"
+    ],
+    "product": "ba412f7acdf5f7cae67fd4436b78d54abaa86c4af291d502d9cf48d9131aaae6",
+    "read": 0.1,
+    "scenarios": [
+     "default",
+     "oncall",
+     "refactor"
+    ],
+    "seeds": [
+     0,
+     1
+    ],
+    "structural": true,
+    "tool_block_chars": 39993,
+    "windows": [
+     64000,
+     128000
+    ],
+    "write": 1.25
+   },
+   "rows_sha256": "7dd88503df25ac18752b5dd25552d153391c411f98386635149b5daf9c4165d2",
+   "scorecard": [
+    {
+     "arm": "stock_defaults",
+     "base": 48854.433,
+     "effective": 53411.833,
+     "first_compaction_request": 24.0,
+     "host_compactions": 2.667,
+     "kept": 8.5,
+     "lost": 6.833,
+     "mean_request_chars": 131419.867,
+     "needed": 15.333,
+     "prefix_breaks": 2.667,
+     "prune_commits": 0.0,
+     "recoverable": 0.0,
+     "requests": 77.333,
+     "runs": 6,
+     "sessions_without_compaction": 0,
+     "window": 64000
+    },
+    {
+     "arm": "stock_defaults",
+     "base": 66045.133,
+     "effective": 70597.417,
+     "first_compaction_request": 49.17,
+     "host_compactions": 1.333,
+     "kept": 9.667,
+     "lost": 5.667,
+     "mean_request_chars": 203129.4,
+     "needed": 15.333,
+     "prefix_breaks": 1.333,
+     "prune_commits": 0.0,
+     "recoverable": 0.0,
+     "requests": 77.333,
+     "runs": 6,
+     "sessions_without_compaction": 0,
+     "window": 128000
+    },
+    {
+     "arm": "tameru_1_4_product",
+     "base": 50828.917,
+     "effective": 53504.783,
+     "first_compaction_request": 29.0,
+     "host_compactions": 0.5,
+     "kept": 11.333,
+     "lost": 2.667,
+     "mean_request_chars": 126290.85,
+     "needed": 15.333,
+     "prefix_breaks": 6.5,
+     "prune_commits": 6.0,
+     "recoverable": 1.333,
+     "requests": 77.333,
+     "runs": 6,
+     "sessions_without_compaction": 4,
+     "window": 64000
+    },
+    {
+     "arm": "tameru_1_4_product",
+     "base": 55773.75,
+     "effective": 57772.267,
+     "first_compaction_request": null,
+     "host_compactions": 0.0,
+     "kept": 13.333,
+     "lost": 1.0,
+     "mean_request_chars": 149065.7,
+     "needed": 15.333,
+     "prefix_breaks": 4.833,
+     "prune_commits": 4.833,
+     "recoverable": 1.0,
+     "requests": 77.333,
+     "runs": 6,
+     "sessions_without_compaction": 6,
+     "window": 128000
+    }
+   ]
+  },
+  "probes": {
+   "directives": [
+    {
+     "arm": "stock_defaults",
+     "compactions": 4,
+     "kept": {
+      "I": 2,
+      "R": 4,
+      "S": 2
+     },
+     "seeds": [
+      0,
+      1
+     ],
+     "total": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "window": 32000
+    },
+    {
+     "arm": "tameru_1_4_product",
+     "compactions": 1,
+     "kept": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "seeds": [
+      0,
+      1
+     ],
+     "total": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "window": 32000
+    },
+    {
+     "arm": "tameru_legacy",
+     "compactions": 1,
+     "kept": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "seeds": [
+      0,
+      1
+     ],
+     "total": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "window": 32000
+    },
+    {
+     "arm": "stock_defaults",
+     "compactions": 3,
+     "kept": {
+      "I": 2,
+      "R": 4,
+      "S": 2
+     },
+     "seeds": [
+      0,
+      1
+     ],
+     "total": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "window": 48000
+    },
+    {
+     "arm": "tameru_1_4_product",
+     "compactions": 0,
+     "kept": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "seeds": [
+      0,
+      1
+     ],
+     "total": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "window": 48000
+    },
+    {
+     "arm": "tameru_legacy",
+     "compactions": 0,
+     "kept": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "seeds": [
+      0,
+      1
+     ],
+     "total": {
+      "I": 4,
+      "R": 4,
+      "S": 4
+     },
+     "window": 48000
+    }
+   ]
+  }
+ },
+ "skipped": [],
+ "passed": true
+}
