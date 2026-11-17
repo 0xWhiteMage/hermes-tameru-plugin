@@ -77,7 +77,7 @@ Records do not disappear when a chat is deleted: a chat unused for 90 days is cl
 
 ## F. Self-tuning seems off (too aggressive or stuck)
 
-1. Set `autotune: off` to freeze the policy, or choose **Preserve detail** in the dropdown.
+1. Set `autotune: off` to freeze the policy, or choose **Less** in the strength menu.
 2. Each chat starts from the neutral table; nothing is learned across chats (the 1.9.0 cross-chat memory, `learned.json`, was removed in 1.10.0, and a
    leftover `$HERMES_HOME/tameru/learned.json` is never read and can be deleted). `/tameru reset` puts this chat back to neutral.
 

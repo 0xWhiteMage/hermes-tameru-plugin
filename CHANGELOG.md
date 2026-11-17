@@ -30,6 +30,15 @@ Removes three things that showed no measured benefit, as announced under *Deprec
 - **README:** "When it prunes" now describes the adaptive mode (0.60 start, 85% target, 35% pay-back, 15% runway) instead of the legacy trigger.
 
 ### Changed
+- **One interface for every Tameru plugin (Desktop bar):** the panel header now follows the shared design in the engine repo's
+  [docs/PLUGIN-UI.md](https://github.com/0xWhiteMage/tameru-compaction-system/blob/main/docs/PLUGIN-UI.md). The status dot is the Tameru star; the lean-mode dropdown and the pause button are
+  one **Strength** menu (**Off**, **Less**, **Normal**, **More**; Off is the old pause, Less, Normal and More are the old Preserve detail, Balanced and Save space, and the
+  commands and saved state are unchanged); the working-memory bar is a ring gauge with "N% full"; the sentence under the name is one
+  status phrase that opens the results; the collapse chevron is replaced by a results launcher (outputs currently shortened) and the
+  pins button now shows its count. Keep is the lock (filled while kept, **Release** lets Tameru shorten it again) and Restore uses the shared undo arrow, so a pin
+  now means only a pinned instruction. "Freed" left the bar; the line under the table says how much context was removed. Words follow the shared vocabulary
+  ("AI" and "context", never "working memory"); a test keeps the strings and drawings identical to the engine repo's `docs/ui-vocabulary.json` and `docs/ui-icons.json`
+  (copies live in `tests/desktop/`). The results table and the viewer are unchanged.
 - A configured `adaptive_host` or `learned_priors` is named in `get_status()["tameru"]["warnings"]` ("removed in 1.10.0; ignored") instead of "unknown setting".
 - The plugin is version 1.10.0 (engine 1.9.0); `/tameru stats` shows both.
 

@@ -41,17 +41,19 @@ Details: [CHANGELOG.md](CHANGELOG.md).
 
 ## See it work
 
+*The recordings below were made with the 1.9.1 panel. In 1.10.0 the bar is the shared Tameru bar (a Strength menu in place of the lean-mode dropdown and the pause button, list and pin icons with counts) and Keep is a lock instead of a pin; what each control does is unchanged.*
+
 **Pin.** Type a rule or use the panel's pin list; it is kept verbatim through every summary.
 
 ![A recording of the Tameru pins list in Hermes Desktop: a rule is typed, pinned, and a second rule added](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/main/assets/features/07-pinned-instructions.gif)
 
-**Restore.** Click the arrow on a shortened output and the model sees the full original on your next message, for its next few replies.
+**Restore.** Click the undo arrow on a shortened output and the model sees the full original on your next message, for its next few replies.
 
 ![A recording of Tameru in Hermes Desktop: Restore shows the model a shortened output in full](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/main/assets/features/05-restore.gif)
 
-**Keep.** Click the pin on a row and the output stays in front of the model on every reply until you unpin it.
+**Keep.** Click the lock on a row and the output stays in front of the model on every reply until you release it.
 
-![A recording of Tameru in Hermes Desktop: Keep pins a shortened output until it is unpinned](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/main/assets/features/06-keep-and-unkeep.gif)
+![A recording of Tameru in Hermes Desktop: Keep holds a shortened output until it is released](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/main/assets/features/06-keep-and-unkeep.gif)
 
 ## How it works with Hermes
 
@@ -205,7 +207,8 @@ In adaptive mode Tameru tunes itself while a chat runs (`autotune`, on by defaul
 returns to the fixed table). It starts at the old "balanced" numbers and moves them in small, bounded steps
 from four signals: Hermes summarizing before Tameru acted, repeated checks that found too little to reclaim,
 the model re-reading a shortened output, and context refilling quickly after cleanup. Calm stretches relax it
-back. The only user choices are a bias (Save space, Balanced, Preserve detail) and Pause; both persist with the chat.
+back. The only user choice is a strength (Off, Less, Normal or More; Off is the pause), saved with the chat. The `/tameru bias` words map to it:
+`detail` is Less, `balanced` is Normal and `save` is More.
 
 Self-tuning is per chat: it starts from the neutral table in every new chat (1.9.0 had an optional cross-chat memory and an optional
 per-chat adjustment of Hermes' own summary threshold; both showed no measured gain and were removed in 1.10.0). It can be switched off
@@ -218,22 +221,25 @@ recovery-tool filter did), and `/tameru reset [confirm]` puts the chat's self-tu
 original, `/tameru ask REF [START-END | term]` gives the exact instruction that makes the agent re-read one, `/tameru bias save|balanced|detail` and `/tameru pause|resume` set the two choices. The older
 `/tameru policy key=value` form still works.
 
-- **Desktop:** one condensed panel above the composer, about 30px when closed and a fixed 196px when open (so it never
-  jumps). The header reads `Tameru (ためる)` and holds the lean mode (a borderless dropdown), working memory as a thin
-  gauge with "N% full" (ticks where Tameru starts and where Hermes compacts), "Freed ~N%" (the share of context removed, not what the chat costs), a pause button and a collapse
-  button. It stays silent while everything is fine and only speaks for a state worth knowing (paused, compacting,
-  starts with your next message). Every control explains itself in a small hover card, also shown on keyboard focus.
+- **Desktop:** one condensed panel above the composer, 36px when closed and a fixed 196px of details when open (so it never
+  jumps). The bar is the same one every Tameru plugin shows ([the shared interface](https://github.com/0xWhiteMage/tameru-compaction-system/blob/main/docs/PLUGIN-UI.md)):
+  the Tameru star (it turns blue while Hermes compacts, dims when Off and turns red on a problem), `Tameru (ためる)`, one short status phrase
+  (for example `3 outputs shortened`, `Idle until 59% full`, `Off`; click it to open the results), a ring gauge with "N% full" (a notch marks where
+  Tameru starts; the hover card says where Hermes compacts), then the controls: **Strength** (Off, Less, Normal or More, in a small menu that opens
+  under the bar), the list icon with the number of outputs the AI currently sees shortened, and the pin icon with the number of pins. The
+  bar never shows a figure about removed text; "about N% of the context removed" sits in the line under the table (that is text removed, not
+  what the chat costs). Every control explains itself in a small hover card, also shown on keyboard focus.
   Below the header, when the panel is wide enough, the list sits on the left and the viewer on the right; when it is
   narrow they swap in one pane. The list shows each Tameru pass, each Hermes summary and each output restored after a
-  restart: time, source, lines kept, reduction, exact tokens reduced, status. Click a row's arrow for its method, lean
-  mode, input and output tokens, duration and whether the original is available. The eye button opens **Left Out**:
+  restart: time, source, lines kept, reduction, exact tokens reduced, status. Click a row's arrow for its method, strength,
+  input and output tokens, duration and whether the original is available. The eye button opens **Left Out**:
   kept lines show normally and each removed stretch folds into one bar ("117 hidden · 40–156") that expands with a
   highlighted edge. Click line numbers (Shift for a range) or "All" on a bar, then **Add** (small, trusted text) or
   **Re-Read** (large or outside text, or when you would rather the AI fetch it). Both only put text in your message
   box: nothing is sent until you send it, and earlier messages are not edited. Keys inside the viewer: R re-read,
   A select all left-out lines, `[` and `]` turn pages, Enter adds, Esc goes back.
-- **Keep and Restore:** on each row, ↺ **Restore** shows the AI the full output for its next few replies and 📌 **Keep**
-  does the same until you unpin it. Both wait for your next message, work on what is sent to the model (saved history
+- **Keep and Restore:** on each row, the undo arrow **Restore** shows the AI the full output for its next few replies and the lock **Keep**
+  does the same until you release it (the lock fills while an output is kept). Both wait for your next message, work on what is sent to the model (saved history
   is never edited), and are refused for web content and for anything that held a credential. The Status column reads
   Pending, then Applied or Kept, or Failed with the reason in the hover card. The same verbs exist as
   `/tameru restore|keep|unkeep REF` and `/tameru cancel` on your own clients, and are off in shared chats.
@@ -241,7 +247,7 @@ original, `/tameru ask REF [START-END | term]` gives the exact instruction that 
   word for word in every Hermes summary of this chat, under `## Pinned by you (Tameru, verbatim)`, so a rule such as
   "never touch production config" cannot be softened by the summarizer. `/tameru pins` lists them and
   `/tameru unpin N` removes one. Nothing is ever pinned for you, text that looks like a credential is refused, the
-  verbs work on your own clients only, and `pins: off` / `TAMERU_PINS=off` switches it off. In Desktop the 📌 button in the panel header opens the same list. Saved per chat in the
+  verbs work on your own clients only, and `pins: off` / `TAMERU_PINS=off` switches it off. In Desktop the pin icon in the bar (with the number of pins) opens the same list. Saved per chat in the
   plugin's own state (see *What Tameru stores*).
 - **What the model is told:** each turn, only when something changed, Tameru adds a short `<tameru_note>` to your message
   for the model: how many tool results are shortened and which files it wrote or patched (base names only). It says
@@ -252,7 +258,7 @@ original, `/tameru ask REF [START-END | term]` gives the exact instruction that 
 - After a restart the table is rebuilt from rows Tameru already shortened, only where an archived original proves
   the row for that exact message.
 
-Validated live on Windows in Hermes Desktop with Claude Haiku 4.5 (card, analysis panel, lean mode, a self-adjustment, a real commit, View
+Validated live on Windows in Hermes Desktop with Claude Haiku 4.5 (card, analysis panel, the bias control, a self-adjustment, a real commit, View
 original, the table rebuilt after a gateway restart, `/tameru stats`, and the recovery-tool filter) and in the classic CLI and the Ink TUI
 (`/tameru` and `/tameru changes`, including after a restart). The compaction status line and the post-commit chat line in the CLI and
 TUI were checked on Hermes' real compressor and in unit tests only, because no model turn ran there.
@@ -388,7 +394,7 @@ plugins:
 | `edits` | `true` | Keep and Restore. |
 | `pins` | `true` | Pinned instructions. |
 | `manifest` | `true` | The short per-turn note to the model. Deprecated unless a live comparison shows it raises read-backs. |
-| `preference` | `balanced` | `save_space`, `balanced` or `preserve_detail`: the chat's starting bias (change it later with `/tameru bias` or the panel's lean mode). |
+| `preference` | `balanced` | `save_space`, `balanced` or `preserve_detail`: the chat's starting bias (change it later with `/tameru bias` or the panel's strength menu). |
 | `net_estimate` | `false` | `/tameru stats` adds a signed, labelled estimate of what the cleanups saved or cost, in uncached-input-token equivalents. Not a bill. |
 | `stats_ledger` | `false` | Keep daily totals (cleanups and tokens removed, no chat ids or text) for 90 days in `$HERMES_HOME/tameru/stats-ledger.json`. Shown only in `/tameru stats`; never read by policy code; `/tameru reset stats confirm` deletes it. |
 
@@ -511,7 +517,7 @@ Hermes `main` (the `main` job may fail without blocking a release).
 | What | Where | Size | How to remove it |
 |---|---|---|---|
 | Originals of shortened outputs (never anything that looks like a credential) | the engine's memory (512 entries, 32M characters), and Hermes' own session archive | bounded | ends with the process; Hermes' session delete for the archive |
-| Per-chat records: self-tuning, pause and lean mode, policy choices, Keeps, pinned lines | the plugin's own state, `$HERMES_HOME/plugin-data/<folder Hermes names for the plugin>/state.json`, key `chat:<session id>` (Hermes' public `ctx.state`; nothing is written to Hermes' session storage) | a few numbers, up to 5 pinned lines (1,500 characters) and 64 short references per chat | `/tameru unpin N`, `/tameru unkeep REF`, `/tameru reset`; a chat's record is dropped after 90 days unused, and only the newest 400 chats are kept |
+| Per-chat records: self-tuning, Off and strength, policy choices, Keeps, pinned lines | the plugin's own state, `$HERMES_HOME/plugin-data/<folder Hermes names for the plugin>/state.json`, key `chat:<session id>` (Hermes' public `ctx.state`; nothing is written to Hermes' session storage) | a few numbers, up to 5 pinned lines (1,500 characters) and 64 short references per chat | `/tameru unpin N`, `/tameru unkeep REF`, `/tameru reset`; a chat's record is dropped after 90 days unused, and only the newest 400 chats are kept |
 | Restores | engine memory only | up to 64, five replies each | `/tameru cancel`, or they expire |
 | Daily totals of cleanups and tokens removed. Off by default | `$HERMES_HOME/tameru/stats-ledger.json` | one small record per day, 90 days, no chat ids, text, tool names or paths | `/tameru reset stats confirm`, or delete the file; written only with `stats_ledger: on` |
 | Telemetry log (only if `telemetry_log` is set) | under `$HERMES_HOME` or the temp folder | rotates at 5 MB, keeping one `.1` file | delete the file; it holds counts, tool names, rungs and reference hashes, never text |

@@ -173,14 +173,10 @@ const originalPayload = (sid, ref, text) => ({ ok: true, kind: 'original', sessi
 const resolve = (call, output) => call.resolve({ type: 'plugin', output: JSON.stringify(output) })
 const doc = dom => dom.window.document
 const buttons = dom => [...doc(dom).querySelectorAll('button')]
-const toggle = dom => doc(dom).querySelector('button[aria-controls][aria-label*="Tameru details"]')
-const leanSelect = dom => doc(dom).querySelector('select[aria-label="Lean mode"]')
-const leanShown = dom => leanSelect(dom).selectedOptions[0].textContent
-const pauseButton = dom => doc(dom).querySelector('button[aria-label="Pause Tameru"], button[aria-label="Resume Tameru"]')
-const setSelect = (el, value) => act(() => {
-  Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set.call(el, value)
-  el.dispatchEvent(new window.Event('change', { bubbles: true }))
-})
+const toggle = dom => doc(dom).querySelector('button[aria-controls][aria-label^="Shortened ("]')
+const strengthButton = dom => doc(dom).querySelector('button[aria-label^="Strength:"]')
+const strengthShown = dom => strengthButton(dom).textContent
+const strengthItems = dom => [...doc(dom).querySelectorAll('[role="menuitemradio"]')]
 const tagline = dom => doc(dom).querySelector('.tameru-sub').textContent
 const figure = dom => doc(dom).querySelector('.tameru-figure').textContent
 const tableRows = dom => [...doc(dom).querySelectorAll('.tameru-table tbody tr')]
@@ -188,11 +184,12 @@ const tableRows = dom => [...doc(dom).querySelectorAll('.tameru-table tbody tr')
 const cells = row => [...row.querySelectorAll('td')].map(td => { const copy = td.cloneNode(true); copy.querySelectorAll('.tameru-sr').forEach(node => node.remove()); return copy.textContent })
 const eye = (dom, i) => tableRows(dom)[i].querySelector('button[aria-label^="Review what was left out"]')
 const viewRow = async (dom, i) => { click(eye(dom, i)); await flush() }
-const choose = async (dom, text) => {
-  if (text === 'Pause' || text === 'Resume') click(pauseButton(dom))
-  else setSelect(leanSelect(dom), { 'Save space': 'save', Balanced: 'balanced', 'Preserve detail': 'detail' }[text])
-  await flush()
+const pickStrength = async (dom, name) => {
+  click(strengthButton(dom)); await flush()
+  click(strengthItems(dom).find(item => item.querySelector('b').textContent === name)); await flush()
 }
+// The old words still name what a test means: Pause is Off, Resume is Normal, Save space is More, Preserve detail is Less.
+const choose = (dom, text) => pickStrength(dom, { Pause: 'Off', Resume: 'Normal', 'Save space': 'More', Balanced: 'Normal', 'Preserve detail': 'Less' }[text])
 const backButton = dom => doc(dom).querySelector('button[aria-label="Back"]')
 
 // The panel is open by default and polls from mount, so booting is just mounting and answering the first poll.
@@ -204,28 +201,29 @@ async function boot(sdk, calls, payload) {
 const commitEvent = (over = {}) => ({ t: 1700000000, kind: 'commit', before: 63000, after: 33000, stage: 'standard', method: 'proactive',
   mode: 'balanced', refs: [ref(0)], tools: ['terminal'], ms: 5, ...over })
 
-test('the header shows live numbers from the first poll, with an accessible meter and both ticks', async () => {
+test('the header shows live numbers from the first poll, with an accessible ring and the start notch', async () => {
   const { sdk, calls } = makeSdk()
   const { dom } = await mount(sdk)
   assert.equal(calls.length, 1, 'the poll starts at mount')
   assert.equal(tagline(dom), 'Loading…')
   resolve(calls[0], snapshotPayload('sid')); await flush()
   assert.equal(doc(dom).querySelector('.tameru-name').textContent, 'Tameru (ためる)')
-  assert.equal(leanShown(dom), 'Balanced')
-  assert.deepEqual([...leanSelect(dom).options].map(o => o.textContent), ['Save space', 'Balanced', 'Preserve detail'])
-  assert.equal(tagline(dom), '', 'an idle chat shows no sentence in the header')
+  assert.equal(doc(dom).querySelector('.tameru-name small').getAttribute('lang'), 'ja')
+  assert.equal(strengthShown(dom), 'Normal')
+  assert.equal(tagline(dom), '40 outputs shortened', 'one status phrase, the same number as the results launcher')
+  assert.equal(toggle(dom).textContent, '40')
   assert.equal(figure(dom), '4% full')
-  assert.equal(doc(dom).querySelector('.tameru-saved').textContent, 'Freed 18K')
   const meter = doc(dom).querySelector('[role="meter"]')
   assert.equal(meter.getAttribute('aria-valuenow'), '41000')
   assert.equal(meter.getAttribute('aria-valuemax'), '1000000')
   assert.equal(meter.getAttribute('aria-valuetext'), '4% full')
-  const pct = el => parseFloat(el.style[el.classList.contains('tameru-fill') ? 'width' : 'left'])
-  const near = (actual, expected) => assert.ok(Math.abs(actual - expected) < 0.01, `${actual} is not ~${expected}`)
-  near(pct(meter.querySelector('.tameru-fill')), 4.1)
-  near(pct(meter.querySelector('.tameru-tick:not(.tameru-host)')), 6.1)
-  near(pct(meter.querySelector('.tameru-tick.tameru-host')), 52.4)
-  assert.match(toggle(dom).getAttribute('aria-label'), /^Hide Tameru details\./)
+  const circumference = 2 * Math.PI * 6
+  const [drawn] = meter.querySelector('.tameru-ring-fill').getAttribute('stroke-dasharray').split(' ').map(Number)
+  assert.ok(Math.abs(drawn / circumference - 0.041) < 0.001, `${drawn / circumference} is not ~4.1%`)
+  assert.ok(meter.querySelector('.tameru-ring-notch'), 'one notch where Tameru starts')
+  assert.equal(doc(dom).querySelector('.tameru-saved').textContent, '18K of context removed', 'what was removed lives under the table')
+  assert.equal(doc(dom).querySelector('.tameru-head').querySelector('.tameru-saved'), null, 'no figure about removed text on the bar')
+  assert.equal(toggle(dom).getAttribute('aria-expanded'), 'true')
   assert.equal(doc(dom).querySelectorAll('[role="tab"]').length, 0, 'one panel, no tabs')
 })
 
@@ -430,27 +428,26 @@ test('an unresolved owner sends no RPC and says the connection is not ready', as
   const { sdk, calls } = makeSdk(null)
   const { dom } = await mount(sdk)
   assert.equal(calls.length, 0)
-  assert.equal(tagline(dom), 'Not connected yet')
+  assert.equal(tagline(dom), 'Not connected')
   assert.doesNotMatch(doc(dom).body.textContent, /connection is not available yet/, 'one line only: the header already says it')
-  assert.equal(leanSelect(dom), null, 'no dropdown before there is a chat')
-  assert.equal(pauseButton(dom), null)
+  assert.equal(strengthButton(dom).disabled, true, 'nothing to set before there is a chat')
 })
 
 test('before a chat has had a turn the header says when Tameru starts instead of "Unavailable"', async () => {
   const { sdk, calls } = makeSdk()
   const { dom } = await mount(sdk)
   resolve(calls[0], { ok: false, error: 'No live Tameru context is available for this chat. Start a turn with Tameru enabled.' }); await flush()
-  assert.equal(tagline(dom), 'Starts with your next message')
+  assert.equal(tagline(dom), 'Idle')
   assert.equal(doc(dom).querySelector('[role="meter"]'), null)
   const other = makeSdk()
   const second = await mount(other.sdk)
   resolve(other.calls[0], { ok: false, error: 'Something else broke.' }); await flush()
-  assert.equal(tagline(second.dom), 'Unavailable')
+  assert.equal(tagline(second.dom), 'Not running')
 })
 
-test('dropdown options always use one matching solid pair, so none can be unreadable', async () => {
-  assert.match(source, /select option \{ background: var\(--tameru-solid\); color: var\(--tameru-solid-text\) \}/)
-  assert.doesNotMatch(source, /select option \{[^}]*var\(--ui-/)
+test('there is no native dropdown whose options could be unreadable: the strength menu is drawn by the panel', async () => {
+  assert.doesNotMatch(source, /h\('select'/)
+  assert.doesNotMatch(source, /select option/)
   assert.match(source, /--tameru-solid: #0b0b0c; --tameru-solid-text: #f2f2f3/)
 })
 
@@ -477,7 +474,7 @@ test('the panel is condensed to the header when collapsed, and polls slower then
   assert.equal(toggle(dom).getAttribute('aria-expanded'), 'false')
   assert.equal(doc(dom).querySelector('.tameru-table'), null)
   assert.ok(doc(dom).querySelector('.tameru-head'), 'the header stays')
-  assert.match(toggle(dom).getAttribute('aria-label'), /^Show Tameru details\./)
+  assert.match(toggle(dom).getAttribute('aria-label'), /^Shortened \(/)
   assert.equal([...intervals.values()].at(-1).ms, 6000)
   resolve(calls.at(-1), snapshotPayload('sid')); await flush()          // the refetch the change triggered
   const before = calls.length
@@ -527,9 +524,9 @@ test('tuning steps and your own lean-mode changes sit in the same table as one-l
   const { dom } = await boot(sdk, calls, snapshotPayload('sid', { items: [], progress: progressFixture({ timeline }) }))
   const rows = tableRows(dom).map(cells)
   assert.equal(rows.length, 4)
-  assert.deepEqual(rows[0].slice(1).filter(Boolean), ['You resumed Tameru — cleanup is running again', 'Resumed'])
-  assert.deepEqual(rows[1].slice(1).filter(Boolean), ['You paused Tameru — no changes until you resume', 'Paused'])
-  assert.deepEqual(rows[2].slice(1).filter(Boolean), ['You changed the lean mode to Preserve detail', 'Lean mode'])
+  assert.deepEqual(rows[0].slice(1).filter(Boolean), ['You turned Tameru on again', 'On'])
+  assert.deepEqual(rows[1].slice(1).filter(Boolean), ['You set Tameru to Off — no changes until you turn it on', 'Off'])
+  assert.deepEqual(rows[2].slice(1).filter(Boolean), ['You set the strength to Less', 'Strength'])
   assert.deepEqual(rows[3].slice(1).filter(Boolean), ['bell\\u0007 reason', 'Tuned'])
 })
 
@@ -548,8 +545,8 @@ test('every row spans exactly the header columns, so a note row cannot push the 
     const span = [...row.querySelectorAll('td')].reduce((sum, td) => sum + (td.colSpan || 1), 0)
     assert.equal(span, columns, `row "${row.textContent.slice(0, 40)}" spans ${span} of ${columns}`)
   }
-  const note = tableRows(dom).find(r => /lean mode/.test(r.textContent))
-  assert.equal([...note.querySelectorAll('td')].at(-2).textContent, 'Lean mode', 'the pill sits under Status')
+  const note = tableRows(dom).find(r => /strength/.test(r.textContent))
+  assert.equal([...note.querySelectorAll('td')].at(-2).textContent, 'Strength', 'the pill sits under Status')
 })
 
 test('the header stays quiet while watching, and a tuning step shows up as a note row in the table', async () => {
@@ -560,7 +557,7 @@ test('the header stays quiet while watching, and a tuning step shows up as a not
     diagnosis: { code: 'committed', text: 'Shortened old outputs and freed about 30K tokens.' }, timeline,
     tuner: { enabled: true, posture: 'balanced', bias: 0, paused: false, adjustments: [{ signal: 'reclaim_declined', changed: ['activation'], reason, t: 1 }] } }) })
   const { dom } = await boot(sdk, calls, payload)
-  assert.equal(tagline(dom), '', 'no sentence in the header while everything is fine')
+  assert.equal(tagline(dom), '40 outputs shortened', 'one status phrase, nothing else, while everything is fine')
   const note = tableRows(dom).find(row => row.classList.contains('tameru-noterow'))
   assert.match(note.textContent, /Tuned/)
   assert.match(note.textContent, /so the bar is lowered/)
@@ -591,56 +588,67 @@ test('with no activity the panel says so', async () => {
   assert.equal(doc(dom).querySelector('button[aria-label^="View original"]'), null)
 })
 
-test('the lean-mode dropdown sets the mode through one lifecycle-bound command and follows the server', async () => {
+test('the strength menu sets the strength through one lifecycle-bound command and follows the server', async () => {
   const { sdk, calls } = makeSdk()
   const { dom } = await boot(sdk, calls, snapshotPayload('sid'))
-  assert.equal(leanSelect(dom).value, 'balanced')
-  setSelect(leanSelect(dom), 'detail'); await flush()
+  assert.equal(strengthShown(dom), 'Normal')
+  click(strengthButton(dom)); await flush()
+  assert.deepEqual(strengthItems(dom).map(item => item.querySelector('b').textContent), ['Off', 'Less', 'Normal', 'More'])
+  assert.equal(strengthItems(dom).find(item => item.getAttribute('aria-checked') === 'true').querySelector('b').textContent, 'Normal')
+  click(strengthItems(dom)[1]); await flush()
   assert.equal(calls.at(-1).payload.arg, "--json bias detail --lifecycle 'life-1'")
-  assert.equal(leanSelect(dom).disabled, true, 'locked while saving')
+  assert.equal(strengthButton(dom).disabled, true, 'locked while saving')
+  assert.equal(doc(dom).querySelector('[role="menu"]'), null, 'the menu closes on a choice')
   resolve(calls.at(-1), snapshotPayload('sid', { kind: 'posture', progress: progressFixture({
     tuner: { enabled: true, posture: 'keeping more detail', bias: 1, paused: false, adjustments: [] } }) })); await flush()
-  assert.equal(leanSelect(dom).value, 'detail')
-  assert.equal(leanShown(dom), 'Preserve detail')
+  assert.equal(strengthShown(dom), 'Less')
 })
 
-test('lean mode and pause live in the header: no popover and no extra row that makes the panel taller', async () => {
+test('strength lives in the header, its menu opens inline, and More, Normal and Less are the engine bias words', async () => {
   const { sdk, calls } = makeSdk()
   const { dom } = await boot(sdk, calls, snapshotPayload('sid'))
   const head = doc(dom).querySelector('.tameru-head')
-  assert.ok(head.contains(leanSelect(dom)) && head.contains(pauseButton(dom)))
-  assert.equal(doc(dom).querySelector('[role="menu"], .tameru-options'), null)
+  assert.ok(head.contains(strengthButton(dom)) && head.contains(toggle(dom)))
+  assert.equal(doc(dom).querySelector('select'), null, 'no native dropdown')
+  assert.equal(doc(dom).querySelector('button[aria-label$="Tameru"]'), null, 'no pause button: Off is a strength')
   assert.doesNotMatch(source, /position: absolute; (?:right|bottom)[^}]*z-index/, 'no floating popover')
   assert.match(source, /document\.body\.appendChild\(card\)/, 'hint cards are drawn outside the panel, so nothing can clip them or add height')
-  click(toggle(dom)); await flush()                     // collapsed: both still work from the header
-  assert.ok(leanSelect(dom) && pauseButton(dom))
+  click(toggle(dom)); await flush()                     // details closed: the strength still works from the header
+  assert.equal(toggle(dom).getAttribute('aria-expanded'), 'false')
+  assert.ok(!strengthButton(dom).disabled)
+  click(strengthButton(dom)); await flush()
+  assert.equal(strengthButton(dom).getAttribute('aria-expanded'), 'true')
+  assert.match(doc(dom).querySelector('[role="menu"]').textContent, /This chat\./)
+  act(() => doc(dom).querySelector('[role="menu"]').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  assert.equal(doc(dom).querySelector('[role="menu"]'), null, 'Escape closes the menu')
 })
 
-test('pause and resume toggle through the same command path', async () => {
+test('Off pauses, and choosing a strength from Off turns Tameru on again first', async () => {
   const { sdk, calls } = makeSdk()
   const { dom } = await boot(sdk, calls, snapshotPayload('sid'))
-  assert.equal(pauseButton(dom).getAttribute('aria-label'), 'Pause Tameru')
   await choose(dom, 'Pause')
   assert.equal(calls.at(-1).payload.arg, "--json pause --lifecycle 'life-1'")
   resolve(calls.at(-1), snapshotPayload('sid', { progress: progressFixture({ state: 'paused',
     diagnosis: { code: 'paused', text: 'Paused. Tameru is not changing this chat.' },
     tuner: { enabled: true, posture: 'balanced', bias: 0, paused: true, adjustments: [] } }) })); await flush()
-  assert.equal(tagline(dom), 'Paused · no changes')
-  assert.ok(doc(dom).querySelector('.tameru-dot.tameru-paused'))
-  assert.equal(pauseButton(dom).getAttribute('aria-label'), 'Resume Tameru')
-  await choose(dom, 'Resume')
+  assert.equal(tagline(dom), 'Off')
+  assert.equal(strengthShown(dom), 'Off')
+  assert.equal(doc(dom).querySelector('.tameru-mark').getAttribute('data-state'), 'off')
+  await choose(dom, 'Preserve detail')
   assert.equal(calls.at(-1).payload.arg, "--json resume --lifecycle 'life-1'")
+  resolve(calls.at(-1), snapshotPayload('sid')); await flush()
+  assert.equal(calls.at(-1).payload.arg, "--json bias detail --lifecycle 'life-1'", 'then the strength itself')
 })
 
 test('a second change while saving cannot double-submit, and a poll waits for the save', async () => {
   const { sdk, calls } = makeSdk()
   const { dom, tick } = await boot(sdk, calls, snapshotPayload('sid'))
   const n = calls.length
+  click(strengthButton(dom)); await flush()
+  const items = strengthItems(dom)
   act(() => {
-    const select = leanSelect(dom)
-    Object.getOwnPropertyDescriptor(window.HTMLSelectElement.prototype, 'value').set.call(select, 'save')
-    select.dispatchEvent(new window.Event('change', { bubbles: true }))
-    pauseButton(dom).dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    items[3].dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
+    items[1].dispatchEvent(new window.MouseEvent('click', { bubbles: true }))
   })
   await flush()
   assert.equal(calls.length, n + 1, 'only the first change is sent')
@@ -656,8 +664,7 @@ test('a failed save shows an alert and the controls work again', async () => {
   await choose(dom, 'Save space')
   calls.at(-1).resolve({ type: 'plugin', output: JSON.stringify({ ok: false, error: 'The active session changed. Open context details again.' }) }); await flush()
   assert.match(doc(dom).querySelector('[role="alert"]').textContent, /active session changed/)
-  assert.equal(leanSelect(dom).disabled, false)
-  assert.equal(pauseButton(dom).disabled, false)
+  assert.equal(strengthButton(dom).disabled, false)
 })
 
 test('a save answered for a different lifecycle clears the panel instead of painting', async () => {
@@ -681,11 +688,10 @@ test('a save resolved after navigation never lands on the new chat', async () =>
   assert.doesNotMatch(doc(dom).body.textContent, /LANDED-ON-WRONG-CHAT/)
 })
 
-test('without the preferences capability the dropdown and pause button are disabled', async () => {
+test('without the preferences capability the strength control is disabled', async () => {
   const { sdk, calls } = makeSdk()
   const { dom } = await boot(sdk, calls, snapshotPayload('sid', { capabilities: { policy: false } }))
-  assert.equal(leanSelect(dom).disabled, true)
-  assert.equal(pauseButton(dom).disabled, true)
+  assert.equal(strengthButton(dom).disabled, true)
 })
 
 test('an older Tameru without progress data still lists its outputs and says to update', async () => {
@@ -695,7 +701,7 @@ test('an older Tameru without progress data still lists its outputs and says to 
   assert.match(doc(dom).body.textContent, /Update Tameru to see compression progress/)
   assert.equal(tableRows(dom).length, 40)
   assert.equal(doc(dom).querySelector('[role="meter"]'), null)
-  assert.equal(leanSelect(dom), null, 'no controls without progress data')
+  assert.equal(strengthButton(dom).disabled, true, 'no controls without progress data')
 })
 
 test('a restored output is labelled as found again after a restart', async () => {
@@ -714,7 +720,7 @@ test('compaction events light the indicator, close it on the finished edge and r
   const emit = payload => act(() => host.__handlers[0].fn(payload))
   emit({ kind: 'compacting', text: 'Compacting context' })
   assert.equal(tagline(dom), 'Compacting…')
-  assert.ok(doc(dom).querySelector('.tameru-dot.tameru-compacting'))
+  assert.equal(doc(dom).querySelector('.tameru-mark').getAttribute('data-state'), 'working')
   const before = calls.length
   emit({ kind: 'compacted' }); await flush()
   assert.notEqual(tagline(dom), 'Compacting…')
@@ -789,7 +795,7 @@ async function openKept(over = {}, lines = sample, left = sampleLeft) {
   return { ...harness, dom }
 }
 
-test('a row opens a small detail line: method, lean mode, tokens, duration, original', async () => {
+test('a row opens a small detail line: method, strength, tokens, duration, original', async () => {
   const { sdk, calls } = makeSdk()
   const timeline = [commitEvent({ ms: 5 })]
   const { dom } = await boot(sdk, calls, snapshotPayload('sid', { items: items(1), progress: progressFixture({ timeline }) }))
@@ -801,7 +807,7 @@ test('a row opens a small detail line: method, lean mode, tokens, duration, orig
   const detail = doc(dom).querySelector('tr.tameru-detail')
   assert.equal(detail.id, doc(dom).querySelector('.tameru-rowtoggle').getAttribute('aria-controls'))
   const facts = Object.fromEntries([...detail.querySelectorAll('.tameru-dl > div')].map(d => [d.children[0].textContent, d.children[1].textContent]))
-  assert.deepEqual(facts, { Method: 'Selected excerpts', 'Lean Mode': 'Balanced', 'Input (Tokens)': '63,000', 'Output (Tokens)': '33,000', Duration: '5 ms', Original: 'Available' })
+  assert.deepEqual(facts, { Method: 'Selected excerpts', Strength: 'Normal', 'Input (Tokens)': '63,000', 'Output (Tokens)': '33,000', Duration: '5 ms', Original: 'Available' })
   click(doc(dom).querySelector('.tameru-rowtoggle')); await flush()
   assert.equal(doc(dom).querySelector('tr.tameru-detail'), null)
 })
@@ -992,18 +998,19 @@ test('hovering a control shows one hint card on the page body, and leaving or Es
   const { sdk, calls } = makeSdk()
   const { dom, timeouts } = await boot(sdk, calls, snapshotPayload('sid'))
   assert.equal(cards(dom).length, 0)
-  hover(dom, pauseButton(dom), timeouts)
+  hover(dom, toggle(dom), timeouts)
   assert.equal(cards(dom).length, 1)
   assert.equal(cards(dom)[0].parentElement, doc(dom).body, 'drawn outside the panel container, so nothing clips it or adds height')
-  assert.match(cards(dom)[0].textContent, /Pause/)
-  assert.match(cards(dom)[0].textContent, /stops changing this chat until you resume/)
-  hover(dom, leanSelect(dom), timeouts)
+  assert.match(cards(dom)[0].textContent, /Shortened/)
+  assert.match(cards(dom)[0].textContent, /currently sees shortened/)
+  hover(dom, strengthButton(dom), timeouts)
   assert.equal(cards(dom).length, 1, 'only one hint is open at a time')
-  assert.match(cards(dom)[0].textContent, /Lean mode/)
-  act(() => leanSelect(dom).dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
+  assert.match(cards(dom)[0].textContent, /Strength/)
+  assert.match(cards(dom)[0].textContent, /This chat\./)
+  act(() => strengthButton(dom).dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true })))
   assert.equal(cards(dom).length, 0, 'Escape closes the hint')
-  hover(dom, pauseButton(dom), timeouts)
-  act(() => pauseButton(dom).dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true })))
+  hover(dom, toggle(dom), timeouts)
+  act(() => toggle(dom).dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true })))
   assert.equal(cards(dom).length, 0, 'moving away closes it')
 })
 
@@ -1068,12 +1075,12 @@ test('copy budget: buttons are short, status text is short, and the surface carr
 })
 
 test('the panel keeps fixed heights, one grid for list and viewer, and swaps to one pane when narrow', async () => {
-  assert.match(source, /\.tameru-head \{[^}]*min-height: 30px/)
+  assert.match(source, /\.tameru-head \{[^}]*min-height: 36px/)
   assert.match(source, /\.tameru-body \{[^}]*grid-template-rows: 176px 20px[^}]*height: 196px/)
   assert.match(source, /@container \(min-width: 1000px\)[^]*grid-template-columns: minmax\(0, 2fr\) minmax\(0, 3fr\)/)
   assert.match(source, /\.tameru-panes\[data-detail="false"\] \.tameru-viewpane \{ display: none \}/)
   assert.match(source, /\.tameru-panes\[data-detail="true"\] \.tameru-listpane \{ display: none \}/)
-  assert.match(source, /\.tameru-track \{[^}]*height: 4px/)
+  assert.match(source, /\.tameru-sep \{[^}]*width: 1px; height: 16px/)
   const { dom } = await openKept()
   assert.ok(doc(dom).querySelector('.tameru-listpane') && doc(dom).querySelector('.tameru-viewpane'), 'both panes live in one grid')
   assert.equal(doc(dom).querySelector('.tameru-statusline').parentElement.className, 'tameru-body', 'the status line sits inside the fixed body')
@@ -1178,7 +1185,7 @@ test('the working-memory hint gives the new tokens of the last reply and timing,
 })
 
 // ------------------------------------------------------------------------------------------------ pinned instructions
-const pinsButton = dom => doc(dom).querySelector('button[aria-label^="Pinned instructions"]')
+const pinsButton = dom => doc(dom).querySelector('button[aria-label^="Pins"]')
 const pinInput = dom => doc(dom).querySelector('input[aria-label="Instruction to pin"]')
 const pinSubmit = dom => buttons(dom).find(el => el.textContent === 'Pin')
 // The test DOM does not deliver a dispatched key event to React's handler, so the handler is called the way React calls it.
@@ -1216,7 +1223,7 @@ test('pinning sends one quoted, lifecycle-bound command and clears the box once 
   resolve(calls.at(-1), pinPayload(["Don't touch prod; answer briefly"])); await flush()
   assert.equal(pinInput(dom).value, '')
   assert.match(doc(dom).querySelector('.tameru-pins').textContent, /Don't touch prod; answer briefly/)
-  assert.equal(pinsButton(dom).getAttribute('aria-label'), 'Pinned instructions (1)')
+  assert.equal(pinsButton(dom).getAttribute('aria-label'), 'Pins (1)')
 })
 
 test('a pinned line can be removed by its number, and a refusal keeps what was typed', async () => {
@@ -1260,7 +1267,7 @@ test('Restore and Keep show on a row only when the backend says it can, and neve
   assert.equal(rowButton(live.dom, 1, 'Keep'), null)
 })
 
-test('Restore and Keep send one lifecycle-bound command each, and a pin turns into Unpin', async () => {
+test('Restore and Keep send one lifecycle-bound command each, and a lock turns into Release', async () => {
   const { sdk, calls } = makeSdk()
   const { dom } = await boot(sdk, calls, editPayload())
   click(rowButton(dom, 0, 'Restore')); await flush()
@@ -1269,8 +1276,8 @@ test('Restore and Keep send one lifecycle-bound command each, and a pin turns in
   click(rowButton(dom, 1, 'Keep')); await flush()
   assert.equal(calls.at(-1).payload.arg, `--json keep ${ref(1)} --lifecycle 'life-1'`)
   resolve(calls.at(-1), editPayload({}, { [ref(1)]: { kind: 'keep', state: 'applied', reason: '' } })); await flush()
-  const unpin = rowButton(dom, 1, 'Unpin')
-  assert.ok(unpin, 'a kept output offers Unpin')
+  const unpin = rowButton(dom, 1, 'Release')
+  assert.ok(unpin, 'a kept output offers Release')
   assert.equal(unpin.getAttribute('aria-pressed'), 'true')
   click(unpin); await flush()
   assert.equal(calls.at(-1).payload.arg, `--json unkeep ${ref(1)} --lifecycle 'life-1'`)
@@ -1290,7 +1297,7 @@ test('the Status column says Pending, Kept, Applied, Failed or Expired, with the
   const hint = i => describe(dom, tableRows(dom)[i].querySelector('.tameru-edit'))
   assert.match(hint(2), /Too big/)
   assert.match(hint(0), /next message/)
-  assert.match(hint(1), /until you unpin/)
+  assert.match(hint(1), /until you release it/)
 })
 
 test('pending changes show one short line with a Cancel that sends one command', async () => {
@@ -1314,7 +1321,7 @@ test('a refusal shows as one short alert in the status line and changes nothing 
   click(rowButton(dom, 0, 'Keep')); await flush()
   calls.at(-1).resolve({ type: 'plugin', output: JSON.stringify({ ok: false, error: 'Keep limit reached. Unkeep something first.' }) }); await flush()
   assert.equal(statusOf(dom).getAttribute('role'), 'alert')
-  assert.equal(statusOf(dom).textContent, 'Keep limit reached. Unkeep something first.')
+  assert.equal(statusOf(dom).textContent, 'That change did not apply. Your chat is unchanged. Try again. Details: Keep limit reached. Unkeep something first.')
   assert.equal(cells(tableRows(dom)[0])[5], 'Done')
 })
 
@@ -1335,7 +1342,6 @@ test('every floating or sticky surface is one solid colour, never a theme token 
   assert.doesNotMatch(source, /--ui-bg-primary/, 'no translucent-capable token behind a hover card, sticky header or list')
   assert.match(source, /\.tameru-hintcard \{[^}]*background: #0b0b0c/)
   assert.match(source, /\.tameru-table th \{[^}]*background: var\(--tameru-solid\)/)
-  assert.match(source, /select option \{ background: var\(--tameru-solid\); color: var\(--tameru-solid-text\) \}/)
 })
 
 test('hover cards and the panel are always the same solid near-black, whatever the page colours are', async () => {
@@ -1345,9 +1351,9 @@ test('hover cards and the panel are always the same solid near-black, whatever t
   for (const [body, bg] of [['rgb(20, 20, 20)', 'rgb(250, 250, 250)'], ['rgb(240, 240, 240)', 'rgb(20, 20, 21)']]) {
     doc(dom).body.style.color = body
     doc(dom).body.style.backgroundColor = bg
-    hover(dom, pauseButton(dom), timeouts)
+    hover(dom, toggle(dom), timeouts)
     assert.equal(cards(dom)[0].dataset.theme, undefined)
-    act(() => pauseButton(dom).dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true })))
+    act(() => toggle(dom).dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true })))
   }
   assert.match(source, /\.tameru-hintcard \{[^}]*color: #f2f2f3; background: #0b0b0c/)
 })
@@ -1390,13 +1396,13 @@ test('with the SDK Tip the panel uses it: title, text and keys go in its label a
   const { sdk, calls } = makeSdk(undefined, { tip: true })
   const { dom, timeouts } = await boot(sdk, calls, snapshotPayload('sid'))
   assert.equal(sdkTips(dom).length, 0)
-  enter(dom, pauseButton(dom))
+  enter(dom, toggle(dom))
   assert.equal(sdkTips(dom).length, 1)
   assert.equal(sdkTips(dom)[0].getAttribute('role'), 'tooltip')
-  assert.match(sdkTips(dom)[0].textContent, /Pause/)
-  assert.match(sdkTips(dom)[0].textContent, /stops changing this chat until you resume/)
+  assert.match(sdkTips(dom)[0].textContent, /Shortened/)
+  assert.match(sdkTips(dom)[0].textContent, /currently sees shortened/)
   assert.equal(cards(dom).length, 0, 'the fallback card is not drawn when the SDK has a Tip')
-  act(() => pauseButton(dom).dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true })))
+  act(() => toggle(dom).dispatchEvent(new window.MouseEvent('mouseout', { bubbles: true })))
   assert.equal(sdkTips(dom).length, 0, 'leaving closes it')
   void timeouts
 })
@@ -1404,10 +1410,10 @@ test('with the SDK Tip the panel uses it: title, text and keys go in its label a
 test('with the SDK Tip the screen-reader description is still in the page and linked to the control', async () => {
   const { sdk, calls } = makeSdk(undefined, { tip: true })
   const { dom } = await boot(sdk, calls, snapshotPayload('sid'))
-  const button = pauseButton(dom)
+  const button = toggle(dom)
   const id = button.getAttribute('aria-describedby')
   assert.ok(id, 'the control points at its description')
-  assert.match(doc(dom).getElementById(id).textContent, /Pause.*stops changing this chat until you resume/)
+  assert.match(doc(dom).getElementById(id).textContent, /Shortened.*currently sees shortened/)
 })
 
 test('the extra first-hover line shows once with the SDK Tip, then not again', async () => {
@@ -1426,6 +1432,119 @@ test('without an SDK Tip the panel keeps drawing its own card', async () => {
   const { sdk, calls } = makeSdk()
   assert.equal(sdk.Tip, undefined)
   const { dom, timeouts } = await boot(sdk, calls, snapshotPayload('sid'))
-  hover(dom, pauseButton(dom), timeouts)
+  hover(dom, toggle(dom), timeouts)
   assert.equal(cards(dom).length, 1)
+})
+
+
+// ------------------------------------------------------------------------------------------------ 1.10: one interface for every Tameru plugin
+const shared = name => JSON.parse(readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), 'utf8'))
+const vocabulary = shared('ui-vocabulary.json')
+const iconSet = shared('ui-icons.json')
+const engineDocs = fileURLToPath(new URL('../../../Tameru/docs/', import.meta.url))
+
+test('the shared words and drawings are the engine repo files, byte for byte, when that repo is beside this one', async t => {
+  const { existsSync } = await import('node:fs')
+  if (!existsSync(engineDocs + 'ui-vocabulary.json')) return t.skip('the engine repo is not checked out beside this one')
+  for (const name of ['ui-vocabulary.json', 'ui-icons.json']) {
+    const mine = readFileSync(fileURLToPath(new URL(`./${name}`, import.meta.url)), 'utf8').replace(/\r\n/g, '\n')
+    assert.equal(mine, readFileSync(engineDocs + name, 'utf8').replace(/\r\n/g, '\n'), `${name} drifted from the engine repo docs/${name}`)
+  }
+})
+
+test('the panel draws the shared star, lock and undo exactly, and no other Tameru drawing', () => {
+  for (const name of ['star', 'lock', 'lockFilled', 'undo']) {
+    for (const path of iconSet.icons[name].paths) assert.ok(source.includes(`d: '${path.d}'`), `${name} path ${path.d} is not in plugin.js`)
+  }
+  assert.equal(iconSet.grid, 16)
+  assert.equal(iconSet.stroke, 1.4)
+  assert.match(source, /viewBox: '0 0 16 16'[^]*strokeWidth: 1\.4/)
+  assert.equal([...source.matchAll(/fill: true/g)].length, iconSet.icons.lockFilled.paths.filter(path => path.fill).length, 'only the filled lock has a filled path')
+})
+
+test('every strength name, its line and the scope are the shared words', () => {
+  for (const key of ['off', 'less', 'normal', 'more']) {
+    assert.ok(source.includes(`name: '${vocabulary.strength[key].name.en}'`), `${key} name`)
+    assert.ok(source.includes(`line: '${vocabulary.strength[key].line.en}'`), `${key} line`)
+  }
+  assert.ok(source.includes(`'${vocabulary.strength.scopeChat.en}'`))
+})
+
+test('each status phrase the bar shows is the shared phrase', async () => {
+  const w = vocabulary.status
+  const phraseOf = async (payload, fix) => {
+    const { sdk, calls } = makeSdk()
+    const { dom } = await boot(sdk, calls, payload)
+    const text = tagline(dom)
+    await cleanupMount()
+    return text
+  }
+  assert.equal(await phraseOf(snapshotPayload('sid', { items: [] })), w.idleUntil.en.replace('{percent}', '6'))
+  assert.equal(await phraseOf(snapshotPayload('sid', { items: items(1) })), w.shortenedOne.en)
+  assert.equal(await phraseOf(snapshotPayload('sid', { items: items(3) })), w.shortened.en.replace('{n}', '3'))
+  const kept = { [ref(0)]: { kind: 'keep', state: 'applied', reason: '' }, [ref(1)]: { kind: 'keep', state: 'applied', reason: '' } }
+  assert.equal(await phraseOf(editPayload({ items: items(2) }, kept)), w.keptOnly.en.replace('{n}', '2'))
+  const waiting = { [ref(0)]: { kind: 'restore', state: 'pending', reason: '' } }
+  assert.equal(await phraseOf(editPayload({}, waiting)), w.waitingMessage.en)
+  const off = progressFixture({ state: 'paused', tuner: { enabled: true, posture: 'balanced', bias: 0, paused: true, adjustments: [] } })
+  assert.equal(await phraseOf(snapshotPayload('sid', { progress: off })), w.off.en)
+  const { sdk } = makeSdk(null)
+  const { dom } = await mount(sdk)
+  assert.equal(tagline(dom), w.notConnected.en)
+})
+
+test('no user-facing string on the bar or in the menu uses a word the shared vocabulary forbids or avoids', async () => {
+  const forbidden = vocabulary.forbidden.en.map(word => new RegExp(`\\b${word}`, 'i'))
+  const avoided = vocabulary.avoid.en.map(word => new RegExp(`\\b${word}`, 'i'))
+  const { sdk, calls } = makeSdk()
+  const { dom } = await boot(sdk, calls, pinPayload(['one']))
+  click(strengthButton(dom)); await flush()
+  const surfaces = [doc(dom).querySelector('.tameru-head').textContent, doc(dom).querySelector('[role="menu"]').textContent,
+    ...[...doc(dom).querySelectorAll('.tameru-head [aria-label]')].map(el => el.getAttribute('aria-label')),
+    ...[...doc(dom).querySelectorAll('.tameru-head .tameru-sr')].map(el => el.textContent)]
+  for (const text of surfaces) {
+    for (const rule of forbidden) assert.doesNotMatch(text, rule, `"${text.slice(0, 60)}" uses a forbidden word`)
+    for (const rule of avoided) assert.doesNotMatch(text, rule, `"${text.slice(0, 60)}" uses an avoided word`)
+  }
+})
+
+test('the bar never says anything about removed text: that figure lives under the table only', async () => {
+  const { sdk, calls } = makeSdk()
+  const { dom } = await boot(sdk, calls, snapshotPayload('sid'))
+  const head = doc(dom).querySelector('.tameru-head').textContent
+  assert.doesNotMatch(head, /removed|freed/i)
+  assert.match(doc(dom).querySelector('.tameru-statusline').textContent, /of context removed/)
+})
+
+test('the results and pins launchers open their own view and close it again, with no chevron toggle and no pause button', async () => {
+  const { sdk, calls } = makeSdk()
+  const { dom } = await boot(sdk, calls, pinPayload(['a', 'b']))
+  assert.equal(toggle(dom).getAttribute('aria-expanded'), 'true')
+  assert.equal(pinsButton(dom).getAttribute('aria-expanded'), 'false')
+  assert.equal(pinsButton(dom).textContent, '2')
+  click(pinsButton(dom)); await flush()
+  assert.equal(pinsButton(dom).getAttribute('aria-expanded'), 'true')
+  assert.equal(toggle(dom).getAttribute('aria-expanded'), 'false', 'one view at a time')
+  assert.ok(doc(dom).querySelector('.tameru-pins'))
+  click(pinsButton(dom)); await flush()
+  assert.equal(doc(dom).querySelector('.tameru-panes'), null, 'pressing the pins launcher again closes the details')
+  click(toggle(dom)); await flush()
+  assert.equal(toggle(dom).getAttribute('aria-expanded'), 'true')
+  assert.equal(doc(dom).querySelector('.tameru-head .tameru-chev'), null, 'no chevron toggle')
+  assert.equal(doc(dom).querySelector('.tameru-sub').tagName, 'BUTTON', 'the status phrase is a button that opens the results')
+  click(toggle(dom)); await flush()
+  assert.equal(toggle(dom).getAttribute('aria-expanded'), 'false')
+  click(doc(dom).querySelector('.tameru-sub')); await flush()
+  assert.equal(toggle(dom).getAttribute('aria-expanded'), 'true')
+})
+
+test('the Keep control is the shared lock, outline until kept and filled after; Restore is the shared undo', async () => {
+  const { sdk, calls } = makeSdk()
+  const edits = { [ref(1)]: { kind: 'keep', state: 'applied', reason: '' } }
+  const { dom } = await boot(sdk, calls, editPayload({}, edits))
+  const filled = svg => svg.querySelectorAll('path[fill="currentColor"]').length
+  assert.equal(filled(rowButton(dom, 0, 'Keep').querySelector('svg')), 0)
+  assert.equal(filled(rowButton(dom, 1, 'Release').querySelector('svg')), 1)
+  assert.equal(rowButton(dom, 0, 'Keep').querySelector('svg').getAttribute('viewBox'), '0 0 16 16')
+  assert.equal(rowButton(dom, 0, 'Restore').querySelector('svg').getAttribute('viewBox'), '0 0 16 16')
 })
