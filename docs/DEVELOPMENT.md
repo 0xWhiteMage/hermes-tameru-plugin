@@ -97,6 +97,21 @@ git diff tests/eval/baselines    # read the diff before committing it
 `stock.json` is compared exactly; `tameru_1_3.json` only while the vendored engine reports 1.3.x (skipped now). Timing keys
 (`engine_seconds`, per-operation seconds) change on every run and are not compared.
 
+### Proving a vendored-engine or acceptance change leaves the replay unchanged
+
+Hermes accepts an engine result only through the engine's `decide()` under `HERMES_POLICY` (`tests/test_acceptance_via_decide.py` fails on any other
+risk, confidence or fingerprint threshold in `engine.py`). To show a change like that leaves the replay byte-identical, write the product arm's rows before and after
+(about 4 minutes each; the stock arm does not depend on the engine) and compare the `rows`; only `meta.product`, the hash of the plugin's source, differs:
+
+```bash
+TAMERU_MATRIX_OUT=before.json TAMERU_MATRIX_ARMS=tameru_1_4_product TAMERU_MATRIX_SEEDS=0,1,2,3,4,5 python -m pytest -q -p no:cacheprovider tests/eval/test_matrix_run.py -k write_the_matrix
+# change, then the same command with TAMERU_MATRIX_OUT=after.json
+python -c "import json; print(json.load(open('before.json'))['rows'] == json.load(open('after.json'))['rows'])"
+```
+
+The scenarios, windows and seeds default to the development set (`oncall`, `default`, `refactor`, `smallrows`, `i18n`, `bursty` at 64K, 128K, 200K, seeds 0-5; 108 rows per arm).
+Never include the holdout or blind shapes in such a comparison.
+
 ## The gate report
 
 `python tests/eval/gate.py` runs the stub suite, the real-Hermes suite (when `HERMES_REPO_ROOT` is set) and the Desktop panel tests (set

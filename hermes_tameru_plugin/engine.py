@@ -121,6 +121,7 @@ from .tameru.compress_context import (
     error_fingerprints,
     extract_evidence_lines,
 )
+from .tameru.decide import HERMES_POLICY, decide
 from .telemetry import Telemetry
 
 REREAD_GAP = 5          # a ref's re-read counts as a signal at most once per this many turns (a forced loop of re-reads cannot widen the tail)
@@ -140,7 +141,7 @@ _EXEMPT_TOOLS = frozenset({
     "skill_view", "skills_list", "skill_manage", "clarify", "todo_list", "todo", "memory",
     "session_search", EXPAND_TOOL_NAME, READ_ORIGINAL_TOOL_NAME, "delegate_task", "cronjob_manage", "process_manage",
 })
-_RISK_ORDER = {"low": 0, "medium": 1, "high": 2}
+_RISK_CEILINGS = ("low", "medium", "high")           # the values ``max_risk`` may take; the engine's ``decide`` applies the ceiling
 _BODYLESS = frozenset({"header", "superseded"})   # rungs that keep no text of the original
 _ERROR_LINE_CHARS = 300                            # an errors row keeps at most this much of one exemplar line
 _FIXED_RETRIES = 2                                 # fixed-budget extract attempts after an oversized one
@@ -162,6 +163,15 @@ class _Extract(NamedTuple):
     text: str
     fail_open: bool
     risk: str | None
+
+    # The attribute names ``decide`` reads on a ``CompressResult``.
+    @property
+    def compressed_text(self) -> str:
+        return self.text
+
+    @property
+    def compression_risk(self) -> str | None:
+        return self.risk
 
 
 class _Memo:
@@ -1553,13 +1563,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         return out
 
     def _acceptable(self, out: _Extract | None, fingerprints: dict[str, str]) -> bool:
-        """Not fail-open, within ``max_risk`` and an exemplar of every error of the original kept."""
-        if out is None or out.fail_open:
-            return False
-        ceiling = _RISK_ORDER.get(self._settings.max_risk, 1)
-        if _RISK_ORDER.get(out.risk or "", 2) > ceiling:
-            return False
-        return fingerprints.keys() <= error_fingerprints(out.text, status_rows=False).keys()
+        """The engine's ``decide`` under ``HERMES_POLICY`` (not fail-open, within ``max_risk``, every error of the original kept)."""
+        ceiling = self._settings.max_risk if self._settings.max_risk in _RISK_CEILINGS else "medium"
+        return decide(out, dataclass_replace(HERMES_POLICY, max_risk=ceiling), fingerprints=fingerprints).accept
 
     @staticmethod
     def _body_row(
