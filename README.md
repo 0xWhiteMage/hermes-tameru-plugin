@@ -26,7 +26,7 @@ changes) uses the [Tameru engine](https://github.com/0xWhiteMage/tameru-compacti
 
 - **Per-chat records live in Hermes' public plugin state**, not in its private session storage: pins, Keeps, policy choices and self-tuning survive a restart through `ctx.state`. A chat unused for 90 days is cleared and only the newest 400 are kept. Records from 1.9.0 are not migrated: re-add pins and Keeps.
 - **The panel's hints use Hermes' own tooltip** when the app provides one (Hermes 0.23.0 and later); older apps keep the panel's own card.
-- **Apache-2.0**, matching the engine. The engine itself is unchanged (1.9.0).
+- **Apache-2.0**, matching the engine. The engine is vendored at 1.10.0 (replay-measured; the plugin's own replay numbers are in the changelog).
 
 Everything below was introduced in 1.9.0 and works the same way:
 

@@ -5,7 +5,7 @@ All notable changes to this project are documented here. The format follows
 
 ## [1.10.0] - Unreleased
 
-Removes three things that showed no measured benefit, as announced under *Deprecated* in 1.9.0. The engine is unchanged (1.9.0).
+Removes three things that showed no measured benefit, as announced under *Deprecated* in 1.9.0, and vendors Tameru engine 1.10.0.
 
 ### Added
 - **Benchmarks you can reproduce:** `tests/eval/stats.py` (paired differences, bootstrap and cluster-bootstrap intervals), `matrix.py` (byte-reproducible result rows and a fixed promotion gate), committed result rows
@@ -40,7 +40,15 @@ Removes three things that showed no measured benefit, as announced under *Deprec
   ("AI" and "context", never "working memory"); a test keeps the strings and drawings identical to the engine repo's `docs/ui-vocabulary.json` and `docs/ui-icons.json`
   (copies live in `tests/desktop/`). The results table and the viewer are unchanged.
 - A configured `adaptive_host` or `learned_priors` is named in `get_status()["tameru"]["warnings"]` ("removed in 1.10.0; ignored") instead of "unknown setting".
-- The plugin is version 1.10.0 (engine 1.9.0); `/tameru stats` shows both.
+- **Engine 1.10.0 is vendored** (commit `bbb0c38`). Hermes now accepts or declines an extract only through the engine's `decide()` under `HERMES_POLICY`
+  (`tests/test_acceptance_via_decide.py` fails on any other risk, confidence or fingerprint threshold in `engine.py`); the ladder and the fixed-budget retry loop stay in the plugin.
+  On the way there the interface-only engine step (`773c347`) gave byte-identical replay rows (108 development rows). The engine's measurements are by replay on its own
+  benchmark, not against a real model's bill: see the engine's `docs/RESULTS-1.10.0.md`. This plugin's own replay measurement (development shapes `default`, `oncall`, `refactor`, `smallrows`, `i18n`, `bursty`
+  at 64K, 128K and 200K, seeds 0-5, 1.10.0 against the previous vendored engine 1.9.0, paired cluster bootstrap over the six shapes, replay only, no holdout shape looked at): effective cost
+  (`effective_real`) -0.05% [-0.18, +0.01] pooled at 128K and 200K and -0.00% [-0.01, +0.01] at 64K; facts kept, facts held and error templates kept unchanged in every row; cache breaks unchanged.
+  The only shapes that moved by more than 0.1% are `oncall` (-0.35%), `default` (-0.14%) and `refactor` (-0.11%), all at 200K and all cheaper; `refactor` at 64K and `smallrows` are exactly 0. In the 30-turn replay `oncall` at 64K, the equal-gates plugin now costs less than stock, so that recorded loss is removed.
+  Calls with `pin_patterns` keep 1.9.0 behaviour for the structural features by design.
+- The plugin is version 1.10.0 (engine 1.10.0); `/tameru stats` shows both.
 
 ## [1.9.1] - 2026-11-12
 
