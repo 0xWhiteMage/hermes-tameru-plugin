@@ -27,7 +27,7 @@ tameru = "hermes_tameru_plugin"
 packages = ["hermes_tameru_plugin", "hermes_tameru_plugin.tameru"]
 
 [tool.setuptools.package-data]
-hermes_tameru_plugin = ["plugin.yaml", "desktop/*.js"]
+hermes_tameru_plugin = ["plugin.yaml", "desktop/*.js", "tameru/*.json"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

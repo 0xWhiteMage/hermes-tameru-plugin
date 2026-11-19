@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import bisect
 import collections
+import contextvars
 import functools
 import hashlib
 import json
@@ -41,12 +42,14 @@ from .agent_formats import (
 from .contract_gates import (
     GENERIC_WORDS,
     distinctive_query_terms,
+    han_units,
     query_has_distinctive_selectors,
+    query_profile,
 )
 from .folding import fold_lossless, json_brief, mask_template
 from .format_adapters import FILLER_WORDS
-from .gap_kind import call_gap_marker
-from .markers import REDACTED_MARKER
+from .gap_kind import call_gap_marker, gap_accepts_kind
+from .markers import REDACTED_MARKER, marker_name as _marker_name
 from .industrial import IndustrialLimits, IndustrialResult, industrial_preprocess
 from .structured_reports import REPORT_FORMATS, loads_for_rewrite, report_format
 from .supersession import apply_supersession
@@ -74,9 +77,9 @@ except Exception:
     DEFAULT_CCR_DIR = Path(tempfile.gettempdir()) / ".tameru" / "cache" / "context-compress-ccr"
 # Engine release this module ships in; the release bump keeps it in step with
 # pyproject.toml and src/tameru/__init__.py.
-ENGINE_VERSION = "1.9.0"
-# Shape of CompressResult for hosts: 1 until the additive fields land (see docs/1.10.0-BUILD-NOTES.md).
-RESULT_SCHEMA = 1
+ENGINE_VERSION = "1.10.0"
+# Shape of CompressResult for hosts: 2 since 1.10.0 (confidence_basis, stable_key, dropped, result_schema, preset).
+RESULT_SCHEMA = 2
 CCR_TTL_SECONDS = 6 * 60 * 60
 CCR_MAX_CLOCK_SKEW_SECONDS = 5 * 60
 FREEZE_MAX_DECISIONS = 4096
@@ -343,7 +346,7 @@ _TERM_TOKEN_RE = re.compile(
     r"[A-Za-z_\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF]"
     r"[A-Za-z_\u00C0-\u00D6\u00D8-\u00F6\u00F8-\u024F\u1E00-\u1EFF0-9\u0300-\u036F]*"
     r"|\d+(?:\.\d+)?|"
-    r"[\u4e00-\u9fff]|"
+    r"[\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\U00020000-\U0002fa1f]|"
     r"[\u3040-\u30ff]{2,}|[\uac00-\ud7a3]{2,}|"
     r"[\u0600-\u06ff]{2,}|[\u0e00-\u0e7f]{2,}"
 )
@@ -383,6 +386,23 @@ def _finalize_reused_probe(res, query_as_given, anchor_lines) -> "CompressResult
     return dataclasses.replace(res, receipt=receipt, compression_risk=new_risk)
 
 
+def _rebase_anchored(res, caller_text, caller_query):
+    """A reused probe ran with the anchors as its query"""
+    extra: dict[str, Any] = {}
+    if not res.fail_open:
+        # The probe ran with the anchors as its query, so it rated itself on recall of terms taken from the text.
+        # The result's confidence rests on the anchors, i.e. on the error fingerprints it kept.
+        source = strip_ansi(_norm_newlines(caller_text))
+        basis = _query_basis(caller_query, source, anchored=True)
+        extra = {
+            "confidence_basis": basis,
+            "confidence": round(
+                _compute_confidence(basis=basis, compressed=res.compressed_text, fail_open=False, original=source,
+                                    recall=float(res.confidence or 0.0)), 3),
+        }
+    return dataclasses.replace(res, **extra)
+
+
 @dataclass
 class CompressResult:
     compressed_text: str
@@ -404,6 +424,12 @@ class CompressResult:
     reasons: list[str] = field(default_factory=list)
     verifier: Optional[dict[str, Any]] = None
     receipt: Optional[dict[str, Any]] = None
+    # 1.10.0 (result schema 2), all additive:
+    confidence_basis: str = "none"  # what the confidence rests on: see contract_gates.QUERY_BASES
+    stable_key: str = ""  # sha256(engine version, text, query)[:16]: the same call has the same key
+    dropped: tuple = ()  # up to 3 (category, line_count, first_locator) of what the output left out, largest first
+    result_schema: int = RESULT_SCHEMA
+    preset: Optional[str] = None  # the named option set the call used, when the host says so
 
     def __post_init__(self) -> None:
         self.tokens_saved = max(0, self.original_tokens - self.kept_tokens)
@@ -492,10 +518,19 @@ def _norm_newlines(text: str) -> str:
 _CL_HEADING_RE = re.compile(r"^#{1,6}\s+")
 _CL_FENCE_RE = re.compile(r"^(```|~~~)")
 _CL_TRACE_RE = re.compile(
-    r"^(Traceback|Caused by:|Error:|Exception:|[A-Za-z]+Error\b|at\s+\S+\(|\s*File\s+\".+\", line \d+)"
+    r"^(Traceback|Caused by:|Error:|Exception:|[A-Za-z]+Error\b|at\s+\S+\(|\s*File\s+\".+\", line \d+"
+    # 1.10.0 (structure): per-language chain heads and frames. Packaged Java/.NET exception types,
+    # "Exception in thread", .NET "Unhandled exception." and "---> inner", Python chaining sentences,
+    # Go goroutines and panics, JS "at fn (file:line:col)" frames and "[cause]".
+    r"|Exception in thread\b|Unhandled exception\.|--->\s|Suppressed:|During handling of the above"
+    r"|The above exception was|goroutine \d+ \[|panic:|\[cause\]"
+    r"|from\s+\S+:\d+:in\s|[\w./-]+:\d+:in\s+[`']"
+    r"|#\d+\s+\S+\(\d+\):|#\d+\s+\{main\}|Stack trace:$"
+    r"|(?:[A-Za-z_$][\w$]*\.)+[A-Za-z_$][\w$]*(?:Exception|Error)\b(?::|\s|$)"
+    r"|at\s+(?:async\s+)?(?:new\s+)?[^\s(]+\s\([^()\s]*:\d+:\d+\)|at\s+(?:async\s+)?\S+:\d+:\d+$)"
 )
 _CL_LOG_RE = re.compile(
-    r"^\[?(20\d\d-\d\d-\d\d|20\d\d/\d\d/\d\d[ T]\d\d:\d\d:\d\d|\d\d:\d\d:\d\d|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) [A-Z][a-z]{2} [ \d]\d \d\d:\d\d:\d\d|INFO|WARN|WARNING|ERROR|DEBUG|TRACE|ERR|FAIL|FATAL|OK)\]?"
+    r"^\[?(20\d\d-\d\d-\d\d|20\d\d/\d\d/\d\d[ T]\d\d:\d\d:\d\d|\d\d:\d\d:\d\d|(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun) [A-Z][a-z]{2} [ \d]\d \d\d:\d\d:\d\d|INFO|WARN|WARNING|ERROR|DEBUG|TRACE|ERR|FAIL|FATAL|OK|(?:info|warn|fail|crit|dbug|trce):)\]?"
 )
 _CL_LOGFMT_RE = re.compile(
     r"^(?:ts|time|timestamp|t)=[^\s]+(?:\s+level=[A-Za-z0-9_.]+|\s+.*\slevel=[A-Za-z0-9_.]+)"
@@ -539,7 +574,7 @@ _REDIS_LINE_RE = re.compile(r"^\d+:[XCSM] \d{1,2} [A-Z][a-z]{2}(?: \d{4})? \d\d:
 
 
 def classify_line(line: str) -> str:
-    t = line.strip()
+    t = _nfkc(line.strip())  # 1.10.0: full-width text classifies as the ASCII it looks like
     if not t:
         return "blank"
     if _CL_HEADING_RE.match(t):
@@ -827,7 +862,7 @@ def _without_zero_counts(s: str) -> str:
 
 def _is_level_error_line(line: str) -> bool:
     """A level-tagged ERROR/FATAL/CRITICAL/PANIC/FAIL* log line."""
-    return _ERR_LEVEL_RE.search(_without_zero_counts(line[:_RX_LINE_CAP])) is not None
+    return _ERR_LEVEL_RE.search(_without_zero_counts(_nfkc(line[:_RX_LINE_CAP]))) is not None
 
 
 # Every way a line can be an error line contains one of these literals (the
@@ -840,6 +875,11 @@ _ERROR_LINE_HINT_RE = re.compile(
 
 
 _DIAG_EXEMPLAR_CAP = 32
+# An indented "at <callee> (<file>:<line>)" / "at <callee> in <file>:line N" frame (Java, .NET, JS).
+_STACK_FRAME_LINE_RE = re.compile(
+    r"^[ \t]+at\s+\S[^\n]*?(?:\([^()\n]*:\d+(?::\d+)?\)|\bin\s+\S+:line\s+\d+|:\d+:\d+$)"
+    r"|^#\d+\s+(?:\S+\(\d+\):|\{main\})"
+)
 
 
 def _is_error_line(line: str) -> bool:
@@ -847,7 +887,11 @@ def _is_error_line(line: str) -> bool:
     ``"level": "error"``), ``XxxError:``/``Exception:`` head, traceback head or
     Go panic, or a multi-language compiler/test/runtime diagnostic
     (agent_formats.DIAGNOSTIC_LINE_RE) — the lines :func:`error_fingerprints` keys on."""
-    capped = line[:_RX_LINE_CAP]
+    capped = _nfkc(line[:_RX_LINE_CAP])
+    if _STACK_FRAME_LINE_RE.match(capped) is not None:
+        # 1.10.0: an indented stack FRAME ("    at pkg.Cls.m(File.java:12)") is a location, not an error: the
+        # exception head above it is the error. Frames fold; the heads they hang from are what must survive.
+        return False
     if is_diagnostic_line(capped) and _ERR_NEGATED_RE.search(capped) is None:
         return True
     if _ERROR_LINE_HINT_RE.search(capped) is None:
@@ -877,7 +921,7 @@ def _error_fp(line: str) -> str:
     that differ only in digit placement still collide), digits -> ``#``,
     whitespace collapsed, capped at 160 chars.
     """
-    s = _COUNT_PREFIX_RE.sub("", line[:_RX_LINE_CAP], count=1).lower()
+    s = _COUNT_PREFIX_RE.sub("", _nfkc(line[:_RX_LINE_CAP]), count=1).lower()
     return mask_template(s)[:_FINGERPRINT_CAP]
 
 
@@ -933,7 +977,221 @@ def _error_fingerprints_cached(text: str) -> dict[str, str]:
 _TRACE_KEEP_HEAD = 3  # exception head + outermost frames (Java/Go/JS put the head first)
 _TRACE_KEEP_TAIL = 3  # innermost frame + source line + exception (Python), or the Caused-by root (Java)
 
-def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
+# ---------------------------------------------------------------------------
+# 1.10.0 (structure): per-cause chain folding. A stack trace run is a sequence
+# of "other" lines (exception heads, "Caused by:", "---> inner", "During
+# handling...", "goroutine N [...]", "... N more", messages) and FRAME groups
+# (a frame line plus the more-indented lines that belong to it: a Python source
+# line, a Go file:line). Heads, messages and "... N more" are never dropped. A
+# run of at least _FRAME_FOLD_MIN consecutive frame groups keeps its first
+# frame, its first frame outside the framework, its last frame (and up to the
+# remaining slots of query-matching frames) and one counted marker for the rest.
+# A folded run keeps at most _FRAME_FOLD_MIN - 1 frames, so folding is idempotent.
+# ---------------------------------------------------------------------------
+_FRAME_FOLD_MIN = 5
+# Lines of the blocks a caller pinned (pin_patterns / pin_recent) for the call in progress. While a call has pins the
+# structural pass, build-noise counting, built-in anchors and the early exit are OFF: the pinned ORIGINAL blocks must come
+# back verbatim (the pinned-source cost gate), and folding moves block boundaries. Never read inside memoised functions.
+_PINNED_LINES: "contextvars.ContextVar[frozenset]" = contextvars.ContextVar("tameru_pinned_lines", default=frozenset())
+_FRAME_HIT_SLOTS = 1
+_STRUCT_COLLAPSE_MIN = 12  # structural (query-less) pass: templates seen fewer times stay verbatim
+_FRAME_START_RE = re.compile(r"^\s*(?:at\s+\S|File\s+\"|from\s+\S+:\d+|#\d+\s+\S+\(\d+\):|#\d+\s+\{main\})")
+_GO_FRAME_FUNC_RE = re.compile(r"^[\w./*()\[\]{}-]+\(.*\)$")
+_FRAME_TAIL_RE = re.compile(r"^\s*(?:\.\.\.\s+\d+\s+(?:more|common frames omitted)\b|---\s*End of inner exception)")
+_FRAMEWORK_RE = re.compile(
+    r"org\.springframework"
+    r"|(?<![\w.])(?:java|javax|jdk|sun|System|Microsoft|scala|kotlin|kotlinx|akka|jakarta)\."
+    r"|node_modules|site-packages|/gems/|/lib/ruby/|/vendor/"
+    r"|(?<![\w.-])(?:runtime|internal)/"
+)
+_FRAMES_FOLDED_RE = re.compile(r"^\s*\.\.\. \d+ frames omitted$")
+
+
+def _is_framework_frame(frame: str) -> bool:
+    """A frame inside the language runtime or a framework (so not the caller's own code)."""
+    return _FRAMEWORK_RE.search(frame[:_RX_LINE_CAP]) is not None
+
+
+_CALL_FRAME_RE = re.compile(r"^\s+[\w./$*()\[\]-]+\([^()\n]*:\d+\)")
+
+
+def _is_frame_line(line: str) -> bool:
+    """A stack-frame line (Java/.NET/JS ``at ...``, Python ``File "..."``, Ruby ``from f:1``, indented ``fn(file:line)``); not an exception head or a ``... N more`` tail."""
+    capped = line[:_RX_LINE_CAP]
+    return _FRAME_START_RE.match(capped) is not None or _CALL_FRAME_RE.match(capped) is not None
+
+
+def _indent_of(line: str) -> int:
+    return len(line) - len(line.lstrip())
+
+
+# An indented line that starts a new cause, not a frame: "---> inner", "Caused by:", "[cause]: ...", an exception
+# type with a message, "Suppressed:". Any other indented line of a trace run is a frame of a format the pass does
+# not know (Swift, Haskell, Dart ...) and folds like one.
+_INDENTED_HEAD_RE = re.compile(
+    r"(?:--->|Caused by:|Suppressed:|\[cause\]|Unhandled exception|Exception in thread|Traceback|During handling|The above exception)"
+    r"|(?:[A-Za-z_$][\w$]*\.)*[A-Za-z_$][\w$]*(?:Exception|Error)\b(?::|\s|$)"
+)
+
+
+def _starts_frame(line: str) -> bool:
+    """A frame the pass may fold: a known frame shape, or any other indented line that is not a head or tail marker."""
+    if _is_frame_line(line):
+        return not _FRAME_TAIL_RE.match(line)
+    return (
+        line[:1] in (" ", "\t") and bool(line.strip()) and _FRAME_TAIL_RE.match(line) is None
+        and _FRAMES_FOLDED_RE.match(line) is None
+        and _INDENTED_HEAD_RE.match(line.lstrip()[:_RX_LINE_CAP]) is None
+    )
+
+
+def _frames_folded_marker(count: int, indent: str) -> str:
+    return f"{indent}... {count} frames omitted"
+
+
+def _fold_trace_run(
+    run: list[str], src: list[int], idx: list[int], hits: set[int]
+) -> tuple[list[str], list[int]]:
+    """Fold the frame runs of one stack-trace run. ``hits`` holds the source indices a query selects (kept first)."""
+    n = len(run)
+    groups: list[tuple[int, int]] = []  # (start, end) of a frame group; other lines are not in any group
+    owner = [-1] * n
+    k = 0
+    while k < n:
+        line = run[k]
+        is_frame = _starts_frame(line)
+        if not is_frame and _GO_FRAME_FUNC_RE.match(line) and k + 1 < n and _indent_of(run[k + 1]) > _indent_of(line) \
+                and not run[k + 1].lstrip().startswith(("at ", "...")):
+            is_frame = True
+        if not is_frame:
+            k += 1
+            continue
+        end = k + 1
+        base = _indent_of(line)
+        while end < n and _indent_of(run[end]) > base and not _is_frame_line(run[end]) \
+                and not _FRAME_TAIL_RE.match(run[end]) and run[end].strip():
+            end += 1
+        for j in range(k, end):
+            owner[j] = len(groups)
+        groups.append((k, end))
+        k = end
+    out: list[str] = []
+    out_src: list[int] = []
+    pos = 0
+    g = 0
+    while pos < n:
+        if owner[pos] < 0:
+            out.append(run[pos])
+            out_src.append(src[pos])
+            pos += 1
+            continue
+        # a maximal run of consecutive frame groups
+        first = g
+        last = g
+        while last + 1 < len(groups) and groups[last + 1][0] == groups[last][1]:
+            last += 1
+        span = groups[first : last + 1]
+        total = len(span)
+        if total < _FRAME_FOLD_MIN:
+            keep = set(range(total))
+        else:
+            keep = {0, total - 1}
+            for j, (a, _b) in enumerate(span):
+                if not _is_framework_frame(run[a]):
+                    keep.add(j)  # the first frame outside the framework (the caller's own code)
+                    break
+            room = min(_FRAME_FOLD_MIN - 1 - len(keep), _FRAME_HIT_SLOTS)  # query-matching frames kept
+            if room > 0:
+                for j, (a, _b) in enumerate(span):
+                    if room <= 0:
+                        break
+                    if j not in keep and idx[a] in hits:
+                        keep.add(j)
+                        room -= 1
+        dropped = 0
+        drop_start = 0
+        for j, (a, b) in enumerate(span):
+            if j in keep:
+                if dropped:
+                    if dropped == 1:
+                        a0, b0 = span[j - 1]
+                        out.extend(run[a0:b0])
+                        out_src.extend(src[a0:b0])
+                    else:
+                        a0 = span[drop_start][0]
+                        out.append(_frames_folded_marker(dropped, run[a0][: _indent_of(run[a0])]))
+                        out_src.append(src[a0])
+                    dropped = 0
+                out.extend(run[a:b])
+                out_src.extend(src[a:b])
+            else:
+                if dropped == 0:
+                    drop_start = j
+                dropped += 1
+        if dropped:  # cannot happen (the last frame is always kept); kept for safety
+            a0 = span[drop_start][0]
+            out.append(_frames_folded_marker(dropped, run[a0][: _indent_of(run[a0])]))
+            out_src.append(src[a0])
+        pos = span[-1][1]
+        g = last + 1
+    return out, out_src
+
+
+# 1.10.0 (build output): lines that only say "still working" -- compile / link / resolve / download / install
+# steps and passing-test rows. A run of them becomes "[×N] <first line>"; failures, diagnostics, resolver
+# conflicts ("npm ERR!", "ERROR: Cannot install") and summary lines are never noise.
+_BUILD_NOISE_RE = re.compile(
+    r"^\s*(?:"
+    r"(?:Compiling|Building|Restoring|Linking|Generating|Copying|Resolving|Fetching|Unpacking|Preparing|Scanning|Packaging|Transpiling|Bundling)\s+\S"
+    r"|\[\s*\d+%\]\s+(?:Building|Linking|Scanning|Generating)\b"
+    r"|\[\d+/\d+\]\s+(?:Building|Linking|Scanning|Generating|Compiling|CXX|CC|AR|LINK)\b"
+    r"|[\w./\\-]+\.(?:cpp|cc|cxx|c|cs|java|kt|go|rs|ts)\s*$"
+    r"|(?:clang|clang\+\+|gcc|g\+\+|cc|c\+\+|javac|cl)\S*\s+(?:-c|/c)\s"
+    r"|(?:Collecting|Downloading|Downloaded|Using cached|Requirement already satisfied|Obtaining|Building wheel|Created wheel|Stored in directory|Looking in indexes)\b"
+    r"|npm (?:WARN deprecated|http fetch|timing|notice)\b"
+    r"|\[INFO\]\s+(?:Downloading|Downloaded)\s+from\b"
+    r"|(?:PASS|PASSED|Passed|ok)\s+\S"
+    r"|(?:✓|✔|√)\s*\S"
+    r"|---\s+PASS:\s"
+    r"|test\s+\S+\s+\.\.\.\s+ok$"
+    r")"
+)
+_BUILD_NOISE_RUN_MIN = 4
+
+
+def _is_build_noise_line(line: str) -> bool:
+    if _BUILD_NOISE_RE.match(line[:_RX_LINE_CAP]) is None:
+        return False
+    low = line.casefold()
+    return not ("error" in low or "fail" in low or "warn" in low and "deprecated" not in low)
+
+
+def _fold_build_noise(lines: list[str]) -> list[str]:
+    """Replace each run of at least ``_BUILD_NOISE_RUN_MIN`` consecutive build-noise lines by ``[×N] <first line>``.
+    Idempotent (a marker line is not noise) and lossless for everything that is not noise."""
+    out: list[str] = []
+    n = len(lines)
+    i = 0
+    while i < n:
+        if _is_build_noise_line(lines[i]):
+            j = i + 1
+            while j < n and _is_build_noise_line(lines[j]):
+                j += 1
+            if j - i >= _BUILD_NOISE_RUN_MIN:
+                out.append(f"[\u00d7{j - i}] {lines[i].strip()}")
+                i = j
+                continue
+        out.append(lines[i])
+        i += 1
+    return out
+
+
+def structural_log_pass(lines: list[str]) -> list[str]:
+    """The always-on STRUCTURAL log pass (1.10.0): progress removal, ``[×N]`` template collapse with the last instance kept, and per-cause stack folding. It is :func:`preprocess_logs` with no query: it never drops a distinct error line, an exception head, a ``Caused by`` / inner-exception message, ``... N more``, or the first frame outside the framework, and it is idempotent."""
+    return preprocess_logs(_fold_build_noise(lines), "", structural=True)
+
+
+def preprocess_logs(lines: list[str], query: str = "", *, structural: bool = False) -> list[str]:
     """v0.9.0 log preprocessing (NTK layer1 filter adoption):
 
     - progress bars / build spam deleted (N4)
@@ -962,50 +1220,22 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
         try:
             return fp_memo[line]
         except KeyError:
-            fp = fp_memo[line] = _log_fingerprint(line)
+            fp = _log_fingerprint(line)
+            if fp is not None and structural and not query_selectors and _is_error_line(line):
+                # 1.10.0: without a query, two error lines are the same line only when their text is
+                # identical apart from the leading timestamp (ids, keys and values are the evidence).
+                fp = "!" + line[_lead_ts_end(line):].strip()[:_FINGERPRINT_CAP]
+            fp_memo[line] = fp
             return fp
 
     def flush_trace() -> None:
         nonlocal trace, trace_src, trace_idx
         if not trace:
             return
-        if len(trace) <= _TRACE_KEEP_HEAD + _TRACE_KEEP_TAIL:
-            out.extend(trace)
-            out_src.extend(trace_src)
-        else:
-            out.extend(trace[:_TRACE_KEEP_HEAD])
-            out_src.extend(trace_src[:_TRACE_KEEP_HEAD])
-            tail_start = len(trace) - _TRACE_KEEP_TAIL
-            middle = trace[_TRACE_KEEP_HEAD:tail_start]
-            middle_src = trace_src[_TRACE_KEEP_HEAD:tail_start]
-            middle_idx = trace_idx[_TRACE_KEEP_HEAD:tail_start]
-
-            matched = [idx in query_match_source_indices for idx in middle_idx]
-            if sum(matched) > _TRACE_KEEP_HEAD + _TRACE_KEEP_TAIL:
-                out.append(f"  ... {len(middle)} frames omitted")
-                out_src.append(middle_src[0])
-            else:
-                omitted_run = 0
-                omitted_start_src = 0
-                for frame, src, idx in zip(middle, middle_src, middle_idx):
-                    if idx in query_match_source_indices:
-                        if omitted_run:
-                            out.append(f"  ... {omitted_run} frames omitted")
-                            out_src.append(omitted_start_src)
-                            omitted_run = 0
-                        out.append(frame)
-                        out_src.append(src)
-                    else:
-                        if omitted_run == 0:
-                            omitted_start_src = src
-                        omitted_run += 1
-
-                if omitted_run:
-                    out.append(f"  ... {omitted_run} frames omitted")
-                    out_src.append(omitted_start_src)
-
-            out.extend(trace[-_TRACE_KEEP_TAIL:])
-            out_src.extend(trace_src[-_TRACE_KEEP_TAIL:])
+        # 1.10.0: per-cause chain folding (heads, messages and "... N more" are kept; frame runs fold).
+        folded, folded_src = _fold_trace_run(trace, trace_src, trace_idx, query_match_source_indices)
+        out.extend(folded)
+        out_src.extend(folded_src)
         trace = []
         trace_src = []
         trace_idx = []
@@ -1080,6 +1310,9 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
         fp = fingerprint(line)
         if fp:
             short_counts[fp] = short_counts.get(fp, 0) + 1
+    # 1.10.0: without a query the pass cannot tell which rare variant matters, so a template seen fewer than
+    # _STRUCT_COLLAPSE_MIN times stays verbatim; only a dominant template folds into "[×N] exemplar + [last]".
+    collapse_floor = _STRUCT_COLLAPSE_MIN if structural and not query_selectors else 0
 
     i = 0
     n = len(kept_lines)
@@ -1104,7 +1337,7 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
             i += 1
             continue
         fp = fingerprint(line)
-        if fp and (_template_long_enough(line) or (short_counts.get(fp, 0) >= 5 and sum(ch.isalpha() for ch in line) >= 2 and "=" not in line)):
+        if fp and short_counts.get(fp, 0) >= collapse_floor and (_template_long_enough(line) or (short_counts.get(fp, 0) >= 5 and sum(ch.isalpha() for ch in line) >= 2 and "=" not in line)):
             if fp in exemplar_idx:
                 seen[fp] += 1
                 last_seen[fp] = line
@@ -1152,7 +1385,14 @@ def preprocess_logs(lines: list[str], query: str = "") -> list[str]:
     def has_error_signal(text: str) -> bool:
         return bool(_ERROR_RE.search(text))
 
-    orig_errors = [(i, ln) for i, ln in enumerate(lines) if has_error_signal(ln)]
+    # 1.10.0: a stack FRAME that merely mentions "Error"/"Exception" in a class name is not an error line
+    # (folding it is the point), and a trust-risk line (injection-shaped text) is never restored as one.
+    orig_errors = [
+        (i, ln)
+        for i, ln in enumerate(lines)
+        if has_error_signal(ln) and not _is_frame_line(ln) and not _FRAMES_FOLDED_RE.match(ln)
+        and not _is_trust_risk_line(ln)
+    ]
     if orig_errors:
         present_lines = set(result)
         present_fps: set[str] = set()
@@ -1650,6 +1890,11 @@ def _normalise_instruction_text(text: str) -> str:
     )
 
 
+def _is_trust_risk_line(line: str) -> bool:
+    """Injection-shaped line (``_TRUST_RISK_RE`` on the normalised text). Never an anchor, a fingerprint or a restored error."""
+    return _TRUST_RISK_RE.search(_normalise_instruction_text(line[:_RX_LINE_CAP])) is not None
+
+
 def preprocess_filler_comments(text: str, query: str) -> str:
     """Drop `-- filler` / `# filler` comments unless the query names them."""
     if "filler" in (query or "").casefold():
@@ -2025,8 +2270,33 @@ def _looks_like_repetitive_tool_output(lines: list[str]) -> bool:
     return repeated >= 0.5 * len(non_blank)
 
 
+_QUERY_MEMO_CHARS = 8192  # was 2048: a tool call plus a 2000-character user message is longer than that
+
+
+def _is_han_ord(o: int) -> bool:
+    """Han: unified, Extension A, compatibility ideographs, Extension B and later (supplementary planes)."""
+    return 0x3400 <= o <= 0x4DBF or 0x4E00 <= o <= 0x9FFF or 0xF900 <= o <= 0xFAFF or 0x20000 <= o <= 0x2FA1F
+
+
+def _is_syllabic_ord(o: int) -> bool:
+    """A script whose terms match by substring (no word boundaries): Han, kana, hangul, Arabic, Thai."""
+    return (
+        _is_han_ord(o)
+        or 0x3040 <= o <= 0x30FF
+        or 0xAC00 <= o <= 0xD7A3
+        or 0x0600 <= o <= 0x06FF
+        or 0x0E00 <= o <= 0x0E7F
+    )
+
+
+def _nfkc(text: str) -> str:
+    """NFKC of ``text`` (identity on ASCII). Classifiers, fingerprints and term extraction read this view, so a
+    full-width ``ＥＲＲＯＲ：`` is the ``ERROR:`` it looks like; the output is always the raw slices."""
+    return text if text.isascii() else unicodedata.normalize("NFKC", text)
+
+
 def _extract_terms(query: str) -> list[str]:
-    if type(query) is str and len(query) <= 2048:
+    if type(query) is str and len(query) <= _QUERY_MEMO_CHARS:
         return list(_extract_terms_cached(query))
     return _extract_terms_scan(query)
 
@@ -2039,20 +2309,15 @@ def _extract_terms_cached(query: str) -> tuple[str, ...]:
 def _extract_terms_scan(query: str) -> list[str]:
     terms: list[str] = []
     seen: set[str] = set()
-    for raw in _TERM_TOKEN_RE.findall(query or ""):
+    query = _split_cjk_edges(_nfkc(query or ""))
+    for raw in _TERM_TOKEN_RE.findall(query):
         term = raw.lower().strip("؟?!.،,;:…\"'()[]")
         if not term:
             continue
-        # CJK characters are single tokens (no word boundaries in CJK).
-        # Accept them even though they're 1 char — they carry meaning.
         o = ord(raw[0]) if raw else 0
-        is_cjk = (
-            0x4E00 <= o <= 0x9FFF
-            or 0x3040 <= o <= 0x30FF
-            or 0xAC00 <= o <= 0xD7A3
-            or 0x0600 <= o <= 0x06FF
-            or 0x0E00 <= o <= 0x0E7F
-        )
+        if _is_han_ord(o):
+            continue  # 1.10.0: Han is read as bigrams and trigrams below; a single character is never a term
+        is_cjk = _is_syllabic_ord(o)
         if (len(term) <= 2 and not is_cjk) or term in _STOP or term in _KANA_STOP or term in seen:
             continue
         seen.add(term)
@@ -2071,11 +2336,16 @@ def _extract_terms_scan(query: str) -> list[str]:
         terms.append(term)
     # Hyphenated compound names in the query ("titanium-torsion-rod") are
     # single search terms too — the tokenizer splits them on "-".
-    for m in re.findall(r"\b\w+(?:-\w+)+\b", query or ""):
+    for m in re.findall(r"\b\w+(?:-\w+)+\b", query):
         m = m.lower()
         if m not in _STOP and m not in seen:
             seen.add(m)
             terms.append(m)
+    # 1.10.0: Han bigrams/trigrams, minus function words (的/是/了 ...), after the Latin terms.
+    for unit in han_units(query):
+        if unit not in seen:
+            seen.add(unit)
+            terms.append(unit)
     return terms
 
 
@@ -2164,7 +2434,7 @@ def _topic_terms(query: str) -> list[str]:
 
 
 def _extract_entities(query: str) -> list[str]:
-    if type(query) is str and len(query) <= 2048:
+    if type(query) is str and len(query) <= _QUERY_MEMO_CHARS:
         return list(_extract_entities_cached(query))
     return _extract_entities_scan(query)
 
@@ -2174,10 +2444,25 @@ def _extract_entities_cached(query: str) -> tuple[str, ...]:
     return tuple(_extract_entities_scan(query))
 
 
+_CJK_EDGE_RE = re.compile(
+    r"(?<=[A-Za-z0-9_./\-])(?=[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7a3\U00020000-\U0002fa1f])"
+    r"|(?<=[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7a3\U00020000-\U0002fa1f])(?=[A-Za-z0-9_./\-])"
+)
+
+
+def _split_cjk_edges(text: str) -> str:
+    """A space between an ASCII identifier and the CJK text glued to it (``test_auth.py为什么``), so the identifier
+    is one term and the CJK units are others. ASCII and CJK-free text is returned untouched."""
+    if text.isascii():
+        return text
+    return _CJK_EDGE_RE.sub(" ", text)
+
+
 def _extract_entities_scan(query: str) -> list[str]:
     found: list[str] = []
+    query = _split_cjk_edges(_nfkc(query or ""))
     for rx in (_URI_RE, _PATH_RE, _DOTTED_RE, _CAMEL_RE, _QUOTED_RE, _CAPS_RE):
-        for m in rx.finditer(query or ""):
+        for m in rx.finditer(query):
             val = m.group(1) if m.lastindex else m.group(0)
             if val and val not in found and len(val) >= 2:
                 found.append(val)
@@ -2407,9 +2692,9 @@ def _clear_memos() -> None:
         _contains_secret_cached, _error_fingerprints_cached, _extract_critical_lines_cached,
         _preprocess_cached, _segment_blocks_cached, _brief_scan_cached,
         _block_link_terms_cached, _extract_entities_cached, _extract_terms_cached,
-        _estimate_tokens_cached,
+        _estimate_tokens_cached, _evidence_blob,
         industrial._profile_input_cached, unicode_profile._search_units_cached,
-        contract_gates._distinctive_query_terms_cached,
+        contract_gates._distinctive_query_terms_cached, contract_gates._source_blob,
     ):
         fn.cache_clear()
     with _SCORED_MEMO_LOCK:
@@ -2453,14 +2738,7 @@ def _term_test(term: str) -> Callable[[str], bool]:
     """``lambda lower: _term_in_text(term, lower)`` with the pattern compiled once."""
     if not term:
         return lambda lower: False
-    o = ord(term[0])
-    syllabic = (
-        0x4E00 <= o <= 0x9FFF
-        or 0x3040 <= o <= 0x30FF
-        or 0xAC00 <= o <= 0xD7A3
-        or 0x0600 <= o <= 0x06FF
-        or 0x0E00 <= o <= 0x0E7F
-    )
+    syllabic = _is_syllabic_ord(ord(term[0]))
     if syllabic or len(term) > 5:
         def base(lower: str) -> bool:
             return term in lower
@@ -2498,14 +2776,7 @@ def _term_in_text(term: str, lower: str) -> bool:
     """Substring for long / syllabic terms; word-boundary for short Latin."""
     if not term:
         return False
-    o = ord(term[0])
-    syllabic = (
-        0x4E00 <= o <= 0x9FFF
-        or 0x3040 <= o <= 0x30FF
-        or 0xAC00 <= o <= 0xD7A3
-        or 0x0600 <= o <= 0x06FF
-        or 0x0E00 <= o <= 0x0E7F
-    )
+    syllabic = _is_syllabic_ord(ord(term[0]))
     if syllabic:
         if len(term) > 5:
             return term in lower
@@ -3180,6 +3451,9 @@ def _important(blocks: list[dict[str, Any]]) -> set[int]:
     return ids
 
 
+_TRACE_UNIT_MAX_BLOCKS = 32  # contiguous trace blocks kept as one unit around a kept trace block
+
+
 def _stitch_neighbors(blocks: list[dict[str, Any]], kept: set[int]) -> set[int]:
     by_id = {b["id"]: b for b in blocks}
     extra: set[int] = set()
@@ -3193,13 +3467,22 @@ def _stitch_neighbors(blocks: list[dict[str, Any]], kept: set[int]) -> set[int]:
         # A traceback is one unit: if we keep any part of a stack, keep the
         # whole stack and the log line that triggered it (error/exception).
         if by_id[i]["type"] == "trace" or i in extra and by_id[i]["type"] == "trace":
-            for nb in (i - 1, i + 1):
-                if nb in by_id and by_id[nb]["type"] in {"trace", "log"}:
-                    t = by_id[nb]["text"].lower()
-                    if by_id[nb]["type"] == "trace" or re.search(
-                        r"error|fail|exception|traceback", t
-                    ):
-                        extra.add(nb)
+            # 1.10.0: the unit is the whole (already folded) chain: every contiguous trace block around the
+            # kept one (bounded), plus the error log line that opened it.
+            for step in (-1, 1):
+                nb = i + step
+                walked = 0
+                while nb in by_id and walked < _TRACE_UNIT_MAX_BLOCKS and (
+                    by_id[nb]["type"] == "trace" or _FRAME_TAIL_RE.match(by_id[nb]["text"]) is not None
+                    or _FRAMES_FOLDED_RE.match(by_id[nb]["text"]) is not None
+                ):
+                    extra.add(nb)
+                    nb += step
+                    walked += 1
+                if nb in by_id and by_id[nb]["type"] == "log" and re.search(
+                    r"error|fail|exception|traceback", by_id[nb]["text"].lower()
+                ):
+                    extra.add(nb)
     # Code-block stitching: a signature line ("fn delay(...)") and its
     # indented body lines are separate blocks because each indented line
     # classifies as "definition". Keep them whole:
@@ -3996,14 +4279,121 @@ def _query_content_terms(query: str) -> set[str]:
     return set(_extract_terms(query))
 
 
+def _match_fold(text: str) -> str:
+    """The lower-cased NFKC view keys are looked up in (ASCII: plain ``lower``)."""
+    return text.lower() if text.isascii() else unicodedata.normalize("NFKC", text).lower()
+
+
+@functools.lru_cache(maxsize=4)
+def _evidence_blob(text: str) -> str:
+    """``_match_fold(text)`` without its trust-risk lines. Injection-shaped text is never evidence: a key that only
+    an ``ignore previous instructions`` line holds is not present, and such a line never counts as kept."""
+    folded = _match_fold(text)
+    if _TRUST_RISK_RE.search(_normalise_instruction_text(folded)) is None:
+        return folded
+    return "\n".join(ln for ln in folded.split("\n") if not _is_trust_risk_line(ln))
+
+
+def _source_keys(query: str, blob: str) -> list[str]:
+    """The entities and terms of ``query`` that occur in ``blob`` (a folded source). Only these can count for or
+    against recall: a query word the text never contains says nothing about what was kept."""
+    keys: list[str] = []
+    for item in _extract_entities(query) + _extract_terms(query):
+        if item not in keys and item.lower() in blob:
+            keys.append(item)
+    return keys
+
+
+_QUERY_TERM_CAP = 24
+_IDENTIFIER_RE = re.compile(r"[_./:-]|"+chr(92)+chr(92))
+
+
+def _prune_query(query: str, source: str) -> str:
+    """A query with more than ``_QUERY_TERM_CAP`` terms (a tool call plus a long user message) is cut to the
+    terms the text contains: identifiers (a term with a digit or a ``_ . / \\ : -`` in it) always stay, the rest are
+    ranked by how rarely they occur in the text (fewest occurrences first, then the longer term, then the term
+    itself, so the order is fixed) and fill up to the cap. Only the query's own terms are ranked, never anything
+    the text offers, and text that only a trust-risk line holds is not present. Terms the text lacks are dropped:
+    they cannot match, and they used to hold confidence down. A query with no term in the text is returned
+    unchanged (that is the "absent objective" case). No tokenizing pass over the text: one ``str.count`` per term."""
+    terms = _extract_terms(query)
+    if len(terms) <= _QUERY_TERM_CAP:
+        return query
+    blob = _evidence_blob(source)
+    counted = [(blob.count(t), t) for t in terms]
+    present = [(c, t) for c, t in counted if c > 0]
+    if not present:
+        return query
+    ents = [e for e in _extract_entities(query) if e.lower() in blob]
+    identifiers = [t for c, t in present if _IDENTIFIER_RE.search(t)]
+    others = sorted((c, -len(t), t) for c, t in present if not _IDENTIFIER_RE.search(t))
+    room = max(0, _QUERY_TERM_CAP - len(identifiers))
+    kept = identifiers + [t for _c, _n, t in others[:room]]
+    return " ".join(dict.fromkeys([*ents, *kept]))
+
+
+_LOCATOR_RE = re.compile(r"[\w./\\-]+\.[A-Za-z]{1,5}:\d+|[A-Za-z_][\w.$]*(?:Error|Exception)\b|\b[A-Za-z_][\w.]{3,}\b")
+
+
+_LEVEL_WORDS = frozenset({"info", "debug", "warn", "warning", "error", "fatal", "trace", "notice", "critical"})
+
+
+def _dropped_summary(original: str, output: str, redact: bool = False) -> tuple:
+    """Up to three ``(category, line_count, first_locator)`` of the lines the output leaves out, largest first.
+
+    A line of the original is left out when the output holds no more copies of it than it has (a ``[×N]`` prefix
+    is read as the one copy it stands for). The category is ``classify_line``'s; the locator is the first
+    ``file:line`` or identifier of the first such line, else ``line N``. Pure function of the two texts: the same
+    input gives the same summary. With ``redact`` a first line that holds a credential is named by its number (``line N``), and any locator is
+    redacted again, so a credential never reaches ``dropped``."""
+    if not original or original == output:
+        return ()
+    have = collections.Counter(ln.strip() for ln in _norm_newlines(output).split("\n"))
+    for line in list(have):
+        bare = _COUNT_PREFIX_RE.sub("", line, count=1)
+        if bare != line:
+            have[bare] += 1
+    counts: dict[str, int] = {}
+    first: dict[str, tuple[int, str]] = {}
+    for number, raw in enumerate(_norm_newlines(original).split("\n"), 1):
+        line = raw.strip()
+        if not line:
+            continue
+        if have[line] > 0:
+            have[line] -= 1
+            continue
+        category = classify_line(line)
+        counts[category] = counts.get(category, 0) + 1
+        if category not in first:
+            first[category] = (number, line)
+    ranked = sorted(counts.items(), key=lambda kv: (-kv[1], kv[0]))[:3]
+    out = []
+    for category, count in ranked:
+        number, line = first[category]
+        if redact:
+            clean = redact_secrets_in(line)
+            line = "" if clean != line else line   # a line that held a credential names its number, not a cut of itself
+        found = next(
+            (m.group(0) for m in _LOCATOR_RE.finditer(line[:_RX_LINE_CAP]) if m.group(0).lower() not in _LEVEL_WORDS),
+            None,
+        )
+        locator = found[:80] if found else f"line {number}"
+        out.append((category, count, redact_secrets_in(locator) if redact else locator))
+    return tuple(out)
+
+
 def _entity_recall(original: str, compressed: str, query: str) -> float:
+    """Recall of the query keys the ORIGINAL contains (1.0 when it contains none: this is the selection's own
+    signal; the confidence reported to a host never takes 1.0 from zero keys, see ``_compute_confidence``)."""
+    orig_l = _match_fold(original)
     keys = []
     for item in _extract_entities(query) + _extract_terms(query):
-        if item.lower() in original.lower() and item not in keys:
+        if item.lower() in orig_l and item not in keys:
             keys.append(item)
     if not keys:
         return 1.0
-    hit = sum(1 for k in keys if k.lower() in compressed.lower())
+    comp_l = _match_fold(compressed)
+    hit = sum(1 for k in keys if k.lower() in comp_l)
     return hit / len(keys)
 
 
@@ -4069,12 +4459,8 @@ def _extract_critical_lines_scan(text: str) -> list[str]:
     return critical
 
 
-def _critical_line_recall(original: str, compressed: str) -> tuple[int, int]:
-    """Return (kept, total) counts of critical lines, matching Baseline RAG
-    verifier's critical_lines_kept/critical_lines_total fields."""
-    critical = _extract_critical_lines(original)
-    if not critical:
-        return 0, 0
+def _critical_kept(critical: list[str], compressed: str) -> int:
+    """How many of the ``critical`` lines (stripped, original case) the compressed text still holds."""
     kept = 0
     # Perf (v1.4.0, E2): lowercase the compressed text ONCE. Lowering it inside
     # the per-line loop was O(lines x output) — 30 s of a 35 s run on a 650 KB
@@ -4107,7 +4493,62 @@ def _critical_line_recall(original: str, compressed: str) -> tuple[int, int]:
             scan_budget -= len(compressed_lower)
             if core in compressed_lower:
                 kept += 1
-    return kept, len(critical)
+    return kept
+
+
+def _critical_line_recall(original: str, compressed: str) -> tuple[int, int]:
+    """Return (kept, total) counts of critical lines, matching Baseline RAG
+    verifier's critical_lines_kept/critical_lines_total fields."""
+    critical = _extract_critical_lines(original)
+    if not critical:
+        return 0, 0
+    return _critical_kept(critical, compressed), len(critical)
+
+
+_KEY_LINE_MAX = 12  # a key found on more lines than this names a topic, not a line that must survive
+
+
+def _verification_critical_lines(original: str, keys: list[str]) -> list[str]:
+    """The lines whose loss the verifier counts (1.10.0): error lines, and the lines that hold a query key the
+    source contains and that are rare (at most ``_KEY_LINE_MAX`` lines). A line with only a number or a
+    ``key: value`` in it is not critical. Trust-risk lines never count; repeats of one template count once."""
+    lines = original.split("\n")
+    flines = [ln.lower() for ln in lines] if original.isascii() else [_match_fold(ln) for ln in lines]
+    key_hits: set[int] = set()
+    wanted = [k.lower() for k in keys if len(k) >= 2]
+    if wanted:
+        # one pass per key over the folded text (C speed), then each hit position -> its line
+        blob = "\n".join(flines)
+        starts: list[int] = []
+        pos = 0
+        for fl in flines:
+            starts.append(pos)
+            pos += len(fl) + 1
+        for key in wanted:
+            found: set[int] = set()
+            at = blob.find(key)
+            while at >= 0 and len(found) <= _KEY_LINE_MAX:
+                found.add(bisect.bisect_right(starts, at) - 1)
+                at = blob.find(key, at + 1)
+            if len(found) <= _KEY_LINE_MAX:
+                key_hits |= found
+    critical: list[str] = []
+    seen: set[str] = set()
+    for i, raw in enumerate(lines):
+        t = raw.strip()
+        if not t:
+            continue
+        scan = t[:_RX_LINE_CAP]
+        if i not in key_hits and _CRITICAL_ERROR_RE.search(scan) is None:
+            continue
+        if _is_trust_risk_line(scan):
+            continue
+        shape = _DIGITS_RE.sub("#", flines[i].strip()[:80])
+        if shape in seen:
+            continue
+        seen.add(shape)
+        critical.append(t)
+    return critical
 
 
 def verify_compression(
@@ -4118,50 +4559,63 @@ def verify_compression(
     """Post-compression self-check, mirroring Baseline RAG's verifier object.
 
     Returns a dict with:
-      entity_recall     — fraction of query entities/terms present in compressed
-      keyword_recall    — fraction of query terms present in compressed
+      entity_recall     — fraction of the query's entities/terms THE ORIGINAL CONTAINS that are in compressed
+      keyword_recall    — the same over the query's terms alone (same source-present denominator)
       important_kept_pct — fraction of critical lines retained
       critical_lines_total / kept / dropped
+      keys_total        — how many query keys the original contains (0: recall says nothing)
       risk              — "low" / "medium" / "high" based on recall thresholds
       score             — overall 0-1 quality score (weighted blend)
+
+    1.10.0: a query word the text never contains no longer counts against recall (with a long tool-call
+    query, confidence used to fall as savings rose for that reason alone); critical lines are error lines
+    and the rare lines holding a query key, not every line with a number; trust-risk lines count for
+    nothing. With no key in the text, recall is not evidence: the score is the critical-line retention.
 
     This is a diagnostic pass: it does NOT modify the compressed output.
     Callers can use the result to decide whether to re-compress with a
     different strategy, expand dropped blocks, or fail open.
     """
-    entity_recall = _entity_recall(original, compressed, query)
-
-    # Keyword recall: fraction of query terms that appear in compressed
-    terms = _extract_terms(query)
-    if terms:
-        hit_terms = sum(1 for t in terms if t in compressed.lower())
-        keyword_recall = hit_terms / len(terms)
+    source = _evidence_blob(original)
+    kept_text = _evidence_blob(compressed)
+    keys = _source_keys(query, source)
+    if keys:
+        entity_recall = sum(1 for k in keys if k.lower() in kept_text) / len(keys)
+        query_terms = set(_extract_terms(query))
+        term_keys = [k for k in keys if k in query_terms]
+        keyword_recall = (
+            sum(1 for k in term_keys if k.lower() in kept_text) / len(term_keys) if term_keys else entity_recall
+        )
     else:
-        keyword_recall = 1.0
+        entity_recall = keyword_recall = 1.0
 
-    cl_kept, cl_total = _critical_line_recall(original, compressed)
+    critical = _verification_critical_lines(original, keys)
+    cl_total = len(critical)
+    cl_kept = _critical_kept(critical, compressed) if critical else 0
     important_kept_pct = (cl_kept / cl_total) if cl_total > 0 else 1.0
     critical_lines_dropped = cl_total - cl_kept
 
     # Risk assessment: combine all three signals
     risk = "low"
-    if entity_recall < 0.5:
-        risk = "high"
-    elif entity_recall < 0.8:
-        risk = "medium"
-    if keyword_recall < 0.5 and risk == "low":
-        risk = "medium"
-    elif keyword_recall < 0.3:
-        risk = "high"
+    if keys:
+        if entity_recall < 0.5:
+            risk = "high"
+        elif entity_recall < 0.8:
+            risk = "medium"
+        if keyword_recall < 0.5 and risk == "low":
+            risk = "medium"
+        elif keyword_recall < 0.3:
+            risk = "high"
     if important_kept_pct < 0.5 and risk != "high":
         risk = "high" if important_kept_pct < 0.3 else "medium"
 
     # Overall score: weighted blend (entity recall matters most for
-    # answer quality, keyword recall next, critical lines last)
-    score = round(
-        0.5 * entity_recall + 0.3 * keyword_recall + 0.2 * important_kept_pct,
-        3,
-    )
+    # answer quality, keyword recall next, critical lines last). With no key
+    # in the text there is no recall to blend.
+    if keys:
+        score = round(0.5 * entity_recall + 0.3 * keyword_recall + 0.2 * important_kept_pct, 3)
+    else:
+        score = round(important_kept_pct, 3)
 
     return {
         "entity_recall": round(entity_recall, 3),
@@ -4170,9 +4624,88 @@ def verify_compression(
         "critical_lines_total": cl_total,
         "critical_lines_kept": cl_kept,
         "critical_lines_dropped": critical_lines_dropped,
+        "keys_total": len(keys),
         "risk": risk,
         "score": score,
     }
+
+
+def _query_basis(
+    caller_query: str,
+    source: str,
+    *,
+    anchored: bool = False,
+    derived: bool = False,
+    structural: bool = False,
+) -> str:
+    """What the confidence of a result rests on (one of ``contract_gates.QUERY_BASES``). The caller's own words
+    win when the text contains any of them; otherwise the objective the engine took over (derived, error-anchored,
+    the structural fold); otherwise what the words are worth against this text (cross-lingual, none)."""
+    profile = query_profile(
+        caller_query or "", source,
+        extra_terms=_extract_entities(caller_query or "") + _extract_terms(caller_query or ""),
+        blob=_evidence_blob(source),
+    )
+    if profile.basis in ("lexical", "tool_call"):
+        return profile.basis
+    if derived:
+        return "derived"
+    if anchored:
+        return "anchored"
+    if structural:
+        return "structural"
+    return profile.basis
+
+
+def _error_retention(original: str, compressed: str) -> tuple[int, int]:
+    """(kept, total) of the original's error fingerprints (error heads) that the compressed text still holds.
+    Trust-risk lines are never a fingerprint to keep."""
+    want = {
+        fp for fp, example in error_fingerprints(original, status_rows=False).items()
+        if not _is_trust_risk_line(example)
+    }
+    if not want:
+        return 0, 0
+    have = set(error_fingerprints(compressed, status_rows=False))
+    return len(want & have), len(want)
+
+
+# Confidence ceilings per basis. A confidence that does not rest on the caller's own words stays below what a
+# host gates on (DeepSeek's default gate is 0.7): derived below it, the others cannot reach 1.0.
+_CONF_CAP_STRUCTURAL = 0.95
+_CONF_CAP_ANCHORED = 0.95
+_CONF_CAP_DERIVED = 0.69
+_CONF_NO_ERRORS_STRUCTURAL = 0.75  # a fold that only counts repeats, in text with no error to lose
+_CONF_NO_ERRORS_ANCHORED = 0.5
+_CONF_CAP_NONE = 0.5
+
+
+def _compute_confidence(
+    *,
+    basis: str,
+    compressed: str,
+    fail_open: bool,
+    original: str,
+    recall: float,
+) -> float:
+    """The confidence a result reports, by what the objective rests on.
+
+    ``lexical`` / ``tool_call``: the selection's recall blended with the verifier's score (both over the keys
+    the text contains). ``structural`` / ``anchored``: error-fingerprint and error-head retention. ``derived``:
+    the same, capped below 0.7, and never the recall of the derived terms themselves. ``cross_lingual`` /
+    ``none``: capped at 0.5. A fail-open result keeps the recall it was given (it returns the original)."""
+    if fail_open:
+        return recall
+    if basis in ("lexical", "tool_call"):
+        return recall
+    if basis in ("structural", "anchored", "derived"):
+        kept, total = _error_retention(original, compressed)
+        if basis == "structural":
+            return _CONF_NO_ERRORS_STRUCTURAL if not total else min(_CONF_CAP_STRUCTURAL, kept / total)
+        if basis == "anchored":
+            return _CONF_NO_ERRORS_ANCHORED if not total else min(_CONF_CAP_ANCHORED, kept / total)
+        return _CONF_NO_ERRORS_ANCHORED if not total else min(_CONF_CAP_DERIVED, kept / total)
+    return min(_CONF_CAP_NONE, recall)
 
 
 def _span_chars(lines: list[str], lo: int, hi: int) -> int:
@@ -4201,6 +4734,29 @@ class InliningGapMarker:
 
 def _inlines_short(marker) -> bool:
     return bool(getattr(marker, "inline_short", False))
+
+
+_SPAN_KIND_SAMPLE = 200
+_PASSING_TEST_LINE_RE = re.compile(r"(?:^|[\s\[(])(?:PASSED|PASS|ok|passed)(?:$|[\s\])]|:)|^\s*[✓✔]", re.IGNORECASE)
+
+
+def _span_kind(span: list[str]) -> str:
+    """What a dropped span of lines is, for a kind-aware gap marker: ``frames``, ``progress``, ``tests``, ``repeats``
+    (one repeated template) or ``lines``. Looks at the first ``_SPAN_KIND_SAMPLE`` non-blank lines only."""
+    sample = [ln for ln in span[:_SPAN_KIND_SAMPLE * 2] if ln.strip()][:_SPAN_KIND_SAMPLE]
+    if not sample:
+        return "lines"
+    if all(_is_frame_line(ln) or _FRAMES_FOLDED_RE.match(ln) for ln in sample):
+        return "frames"
+    if all(_PROGRESS_RE.match(ln.strip()) for ln in sample):
+        return "progress"
+    if all(_PASSING_TEST_LINE_RE.search(ln[:_RX_LINE_CAP]) for ln in sample):
+        return "tests"
+    if len(sample) > 1:
+        prints = {_log_fingerprint(ln) for ln in sample}
+        if len(prints) == 1 and None not in prints:
+            return "repeats"
+    return "lines"
 
 
 def _render(
@@ -4241,6 +4797,7 @@ def _render(
     # adjacent kept blocks.
     probe_lines = content_lines if content_lines is not None else lines
     inline_short = _inlines_short(marker_fn) if marker_fn is not None else False
+    wants_kind = marker_fn is not None and gap_accepts_kind(getattr(marker_fn, "fn", marker_fn))
 
     def _gap(lo: int, hi: int) -> list[str] | None:
         if marker_fn is None:
@@ -4248,7 +4805,8 @@ def _render(
         if not any(ln.strip() for ln in probe_lines[lo:hi]):
             return None
         span_text = "\n".join(lines[lo:hi]) if inline_short else None
-        text = call_gap_marker(marker_fn, _span_chars(lines, lo, hi), total, "lines")
+        kind = _span_kind(lines[lo:hi]) if wants_kind else "lines"
+        text = call_gap_marker(marker_fn, _span_chars(lines, lo, hi), total, kind)
         marker = str(text) if text is not None else ""
         if not marker:
             return None
@@ -6298,6 +6856,8 @@ def _anchor_regions(text: str, max_regions: int) -> list[str]:
         # Last resort: the one or two lines that break an otherwise uniform log.
         exemplars = set(_rare_template_lines(lines, max_regions))
         rare_exemplars = set(exemplars)
+    # 1.10.0: injection-shaped (trust-risk) lines are never anchors, whatever tier found them.
+    exemplars = {line for line in exemplars if not _is_trust_risk_line(line)}
     regions: list[str] = []
     seen_rows: set[int] = set()
 
@@ -6402,12 +6962,14 @@ def _anchor_regions(text: str, max_regions: int) -> list[str]:
                     rows = list(range(lo, hi + 1)) + tail
                     seen_rows.update(rows)
                     regions.append(
-                        "\n".join(_strip_anchor_prefix(lines[j].strip())[:_ANCHOR_LINE_CHARS] for j in rows if lines[j].strip())
+                        "\n".join(_strip_anchor_prefix(lines[j].strip())[:_ANCHOR_LINE_CHARS] for j in rows
+                                  if lines[j].strip() and not _is_trust_risk_line(lines[j]))
                     )
                     continue
         seen_rows.update(range(lo, hi + 1))
         regions.append(
-            "\n".join(_strip_anchor_prefix(ln.strip())[:_ANCHOR_LINE_CHARS] for ln in lines[lo : hi + 1] if ln.strip())
+            "\n".join(_strip_anchor_prefix(ln.strip())[:_ANCHOR_LINE_CHARS] for ln in lines[lo : hi + 1]
+                      if ln.strip() and not _is_trust_risk_line(ln))
         )
     return regions
 
@@ -6534,7 +7096,11 @@ def _resolve_objective(
                         _strip_anchor_prefix(line.strip())[:_ANCHOR_LINE_CHARS]
                         for line in rare_topic_lines
                     ]
-                if anchor_lines:
+                if anchor_lines and len(caller_text) > _ANCHOR_RETRY_MAX_CHARS:
+                    # 1.10.0: above the probe cap the comparison probes (two extra full runs) are skipped: the
+                    # anchored objective is used directly, so a large text pays for one run, not three.
+                    query = (query or "") + "\n" + "\n".join(anchor_lines)
+                elif anchor_lines:
                     anchored_query = (query or "") + "\n" + "\n".join(anchor_lines)
                     # Probe both objectives side-effect free (no CCR archive, log or
                     # decision cache); keep the anchored one only when it fails closed,
@@ -6896,6 +7462,183 @@ def _collect_reasons(
     return reasons, risk
 
 
+def _objective_is_empty_or_absent(query: str, original_text: str) -> bool:
+    """The guards of :func:`_apply_query_guards`, read before scoring: an empty or filler query, or one whose
+    distinctive terms occur nowhere in the text."""
+    q = query or ""
+    if not q.strip():
+        return True
+    if not query_has_distinctive_selectors(q) and not _topic_terms(q):
+        return True
+    terms = [t for t in distinctive_query_terms(q) if not t.startswith("script:")]
+    if terms:
+        blob = original_text.casefold() if original_text.isascii() else _match_fold(original_text)
+        return not any(t in blob for t in terms)
+    return query_profile(q, original_text).basis == "cross_lingual"
+
+
+def _structural_exit_lines(
+    *,
+    adapter_info,
+    ambiguity_fail_open,
+    code_hint,
+    content_type,
+    decision_cache,
+    degraded,
+    lines,
+    min_savings_ratio,
+    mode_norm,
+    no_table,
+    original_text,
+    prose_brief,
+    query,
+    route_hint,
+    text,
+):
+    """The structural fold to return when scoring may be skipped, else None. Only for an empty, filler or absent
+    objective, never for adapter output, source code, a prose brief, a CSV, a frozen decision cache, a
+    non-adaptive mode or text carrying injection-shaped (trust-risk) lines, and only when the fold clears
+    ``min_savings_ratio`` (otherwise the normal path runs and fails open exactly as before)."""
+    if (
+        _PINNED_LINES.get() or adapter_info is not None or ambiguity_fail_open or degraded or mode_norm != "adaptive"
+        or decision_cache is not None or code_hint or route_hint == "numbered_code"
+        or content_type not in ("log", "text")
+    ):
+        return None
+    q = query or ""
+    if prose_brief and not q.strip() and content_type == "text":
+        return None
+    if not _objective_is_empty_or_absent(q, original_text):
+        return None
+    if not query_has_distinctive_selectors(q) and not no_table and _looks_like_csv(original_text):
+        return None
+    folded = "\n".join(lines)
+    if folded == original_text:
+        return None
+    if _TRUST_RISK_RE.search(_normalise_instruction_text(folded)) is not None:
+        return None
+    original_tokens = estimate_tokens(original_text)
+    kept_tokens = estimate_tokens(folded)
+    if original_tokens > 200:
+        clears = 1.0 - kept_tokens / max(1, original_tokens) >= min_savings_ratio
+    else:
+        clears = kept_tokens < original_tokens
+    return lines if clears else None
+
+
+def _builtin_anchor_lines(
+    *,
+    adapter_info,
+    anchor_lines,
+    code_hint,
+    content_type,
+    degraded,
+    derived_terms,
+    mode_norm,
+    query,
+    route_hint,
+    text,
+):
+    """Error regions as the built-in objective of a generic or absent query on a log (existing error fingerprints,
+    trust-risk lines excluded, no probe run). Empty when the caller already chose an objective or no real error exists."""
+    if (
+        _PINNED_LINES.get() or adapter_info is not None or anchor_lines or derived_terms or code_hint or degraded
+        or mode_norm != "adaptive" or content_type != "log" or route_hint == "numbered_code"
+    ):
+        return []
+    q = query or ""
+    if (query_has_distinctive_selectors(q) or _topic_terms(q)) and not _objective_is_empty_or_absent(q, text):
+        return []
+    if "[\u00d7" in text or "frames omitted" in text or "[\u2026" in text or "[last] " in text:
+        return []  # already folded or cut by the engine: anchoring again would not be idempotent
+    if not any(not _is_trust_risk_line(example) for example in error_fingerprints(text).values()):
+        return []
+    return _anchor_regions(text, _ANCHOR_MAX_LINES)
+
+
+def _score_select_render(
+    *,
+    adapter_info,
+    ambiguity_fail_open,
+    blocks,
+    budget_ratio,
+    caller_text,
+    citations,
+    code_hint,
+    content_type,
+    decision_cache,
+    degraded,
+    gap_marker,
+    lines,
+    mode_norm,
+    no_table,
+    original_text,
+    pin_patterns,
+    pin_recent,
+    prose_brief,
+    query,
+    recall_base,
+    reorder_best,
+    score_lines,
+    semantic_tier,
+    text,
+):
+    """Score the blocks, apply pins and frozen decisions, select, reconcile, apply the query guards and render. Returns ``(scored, decision_cache, kept, fail_open, risk, selection, compressed, recall, structural_collapse_only)``."""
+    scored = _score_with_degraded_view(
+        blocks=blocks,
+        content_type=content_type,
+        degraded=degraded,
+        query=query,
+        score_lines=score_lines,
+    )
+
+    pin_recent_ids = _apply_pins(
+        pin_patterns=pin_patterns,
+        pin_recent=pin_recent,
+        scored=scored,
+    )
+
+    # Freeze-on-first-sight: if a decision_cache is provided and the block
+    # fingerprints match prior turns, replay the stored keep/drop decisions
+    # byte-identically. This keeps the provider prompt cache warm across a
+    # multi-turn session (the prefix doesn't churn when new turns arrive).
+    if decision_cache is not None and not isinstance(decision_cache, dict):
+        decision_cache = None
+    if decision_cache is not None:
+        scored = _apply_freeze(decision_cache, scored, text, query or "")
+    _reorder = bool(reorder_best) and adapter_info is None
+    kept, fail_open, risk, selection = _select_blocks(
+        budget_ratio=budget_ratio, caller_text=caller_text, citations=citations,
+        code_hint=code_hint, content_type=content_type, gap_marker=gap_marker, lines=lines,
+        mode_norm=mode_norm, prose_brief=prose_brief, query=query, score_lines=score_lines,
+        scored=scored, semantic_tier=semantic_tier,
+    )
+    kept, fail_open, risk = _reconcile_selection(
+        adapter_info=adapter_info, ambiguity_fail_open=ambiguity_fail_open, code_hint=code_hint,
+        decision_cache=decision_cache, fail_open=fail_open, kept=kept,
+        pin_recent_ids=pin_recent_ids, query=query, risk=risk, scored=scored,
+    )
+
+    fail_open, risk = _apply_query_guards(
+        adapter_info=adapter_info,
+        fail_open=fail_open,
+        no_table=no_table,
+        original_text=original_text,
+        query=query,
+        risk=risk,
+        selection=selection,
+    )
+
+    compressed, kept, fail_open, risk, recall, structural_collapse_only = _render_and_check_recall(
+        adapter_info=adapter_info, ambiguity_fail_open=ambiguity_fail_open, caller_text=caller_text,
+        citations=citations, decision_cache=decision_cache, fail_open=fail_open,
+        gap_marker=gap_marker, kept=kept, lines=lines, original_text=original_text, query=query,
+        recall_base=recall_base, _reorder=_reorder, risk=risk, score_lines=score_lines,
+        scored=scored,
+    )
+    return scored, decision_cache, kept, fail_open, risk, selection, compressed, recall, structural_collapse_only
+
+
 def _apply_cost_gates(
     *,
     adapter_info,
@@ -7116,10 +7859,15 @@ def _apply_query_guards(
             if not t.startswith("script:")
         ]
         if latin_terms:
-            blob = original_text.casefold()
+            blob = original_text.casefold() if original_text.isascii() else _match_fold(original_text)
             if not any(t in blob for t in latin_terms):
                 fail_open = True
                 risk = "high"
+        elif query_profile(q, original_text).basis == "cross_lingual":
+            # 1.10.0: a query that names only non-Latin units (a Chinese question about an English log) and
+            # none of them is in the text says nothing about this text: the same fail-open as an absent Latin term.
+            fail_open = True
+            risk = "high"
     if (
         not query_has_distinctive_selectors(q)
         and not no_table
@@ -7358,12 +8106,27 @@ def _split_into_lines(
         # run at all; the result is identical.)
         lines = _compact_progress_lines(text.split("\n"))
         content_type = _HINT_ROUTES.get(route_hint) or route_content_type(lines)
+        recall_base = text
+        if content_type == "log" and not _PINNED_LINES.get():
+            # (pins active: the caller's pinned blocks are located in the ORIGINAL line structure, so nothing is folded)
+            # 1.10.0: the STRUCTURAL pass (progress removal, [×N] template collapse, per-cause frame folding)
+            # runs for every log/trace route whatever the query; only query-driven selection is skipped.
+            folded = structural_log_pass(lines)
+            if folded != lines:
+                lines = folded
+                recall_base = "\n".join(lines)
         if content_type == "json":
             summarized = preprocess_json(text, query or "")
             if summarized != text:
                 lines = _compact_progress_lines(summarized.split("\n"))
         elif content_type == "text":
             lines = _fold_repeated_sentences(lines)
+            # 1.10.0: compile / resolve / download / passing-test noise in text-routed tool output is
+            # folded the same way a log route folds it (counts, never the failures).
+            folded = _fold_build_noise(lines) if not _PINNED_LINES.get() else lines
+            if folded != lines:
+                lines = folded
+                recall_base = "\n".join(lines)
             # Split long multi-sentence prose lines into sentence blocks so the
             # no-query prose brief can reach the minimum block count.
             if (
@@ -7378,7 +8141,6 @@ def _split_into_lines(
                     and len(_segment_blocks_memo(split)) >= _PROSE_MIN_BLOCKS
                 ):
                     lines = split
-        recall_base = text
     return lines, content_type, recall_base
 
 
@@ -7610,6 +8372,8 @@ def _compress_auto_ladder(
     *,
     ambiguity_fail_open,
     anchor_errors,
+    prose_brief=False,
+    inline_short_gaps=False,
     budget_ratio,
     cache_prefix,
     caller_text,
@@ -7665,6 +8429,8 @@ def _compress_auto_ladder(
         gap_marker=gap_marker,
         recursion_markers=recursion_markers,
         content_hint=content_hint,
+        prose_brief=prose_brief,
+        inline_short_gaps=inline_short_gaps,
     )
     base = compress_context(caller_text, query_as_given, strategy="extract", **ladder_kwargs)
     if not base.fail_open:
@@ -7811,9 +8577,13 @@ def _verify_and_adjust_risk(
     recall,
     risk,
     route_hint,
+    structural_exit=False,
     text,
 ):
-    """Run the post-compression verifier (diagnostic only) and fold its risk and score in; a derived or error-anchored objective never rates 'low'. Returns (verifier, risk, recall)."""
+    """Run the post-compression verifier (diagnostic only) and fold its risk and score in; a derived or error-anchored objective never rates 'low'. Returns (verifier, risk, recall).
+
+    ``structural_exit`` (1.10.0): the result is the structural fold, which counts repeats instead of dropping them; the verifier's
+    critical-line tally cannot read ``[×N]`` and would rate every folded log "high", so its risk does not raise the fold's own."""
     verifier = None
     if not fail_open and compressed and original_tokens > 50:
         if route_hint == "numbered_code":
@@ -7827,7 +8597,7 @@ def _verify_and_adjust_risk(
             verifier = verify_compression(text, compressed, query or "")
         risk_order = {"low": 0, "medium": 1, "high": 2}
         verifier_risk = str(verifier.get("risk", "high"))
-        if risk_order.get(verifier_risk, 2) > risk_order.get(risk, 2):
+        if risk_order.get(verifier_risk, 2) > risk_order.get(risk, 2) and not structural_exit:
             risk = verifier_risk
         recall = min(recall, float(verifier.get("score", 0.0)))
     # An inferred objective is advisory context, not caller intent — a
@@ -7934,6 +8704,7 @@ def _recursion_noop_result(
 def _reuse_probe_or_none(
     *,
     anchor_lines,
+    caller_query="",
     cache_prefix,
     caller_text,
     ccr,
@@ -7957,6 +8728,8 @@ def _reuse_probe_or_none(
         and summary_endpoint is None
     ):
         reused = _finalize_reused_probe(chosen_probe, query_as_given, anchor_lines)
+        if anchor_lines:
+            reused = _rebase_anchored(reused, caller_text, caller_query)
         if ccr and isinstance(chosen_probe.ccr, dict) and chosen_probe.ccr.get("deferred"):
             try:
                 info = _ccr_store(caller_text, ccr_dir)
@@ -8074,8 +8847,14 @@ def _compress_context_impl(
         recursion_markers=recursion_markers, reorder_best=reorder_best, semantic_tier=semantic_tier,
         strategy=strategy,
     )
+    # 1.10.0: the caller's own words, as the confidence basis reads them (before anchors or derived terms), and the
+    # query cut to the terms the text contains when it has many (a tool call plus a long user message).
+    caller_query = "" if _is_filler_query(query_as_given) else (query_as_given or "")
+    if not anchor_lines and not derived_terms and caller_query:
+        caller_query = _prune_query(caller_query, caller_text)
+        query = caller_query
     reused_result = _reuse_probe_or_none(
-        anchor_lines=anchor_lines, cache_prefix=cache_prefix, caller_text=caller_text, ccr=ccr,
+        anchor_lines=anchor_lines, caller_query=caller_query, cache_prefix=cache_prefix, caller_text=caller_text, ccr=ccr,
         ccr_dir=ccr_dir, chosen_probe=chosen_probe, decision_cache=decision_cache, log_dir=log_dir,
         query_as_given=query_as_given, strategy=strategy, summary_endpoint=summary_endpoint,
     )
@@ -8136,6 +8915,10 @@ def _compress_context_impl(
             requested_mode=requested_mode, strategy=strategy,
         )
     source_pin_texts = _source_pin_texts(caller_text, pin_patterns, pin_recent)
+    _PINNED_LINES.set(frozenset(
+        form for part in source_pin_texts for ln in part.split("\n") if ln.strip()
+        for form in (ln, strip_ansi(ln))
+    ))
     original_text = _norm_newlines(caller_text)
     industrial_text = industrial.text if industrial.applied else caller_text
     text = strip_ansi(_norm_newlines(industrial_text))
@@ -8205,6 +8988,7 @@ def _compress_context_impl(
             decision_cache=decision_cache, degraded_view=degraded_view, derive_query=derive_query,
             gap_marker=gap_marker, limits=limits, log_dir=log_dir,
             min_savings_ratio=min_savings_ratio, pin_patterns=pin_patterns, pin_recent=pin_recent,
+            prose_brief=prose_brief, inline_short_gaps=inline_short_gaps,
             query_as_given=query_as_given, recursion_markers=recursion_markers,
             reorder_best=reorder_best, requested_mode=requested_mode, semantic_tier=semantic_tier,
             summary_allow_remote=summary_allow_remote, summary_endpoint=summary_endpoint,
@@ -8238,6 +9022,48 @@ def _compress_context_impl(
         route_hint=route_hint,
         text=text,
     )
+    # 1.10.0: the structural pass has run (inside _split_into_lines). When the objective is empty, filler or
+    # absent from the text and the fold alone clears min_savings_ratio, scoring is skipped (early exit).
+    if (
+        not _PINNED_LINES.get()
+        and adapter_info is None and content_type == "log" and not code_hint and route_hint != "numbered_code"
+        and query_has_distinctive_selectors(query or "") and _objective_is_empty_or_absent(query, original_text)
+    ):
+        # An objective that names nothing present in the text selects nothing: the log is read through the
+        # structural pass alone (the query-driven collapse would only guess), so the fold is the same one the
+        # early exit returns and a second run over its own output changes nothing.
+        lines = structural_log_pass(_compact_progress_lines(text.split("\n")))
+        recall_base = "\n".join(lines)
+    exit_lines = _structural_exit_lines(
+        adapter_info=adapter_info, ambiguity_fail_open=ambiguity_fail_open, code_hint=code_hint,
+        content_type=content_type, decision_cache=decision_cache, degraded=degraded, lines=lines,
+        min_savings_ratio=min_savings_ratio, mode_norm=mode_norm, no_table=no_table,
+        original_text=original_text, prose_brief=prose_brief, query=query, route_hint=route_hint,
+        text=text,
+    )
+    structural_exit = exit_lines is not None
+    if structural_exit:
+        lines = exit_lines
+    else:
+        # Built-in anchors: a generic or absent objective on a log that carries errors is steered by the
+        # error regions themselves (existing error fingerprints; no extra probe run).
+        built_in = _builtin_anchor_lines(
+            adapter_info=adapter_info, anchor_lines=anchor_lines, code_hint=code_hint,
+            content_type=content_type, degraded=degraded, derived_terms=derived_terms,
+            mode_norm=mode_norm, query=query, route_hint=route_hint, text=text,
+        )
+        if built_in:
+            anchor_lines = built_in
+            query = "\n".join(built_in)
+            lines, content_type, recall_base = _split_into_lines(
+                adapter_info=adapter_info,
+                code_hint=code_hint,
+                industrial=industrial,
+                prose_brief=prose_brief,
+                query=query,
+                route_hint=route_hint,
+                text=text,
+            )
     # numbered_code: the "N\t" / "N|" gutter stays in the output (_render emits
     # `lines`) but is not part of the code the scorer should read.
     score_lines = lines
@@ -8250,58 +9076,28 @@ def _compress_context_impl(
             content_hint=content_hint, industrial=industrial, query_as_given=query_as_given,
             requested_mode=requested_mode, strategy=strategy,
         )
-    scored = _score_with_degraded_view(
-        blocks=blocks,
-        content_type=content_type,
-        degraded=degraded,
-        query=query,
-        score_lines=score_lines,
-    )
-
-    pin_recent_ids = _apply_pins(
-        pin_patterns=pin_patterns,
-        pin_recent=pin_recent,
-        scored=scored,
-    )
-
-    # Freeze-on-first-sight: if a decision_cache is provided and the block
-    # fingerprints match prior turns, replay the stored keep/drop decisions
-    # byte-identically. This keeps the provider prompt cache warm across a
-    # multi-turn session (the prefix doesn't churn when new turns arrive).
-    if decision_cache is not None and not isinstance(decision_cache, dict):
-        decision_cache = None
-    if decision_cache is not None:
-        scored = _apply_freeze(decision_cache, scored, text, query or "")
-    _reorder = bool(reorder_best) and adapter_info is None
-    kept, fail_open, risk, selection = _select_blocks(
-        budget_ratio=budget_ratio, caller_text=caller_text, citations=citations,
-        code_hint=code_hint, content_type=content_type, gap_marker=gap_marker, lines=lines,
-        mode_norm=mode_norm, prose_brief=prose_brief, query=query, score_lines=score_lines,
-        scored=scored, semantic_tier=semantic_tier,
-    )
-    kept, fail_open, risk = _reconcile_selection(
-        adapter_info=adapter_info, ambiguity_fail_open=ambiguity_fail_open, code_hint=code_hint,
-        decision_cache=decision_cache, fail_open=fail_open, kept=kept,
-        pin_recent_ids=pin_recent_ids, query=query, risk=risk, scored=scored,
-    )
-
-    fail_open, risk = _apply_query_guards(
-        adapter_info=adapter_info,
-        fail_open=fail_open,
-        no_table=no_table,
-        original_text=original_text,
-        query=query,
-        risk=risk,
-        selection=selection,
-    )
-
-    compressed, kept, fail_open, risk, recall, structural_collapse_only = _render_and_check_recall(
-        adapter_info=adapter_info, ambiguity_fail_open=ambiguity_fail_open, caller_text=caller_text,
-        citations=citations, decision_cache=decision_cache, fail_open=fail_open,
-        gap_marker=gap_marker, kept=kept, lines=lines, original_text=original_text, query=query,
-        recall_base=recall_base, _reorder=_reorder, risk=risk, score_lines=score_lines,
-        scored=scored,
-    )
+    if structural_exit:
+        # 1.10.0 early exit: the objective is empty, filler or absent from the text and the structural fold
+        # already clears min_savings_ratio, so scoring cannot add anything: the fold IS the result.
+        scored = [
+            dict(b, score=0.0, reason="structural fold", entity_hits=0, term_hits=0, rare_term_hits=0,
+                 trust_risk=False, error_exemplar=False)
+            for b in blocks
+        ]
+        kept = {b["id"] for b in scored}
+        fail_open, risk, selection = False, "medium", {"path": "structural-exit"}
+        compressed, recall, structural_collapse_only = "\n".join(lines), 1.0, True
+    else:
+        (scored, decision_cache, kept, fail_open, risk, selection, compressed, recall,
+         structural_collapse_only) = _score_select_render(
+            adapter_info=adapter_info, ambiguity_fail_open=ambiguity_fail_open, blocks=blocks,
+            budget_ratio=budget_ratio, caller_text=caller_text, citations=citations, code_hint=code_hint,
+            content_type=content_type, decision_cache=decision_cache, degraded=degraded,
+            gap_marker=gap_marker, lines=lines, mode_norm=mode_norm, no_table=no_table,
+            original_text=original_text, pin_patterns=pin_patterns, pin_recent=pin_recent,
+            prose_brief=prose_brief, query=query, recall_base=recall_base, reorder_best=reorder_best,
+            score_lines=score_lines, semantic_tier=semantic_tier, text=text,
+        )
 
     if fail_open:
         risk = "high"
@@ -8373,8 +9169,15 @@ def _compress_context_impl(
     verifier, risk, recall = _verify_and_adjust_risk(
         anchor_lines=anchor_lines, compressed=compressed, derived_terms=derived_terms,
         fail_open=fail_open, original_tokens=original_tokens, query=query, recall=recall, risk=risk,
-        route_hint=route_hint, text=text,
+        route_hint=route_hint, structural_exit=structural_exit and not fail_open, text=text,
     )
+    # 1.10.0: the confidence rests on what the objective was (never on the recall of terms the engine took from the
+    # text itself, and never 1.0 from zero keys).
+    basis = "none" if fail_open else _query_basis(
+        caller_query, text, anchored=bool(anchor_lines), derived=bool(derived_terms),
+        structural=structural_exit or structural_collapse_only or adapter_info is not None,
+    )
+    recall = _compute_confidence(basis=basis, compressed=compressed, fail_open=fail_open, original=text, recall=recall)
     __cr = CompressResult(
         compressed_text=result_text,
         original_tokens=original_tokens,
@@ -8394,6 +9197,7 @@ def _compress_context_impl(
         frozen_blocks=sum(1 for b in scored if b.get("frozen")),
         reasons=reasons,
         verifier=verifier,
+        confidence_basis=basis,
     )
 
     receipt, query_hash = _build_receipt(
@@ -8468,7 +9272,9 @@ def compress_context(
     redact_secrets: bool = False,
     _ccr_defer: bool = False,
 ) -> CompressResult:
-    result = _compress_context_impl(
+    _pin_token = _PINNED_LINES.set(frozenset())
+    try:
+        result = _compress_context_impl(
         context, query,
         mode=mode, budget_ratio=budget_ratio, ccr=ccr, cache_prefix=cache_prefix,
         citations=citations, ccr_dir=ccr_dir, decision_cache=decision_cache, strategy=strategy,
@@ -8480,14 +9286,44 @@ def compress_context(
         limits=limits, derive_query=derive_query, anchor_errors=anchor_errors,
         prose_brief=prose_brief, gap_marker=gap_marker, recursion_markers=recursion_markers,
         content_hint=content_hint, inline_short_gaps=inline_short_gaps, _ccr_defer=_ccr_defer,
-    )
+        )
+    finally:
+        _PINNED_LINES.reset(_pin_token)
     if redact_secrets and not result.fail_open:
         redacted = redact_secrets_in(result.compressed_text)
         if redacted is not result.compressed_text and redacted != result.compressed_text:
             result = replace(
                 result, compressed_text=redacted, reasons=[*result.reasons, "redacted_secrets"],
             )
-    return result
+    return _with_schema_fields(result, context, query, redact_secrets)
+
+
+def _stable_key(context: str, query: str) -> str:
+    """Same engine version, text and query: same key. Hashes, so the key leaks nothing."""
+    digest = hashlib.sha256()
+    for part in (ENGINE_VERSION, context, query):
+        digest.update(str(part).encode("utf-8", errors="surrogatepass"))
+        digest.update(b"\x00")
+    return digest.hexdigest()[:16]
+
+
+def _with_schema_fields(result: CompressResult, context: str, query: Any, redact: bool = False) -> CompressResult:
+    """Result schema 2: ``stable_key`` and ``dropped`` (and both in the receipt, with ``confidence_basis``)."""
+    try:
+        text = context if isinstance(context, str) else str(context)
+        q = query if isinstance(query, str) else chr(10).join(str(item) for item in query)
+        dropped = () if result.fail_open else _dropped_summary(text, result.compressed_text, redact)
+        key = _stable_key(text, q)
+    except Exception:  # a summary never costs a result
+        return result
+    receipt = result.receipt
+    if receipt is not None:
+        receipt = dict(receipt)
+        receipt["dropped"] = [list(item) for item in dropped]
+        receipt["confidence_basis"] = result.confidence_basis
+        receipt["result_schema"] = RESULT_SCHEMA
+        receipt["stable_key"] = key
+    return replace(result, stable_key=key, dropped=dropped, result_schema=RESULT_SCHEMA, receipt=receipt)
 
 
 compress_context.__doc__ = (_compress_context_impl.__doc__ or "") + """
