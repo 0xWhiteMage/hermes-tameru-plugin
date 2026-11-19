@@ -229,10 +229,6 @@
   "plugin": 7743.7,
   "reference": 7430.7
  },
- "scenario_64k/oncall/64000/cost/tameru_1_4": {
-  "plugin": 51050.8,
-  "reference": 50752.9
- },
  "scenario_64k/refactor/64000/cost/tameru_1_4": {
   "plugin": 50617.5,
   "reference": 46400.0

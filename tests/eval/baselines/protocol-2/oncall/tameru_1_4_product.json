@@ -32,15 +32,15 @@
   "cost_cache_priced": 1768443.4,
   "cost_uncached": 8664455.0,
   "cost_ratio_vs_uncached": 0.204103,
-  "cost_auxiliary_input": 47441,
-  "total_simulated_input_cost": 1815884.4,
+  "cost_auxiliary_input": 47442,
+  "total_simulated_input_cost": 1815885.4,
   "cached_chars_total": 7880109,
   "compress_calls": 2,
   "compactions": 2,
   "compactions_shrinking": 2,
   "summary_llm_calls": 2,
   "summary_unparsed_prompts": 0,
-  "summary_prompt_chars": 46273,
+  "summary_prompt_chars": 46274,
   "prune_calls": 43,
   "prune_commits": 6,
   "prune_rows_demoted": 10,
@@ -508,13 +508,13 @@
   ]
  },
  "timing": {
-  "engine_seconds": 1.337,
+  "engine_seconds": 1.822,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 0.403,
-   "prune": 0.924,
-   "select_context": 0.008,
-   "on_turn_complete": 0.003
+   "compress": 0.52,
+   "prune": 1.285,
+   "select_context": 0.012,
+   "on_turn_complete": 0.005
   }
  }
 }
