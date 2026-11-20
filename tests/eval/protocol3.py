@@ -300,8 +300,11 @@ def pricing(*, write: float | None = None, read: float | None = None):
 
 
 def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: str = "crude", structural: bool = False,
-            idle: str = "none", grow: float = 1.0, timing: bool = False) -> dict:
-    """One replay of ``arm`` on ``scenario`` at ``window``, with the needed facts sorted and priced."""
+            idle: str = "none", grow: float = 1.0, timing: bool = False, price_log: bool = False) -> dict:
+    """One replay of ``arm`` on ``scenario`` at ``window``, with the needed facts sorted and priced.
+
+    ``price_log=True`` adds ``row["pricing"]``: the per-request ledger and the read-back terms that ``repricing.py`` needs to price
+    the same run under any profile. Every other field is unchanged."""
     made: list[Any] = []
     spec0 = registry.get_spec(scenario)
     dependent = [g for g in spec0.build(seed, spec0.turns).gold if g.id.startswith("dep_")]
@@ -313,7 +316,8 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
 
     result = replay.run_session(factory, scenario=scenario, context_length=window, seed=seed, keep_final_request=True,
                                 summarizer_factory=_summarizer_factory(summarizer),
-                                request_log=log, script_transform=_transform(structural, grow), **idle_options(idle))
+                                request_log=log, script_transform=_transform(structural, grow), price_log=price_log,
+                                **idle_options(idle))
     metrics = result["metrics"]
     final = result.get("final_request") or []
     spec = registry.get_spec(scenario)
@@ -335,6 +339,8 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
     question = script.turns[-1].user if script.turns else ""
     extra_real = extra_finder = 0.0
     finder_found: list[str] = []
+    # read-back terms for repricing, in the order they are added: ``[k, R1, W1, R2, W2]`` costs ``k*(r*R1 + w*W1) + r*R2 + w*W2``
+    terms: dict[str, list] = {"effective": [], "effective_real": [], "effective_finder": []}
     for fact in (g for g in script.gold if g.needed):
         if fact.needle in text:
             kept.append(fact.id)
@@ -344,20 +350,27 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
             recoverable.append(fact.id)
             extra += replay.CACHE_WRITE * (returned + CALL_OVERHEAD_CHARS)
             extra_real += per_request + replay.CACHE_WRITE * (returned + CALL_OVERHEAD_CHARS)
+            terms["effective"].append([0, 0, 0, 0, returned + CALL_OVERHEAD_CHARS])
+            terms["effective_real"].append([0, 0, 0, row_prompt, returned + CALL_OVERHEAD_CHARS])
             tool = (fact.call_key or "").split(":", 1)[0]
             attempts, got = _weak_find(engine, text, refs, tool, question, fact.needle)
             if got is not None:
                 finder_found.append(fact.id)
                 extra_finder += (attempts - 1) * (per_request + replay.CACHE_WRITE * CALL_OVERHEAD_CHARS)                     + per_request + replay.CACHE_WRITE * (got + CALL_OVERHEAD_CHARS)
+                terms["effective_finder"].append([attempts - 1, row_prompt, CALL_OVERHEAD_CHARS, row_prompt, got + CALL_OVERHEAD_CHARS])
             else:       # the finder gives up after its tries and the model re-runs the command
                 rerun = sizes.get(fact.call_key, returned)
                 extra_finder += attempts * (per_request + replay.CACHE_WRITE * CALL_OVERHEAD_CHARS)                     + per_request + replay.CACHE_WRITE * (rerun + CALL_OVERHEAD_CHARS)
+                terms["effective_finder"].append([attempts, row_prompt, CALL_OVERHEAD_CHARS, row_prompt, rerun + CALL_OVERHEAD_CHARS])
         elif fact.source == "tool" and fact.call_key in sizes:
             lost.append(fact.id)
             extra += replay.CACHE_WRITE * (sizes[fact.call_key] + CALL_OVERHEAD_CHARS)
             rerun_cost = per_request + replay.CACHE_WRITE * (sizes[fact.call_key] + CALL_OVERHEAD_CHARS)
             extra_real += rerun_cost
             extra_finder += rerun_cost
+            terms["effective"].append([0, 0, 0, 0, sizes[fact.call_key] + CALL_OVERHEAD_CHARS])
+            terms["effective_real"].append([0, 0, 0, row_prompt, sizes[fact.call_key] + CALL_OVERHEAD_CHARS])
+            terms["effective_finder"].append([0, 0, 0, row_prompt, sizes[fact.call_key] + CALL_OVERHEAD_CHARS])
         else:
             lost.append(fact.id)
             unrecoverable.append(fact.id)
@@ -381,6 +394,12 @@ def measure(arm: str, scenario: str, window: int, seed: int = 0, *, summarizer: 
     if dependent:
         row["dependent_missing"] = dependent_missing(log or [], [g.needle for g in dependent])
         row["dependent_checked"] = len(dependent) * DEPENDENT_REQUESTS
+    if price_log:
+        row["pricing"] = {"answered": answered, "summary_input_chars": metrics["cost_auxiliary_input"],
+                          "summary_output_chars": sum(o for _, o in result["price_log"]["summaries"]),
+                          "requests": result["price_log"]["requests"], "summaries": result["price_log"]["summaries"],
+                          "readback_terms": terms, "compress_events": len(compress_at),
+                          "threshold_tokens": metrics["threshold_tokens"]}
     if timing:       # wall-clock seconds spent inside the engine: informative, never part of an identity check
         row["timing"] = {"engine_seconds": result["timing"]["engine_seconds"]}
     return row

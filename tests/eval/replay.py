@@ -414,7 +414,7 @@ class _Session:
         realistic: bool = False, clock: VirtualClock | None = None, context_length: int = CONTEXT_LENGTH,
         max_compression_attempts: int = MAX_COMPRESSION_ATTEMPTS,
         cache_ttl_s: float | None = None, idle_seconds: Callable[[int], float] | None = None,
-        request_log: list | None = None,
+        request_log: list | None = None, price_log: dict | None = None,
     ) -> None:
         if estimate is None:  # Hermes' own rough estimator, as the host uses before a request
             from agent.model_metadata import estimate_messages_tokens_rough as estimate
@@ -434,6 +434,11 @@ class _Session:
         # Optional recorder (``run_session(request_log=[])``): every request that is sent is appended as
         # ``{"n", "messages", "tool_block_chars"}``, so a live runner can send the exact same requests to a real provider.
         self.request_log = request_log
+        # Optional pricing ledger (``run_session(price_log=True)``): per sent request
+        # ``[chars, common-prefix chars before any TTL expiry, virtual send time, rough prompt tokens, user turn,
+        # breakpoint positions]`` and per summary call ``[input chars, output chars]``, so the cost under any price
+        # profile is a pure function of the run (``repricing.py``). Off by default: no saved output changes.
+        self.price_log = price_log
         self.cache_expiries = 0
         self._last_sent_at: float | None = None
         schemas = getattr(engine, "get_tool_schemas", None)
@@ -752,6 +757,8 @@ class _Session:
             schema_wire = self._base_wire + (self._extra_wire if reveal_needed(self.engine) else "")
         wire = [schema_wire, *(_wire(m) for m in sent)]
         total = sum(len(w) + 1 for w in wire)
+        if self.price_log is not None:
+            self.last_sent_roles = [m.get("role") for m in sent]
         if self._prev_wire is None:
             lcp = 0
         else:
@@ -763,6 +770,8 @@ class _Session:
                     lcp += _common_prefix_len(a, b)
                     break
             lcp = min(lcp, self._prev_total, total)
+        if self.price_log is not None:
+            self.price_log["requests"].append(_price_entry(wire, total, lcp, self, sent_tokens))
         expired = (self.cache_ttl_s is not None and self.clock is not None and self._last_sent_at is not None
                    and self.clock.elapsed - self._last_sent_at > self.cache_ttl_s)
         if expired:         # the provider dropped the prefix while nobody was asking: everything is written again
@@ -797,6 +806,21 @@ class _Session:
         return messages
 
 
+def _price_entry(wire: list[str], total: int, lcp: int, sess: "_Session", sent_tokens: int) -> list:
+    """One request of the pricing ledger. Breakpoints follow Hermes' legacy Anthropic layout (``agent/prompt_caching.py``,
+    system-and-3): the end of the system message and the ends of the last three non-system messages, as character positions
+    in the replay's wire (tool block first, one separator character after every part)."""
+    ends, at = [], 0
+    for part in wire:
+        at += len(part) + 1
+        ends.append(at)
+    sent = sess.last_sent_roles
+    system_end = [ends[1]] if len(ends) > 1 and sent and sent[0] == "system" else []
+    others = [ends[i + 1] for i, role in enumerate(sent) if role != "system"][-3:]
+    when = round(sess.clock.elapsed, 3) if sess.clock is not None else None
+    return [total, lcp, when, int(sent_tokens), getattr(sess, "user_turns", 0), system_end + others]
+
+
 def _assistant_with_calls(say: str, steps, ids: list[str]) -> dict:
     return {
         "role": "assistant",
@@ -820,6 +844,7 @@ def run_session(
     request_log: list | None = None,
     summarizer_factory: Callable[[], FakeSummarizer] | None = None,
     script_transform: Callable[[Scenario, int], Scenario] | None = None,
+    price_log: bool = False,
 ) -> dict:
     """Replay the scripted session against ``engine_factory()`` and return the metrics.
 
@@ -838,6 +863,7 @@ def run_session(
 
     Returns ``{"meta", "metrics", "series", "timing"[, "final_request"]}``. ``metrics`` and ``series`` are
     fully deterministic for a given (engine, turns, seed); ``timing`` is wall-clock and is not.
+    ``price_log=True`` adds ``"price_log"`` (the pricing ledger, see ``_Session``); nothing else changes.
     """
     spec = get_spec(scenario)
     turns = spec.turns if turns is None else turns
@@ -851,11 +877,14 @@ def run_session(
         sess = _Session(
             engine, script, realistic=realistic, clock=clock, context_length=context_length,
             max_compression_attempts=max_compression_attempts, cache_ttl_s=cache_ttl_s, idle_seconds=idle_seconds,
-            request_log=request_log,
+            request_log=request_log, price_log={"requests": [], "summaries": []} if price_log else None,
         )
         summarizer, final = _play(sess, script, seed, summarizer_factory)
-    return _result(sess, summarizer, final, script, engine, turns, seed, context_length, scenario, realistic,
-                   seconds_per_request, keep_final_request)
+    result = _result(sess, summarizer, final, script, engine, turns, seed, context_length, scenario, realistic,
+                     seconds_per_request, keep_final_request)
+    if price_log:
+        result["price_log"] = sess.price_log
+    return result
 
 
 def _attach_note(engine: Any, messages: list[dict]) -> None:
@@ -886,7 +915,15 @@ def _play(sess: _Session, script: Scenario, seed: int,
         return f"call_{seed:02d}{call_counter:06d}"
 
     messages: list[dict] = [{"role": "system", "content": script.system_prompt}]
-    with patched_summary_llm(summarizer):
+    call_llm: Any = summarizer
+    if sess.price_log is not None:          # the pricing ledger records each summary call's input and output size
+        def call_llm(**kwargs: Any) -> dict:
+            before = (summarizer.input_chars, summarizer.output_chars)
+            try:
+                return summarizer(**kwargs)
+            finally:
+                sess.price_log["summaries"].append([summarizer.input_chars - before[0], summarizer.output_chars - before[1]])
+    with patched_summary_llm(call_llm):
         for turn in script.turns:
             messages.append({"role": "user", "content": turn.user})
             sess.begin_turn()

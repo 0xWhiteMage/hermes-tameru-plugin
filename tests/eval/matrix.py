@@ -32,7 +32,7 @@ def _csv(text: str, cast=str):
     return [cast(part) for part in text.split(",") if part]
 
 
-def run(arms, scenarios, windows, seeds, *, write: float | None = None, read: float | None = None) -> dict:
+def run(arms, scenarios, windows, seeds, *, write: float | None = None, read: float | None = None, price_log: bool = False) -> dict:
     import protocol3
     import replay
     import scenarios_blind
@@ -45,7 +45,7 @@ def run(arms, scenarios, windows, seeds, *, write: float | None = None, read: fl
     replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS = TOOL_BLOCK_CHARS, TOOL_BLOCK_CHARS // 4
     try:
         with protocol3.pricing(write=write, read=read):
-            rows = [protocol3.measure(arm, scenario, window, seed, structural=True)
+            rows = [protocol3.measure(arm, scenario, window, seed, structural=True, price_log=price_log)
                     for scenario in scenarios for window in windows for arm in arms for seed in seeds]
     finally:
         replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS = saved
@@ -54,6 +54,8 @@ def run(arms, scenarios, windows, seeds, *, write: float | None = None, read: fl
     meta = {"product": product_hash(), "tool_block_chars": TOOL_BLOCK_CHARS, "structural": True,
             "write": replay.CACHE_WRITE if write is None else write, "read": replay.CACHE_READ if read is None else read,
             "arms": list(arms), "scenarios": list(scenarios), "windows": list(windows), "seeds": list(seeds)}
+    if price_log:       # only then, so a default run's header is byte-identical to before
+        meta["price_log"] = True
     return {"meta": meta, "rows": rows}
 
 
