@@ -131,7 +131,7 @@ def full_result(
             memory_context=memory_context, **kwargs,
         )
 
-    if engine._policy.controls.mode == "legacy" or not fenced or not _native_ready(engine):
+    if engine._policy.controls.mode in ("legacy", "plan") or not fenced or not _native_ready(engine):
         return native()
     if len(messages) <= engine._protect_head_size(messages) + 4:
         return native()

@@ -16,7 +16,7 @@ from .autotune import Tuning
 PREFERENCES = ("save_space", "balanced", "preserve_detail")
 ACTIVATIONS = ("auto", "earlier", "standard", "later")
 RECENT_PROTECTIONS = ("auto", "short", "standard", "long")
-POLICY_MODES = ("adaptive", "legacy")
+POLICY_MODES = ("adaptive", "legacy", "plan")
 STAGES = ("light", "standard", "strong")
 
 

@@ -151,3 +151,21 @@ def tameru_autotune_off() -> Any:
     from hermes_tameru_plugin.engine import TameruContextEngine
 
     return TameruContextEngine(settings=TameruSettings(autotune=False), quiet_mode=True)
+
+
+@register("HP1")
+def hp1() -> Any:
+    """The plugin under ``policy_mode: plan`` — the engine's ``plan()`` in compact mode at Hermes' own
+    cache-broken moments only (no plugin-supplied proactive prune), EV strength ``normal`` (balanced
+    preference), price profile ``anthropic-sonnet-5.5-5m``."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(
+        settings=TameruSettings(
+            policy_mode="plan",
+            preference="balanced",
+            price_profile="anthropic-sonnet-5.5-5m",
+        ),
+        quiet_mode=True,
+    )

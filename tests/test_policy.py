@@ -78,7 +78,7 @@ def test_stages_preserve_more_early_and_keep_fixed_retention_constant():
     assert [p.stage for p in high_plans] == ["standard", "strong"]
     assert low_plans[0].retention.retained_chars == 4500
     assert high_plans[-1].retention.retained_chars == 3000
-    assert POLICY_MODES == ("adaptive", "legacy")           # the comparison-only "fixed" mode was removed in 1.10.0
+    assert POLICY_MODES == ("adaptive", "legacy", "plan")    # "plan" is the opt-in engine-planning mode (1.11)
 
 
 def test_preferences_keep_their_detail_tradeoff_even_under_pressure():

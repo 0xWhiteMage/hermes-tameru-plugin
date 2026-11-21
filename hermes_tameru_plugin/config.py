@@ -46,7 +46,8 @@ class TameruSettings:
     """Every plugin knob; the defaults are what runs when nothing is configured."""
 
     enabled: bool = True                       # kill switch -> pure stock ContextCompressor behaviour
-    policy_mode: str = "adaptive"             # adaptive | legacy
+    policy_mode: str = "adaptive"             # adaptive | legacy | plan
+    price_profile: str = "anthropic-sonnet-5.5-5m"   # engine prices.json profile the ``plan`` policy's EV check prices with
     autotune: bool = True                     # adaptive mode retunes itself from live session signals
     lazy_tool: bool = False                   # off by default: send the recovery tool only once a result has been shortened (needs Hermes' llm_request middleware; TAMERU_LAZY_TOOL=on)
     net_estimate: bool = False                # off by default: /tameru stats adds a signed estimate of what the cleanups saved or cost (TAMERU_NET_ESTIMATE=on)
@@ -163,6 +164,19 @@ def _choice(choices: tuple[str, ...]) -> Callable[[Any], str]:
     return parse
 
 
+def _parse_price_profile(raw: Any) -> str:
+    """An engine ``prices.json`` profile name; unknown names are ignored with a warning."""
+    value = _parse_str(raw).strip()
+    try:
+        from .tameru.prices import profile_names
+        if value not in profile_names():
+            raise ValueError(f"expected a known engine price profile, got {value!r}")
+    except ImportError:
+        if not value:
+            raise ValueError("expected a price profile name")
+    return value
+
+
 def _parse_savings(raw: Any) -> float:
     value = _parse_float(raw)
     if not 0.0 <= value < 1.0:
@@ -227,6 +241,7 @@ def _parse_patterns(raw: Any) -> tuple[str, ...]:
 _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "enabled": _parse_bool,
     "policy_mode": _choice(POLICY_MODES),
+    "price_profile": _parse_price_profile,
     "autotune": _parse_bool,
     "manifest": _parse_bool,
     "edits": _parse_bool,

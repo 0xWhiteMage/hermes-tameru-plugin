@@ -249,6 +249,14 @@ class _Pass:
     query_cache: dict = field(default_factory=dict)
     supersede: SupersessionIndex | None = None
     age_demote: set[int] | None = None            # rendered rows beyond the retained budget
+    plan_entries: dict | None = None              # plan policy: idx -> prepared row state (None until planned)
+    plan_actions: dict = field(default_factory=dict)   # plan policy: idx -> engine PlanAction
+    plan_rendered: dict = field(default_factory=dict)  # plan policy: idx -> rendered extract row text
+    plan_room: int = 0                            # plan policy: retained-body chars the plan still grants
+    compress_results: dict = field(default_factory=dict)  # plan policy: inner digest -> CompressResult metadata
+    plan_blocked: int = 0                         # plan policy: supersessions the fact-coverage check blocked
+    plan_obj: "Any" = None                        # plan policy: the engine Plan this pass applies
+    plan_input: "Any" = None                      # plan policy: the PlanInput built for this pass
     room: int = 0                                 # retained-extract chars left for new rows
     err_room: int = 0                             # retained "errors"-row chars left for new rows
     boundary: int | None = None                   # Hermes' prune boundary of this pass (pass 2 runs below it)
@@ -398,6 +406,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         self._manifest = ManifestState()
         self._pins = PinState()
         self._reread_turn: dict[str, int] = {}     # ref -> turn of its last counted re-read
+        self._plan_growth: deque = deque(maxlen=64)     # plan policy: observed per-step body growth (tokens)
+        self._plan_last_body: int | None = None         # plan policy: last observed body size
+        self._plan_last_act: int | None = None          # plan policy: ``_responses`` value of the last planned act
         self._edits = EditState()
         self._chat_store = None            # per-chat records live in the plugin's own durable state (chat_store); None means memory only
         self._edits_inflight: list[str] = []
@@ -499,6 +510,11 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         # that call lands here again with the window known. A host without lazy window resolution (no
         # ``_resolved_context_length`` attribute) has the window already and is scaled straight away.
         if getattr(self, "_scaled_prune", False) and getattr(self, "_resolved_context_length", 0) is not None:
+            if self._settings.policy_mode == "plan":
+                # The plugin-supplied prune trigger is adaptive machinery: under ``plan`` only
+                # Hermes' own moments act (its compaction, or a user-configured prune).
+                self.proactive_prune_tokens = 0
+                return
             try:
                 self.proactive_prune_tokens = scaled_prune_tokens(
                     self._settings, self._policy_threshold_tokens(),
@@ -1037,6 +1053,8 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                 self._memo.adopt(scope.memo)
             if scope.plan is not None:
                 self._record_commit(scope)
+            if scope.plan_actions:
+                self._plan_last_act = getattr(self, "_responses", 0)
             return True
 
     def prune_tool_results_only(self, messages, current_tokens=None, *args, **kwargs):
@@ -1049,7 +1067,13 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         self._observe_activity(messages)
         if not (self._settings.enabled and self._seams.demote):
             return parent(messages, current_tokens, *args, **kwargs)
-        if self._policy.controls.mode != "legacy":
+        if self._settings.policy_mode == "plan":
+            from . import plan_pass
+            plan_pass.observe_body(self, message_budget_tokens(messages))
+            # No proactive warm-cache pruning under this policy: a standalone prune call delegates
+            # to Hermes' native pass untouched — only a compaction trigger plans (via ``compress``).
+            return parent(messages, current_tokens, *args, **kwargs)
+        if self._policy.controls.mode not in ("legacy", "plan"):
             return self._adaptive_prune(messages, current_tokens, *args, **kwargs)
         scope = self._new_scope(messages)
         token = _SCOPE.set(scope)
@@ -1092,6 +1116,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         """The regrowth re-arm applies to the plugin's own, window-scaled trigger; a user's or caller's value is Hermes'."""
         return (
             bool(getattr(self, "_scaled_prune", False)) and self._settings.prune_regrowth_ratio > 0
+            and self._settings.policy_mode != "plan"
             and prune_trigger_follows_window(self._settings, self._policy_threshold_tokens())
         )
 
@@ -1157,6 +1182,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         parent = super().compress
         fenced = check_attempt(self)
         self._observe_activity(messages)
+        if self._settings.policy_mode == "plan":
+            from . import plan_pass
+            plan_pass.observe_body(self, message_budget_tokens(messages))
         if not (self._settings.enabled and self._seams.demote):
             return parent(
                 messages, current_tokens=current_tokens, focus_topic=focus_topic, force=force,
@@ -1269,6 +1297,10 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             held.keep = choose_first
         if choose_first:
             return candidate_msgs, n
+        if (scope.settings or self._settings).policy_mode == "plan":
+            # plan acts only where Hermes' own gate commits; a declined reclaim is a non-moment,
+            # so the escalate-and-decline retry does not run under this policy.
+            return messages, 0
         retry_scope = self._candidate_scope(scope, degrade=True)
         if retry_scope is None:
             return messages, 0
@@ -1332,14 +1364,39 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                     demote.add(i)
         scope.age_demote, scope.room, scope.err_room = demote, room, err_room
 
+    # ---- plan policy --------------------------------------------------------------
+    # The ``plan`` policy asks the engine's ``tameru.plan`` once per Hermes rewrite
+    # (compact mode): the pass ranks every row Hermes would demote and the ladder
+    # renders the returned rung. All of it lives in ``plan_pass``; only the delegates
+    # sit here.
+
+    def _plan_rows(self, result, call_id_to_tool, min_prune_chars, rest, kw, scope) -> None:
+        from . import plan_pass
+        plan_pass.plan_rows(self, result, call_id_to_tool, min_prune_chars, rest, kw, scope)
+
+    def _apply_plan_row(self, result, idx, entry, scope, settings) -> bool:
+        from . import plan_pass
+        return plan_pass.apply_plan_row(self, result, idx, entry, scope, settings)
+
+
     def _ladder(self, parent, result, idx, call_id_to_tool, min_prune_chars, rest, kw) -> bool:
         settings = self._pass_settings()
         msg = result[idx]
         content = msg.get("content")
         if msg.get("role") != "tool" or not isinstance(content, str):
             return parent(result, idx, call_id_to_tool, min_prune_chars, *rest, **kw)
-        scope = _SCOPE.get() or self._new_scope(None)
-        if scope.age_demote is None:
+        live_scope = _SCOPE.get()
+        scope = live_scope or self._new_scope(None)
+        settings = scope.settings or self._settings
+        if settings.policy_mode == "plan" and live_scope is None:
+            # plan state only exists inside a pass the plugin itself scoped (the compaction trigger);
+            # a row seen through Hermes' native standalone call keeps Hermes' own line.
+            return parent(result, idx, call_id_to_tool, min_prune_chars, *rest, **kw)
+        if settings.policy_mode == "plan":
+            if scope.plan_entries is None:
+                self._plan_rows(result, call_id_to_tool, min_prune_chars, rest, kw, scope)
+            scope.age_demote = set()
+        elif scope.age_demote is None:
             self._plan_retention(scope, result)
         tool, raw_args = call_id_to_tool.get(msg.get("tool_call_id") or "", ("unknown", ""))
         if not rest and not scope.full and tool in self._exempt:
@@ -1354,6 +1411,11 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             if not (scope.pressure or idx in scope.age_demote):
                 return False
             return self._demote_rendered(result, idx, content, kind, tool, raw_args)
+
+        if settings.policy_mode == "plan":
+            entry = scope.plan_entries.get(idx) if scope.plan_entries is not None else None
+            if entry is not None:
+                return self._apply_plan_row(result, idx, entry, scope, settings)
 
         shadow = [dict(msg)]
         if not parent(shadow, 0, call_id_to_tool, min_prune_chars, *rest, **kw):
@@ -1534,17 +1596,20 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
 
     def _compress(
         self, inner: str, query: list[str], hint: str | None, ratio: float | None,
+        selector_query: str | None = None,
     ) -> _Extract | None:
         """Memoized ``compress_context`` of ``inner`` (None when the engine raised)."""
         key = (
             _digest(inner), _digest(json.dumps(query, ensure_ascii=False)), ENGINE_VERSION,
-            self._settings_sha, hint, ratio,
+            self._settings_sha, hint, ratio, selector_query,
         )
         found = self._working_memo().get(key)
         if found is not None:
             return found
         settings = self._pass_settings()
         fixed = {} if ratio is None else {"mode": "fixed", "budget_ratio": ratio}
+        if selector_query is not None:
+            fixed["selector_query"] = selector_query
         try:
             res = compress_context(
                 inner, query, ccr=False, citations=False, content_hint=hint,
@@ -1557,6 +1622,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             )
         except Exception:
             return None
+        holder = _SCOPE.get()
+        if holder is not None and holder.owner is self:
+            holder.compress_results[_digest(inner)] = res
         out = _Extract(res.compressed_text, bool(res.fail_open), res.compression_risk)
         if len(out.text) <= _MEMO_MAX_TEXT:
             self._working_memo().put(key, out)

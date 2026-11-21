@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [1.11.0] - Unreleased
+
+### Added
+- **`policy_mode: plan`, an opt-in policy that lets the engine plan each Hermes rewrite.** At a
+  cache-broken moment — Hermes' compaction trigger or a prune Hermes itself fires, never a proactive
+  warm-cache pass — the pass builds a compact-mode `PlanInput` over the rows Hermes would demote
+  (cached extract candidate, protected-fact lines, Hermes supersession identity with a fact-coverage
+  check, and Hermes' scaled retained budget) and applies the engine's per-row rung through the existing
+  ladder. `K = 3`, `H = 0`; the adaptive activation constants do not apply. New `price_profile`
+  setting (default `anthropic-sonnet-5.5-5m`) prices the EV check; `preference` maps to EV strength.
+  Replay-only dev-corpus numbers: [docs/REPLAY-PLAN-P3.md](docs/REPLAY-PLAN-P3.md) — the registered
+  cache-break gate passes at every window (breaks equal stock, where the incumbent policy fails), cost
+  is neutral vs stock, and ~0.6-1.4 more facts per session survive.
+- Vendored engine at `fd93aa7` (Tameru 1.10.x + `tameru.plan`, EV `decide`, loss/price profiles).
+
 ## [1.10.0] - Unreleased
 
 Removes three things that showed no measured benefit, as announced under *Deprecated* in 1.9.0, and vendors Tameru engine 1.10.0.
