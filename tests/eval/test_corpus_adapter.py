@@ -206,3 +206,21 @@ def test_memo_answers_identical_calls_once():
 
     m = corpus_run._Memo(Engine())
     assert [m.handle_tool_call("t", {"ref": r}) for r in "aab"] == ["t:a", "t:a", "t:b"] and Engine.calls == 2
+
+
+def test_row_level_names_the_rung_a_row_was_cut_to():
+    """corpus_run's row_rung field: the rung of a rendered row, else 'hermes' for a changed row with no Tameru header."""
+    import corpus_run
+    from hermes_tameru_plugin.render import RenderStats, header_only, render
+
+    stats = RenderStats(kept_lines=3, total_lines=12, kept_chars=120, total_chars=4800,
+                        omitted=(("stdout", 9),), rung="extract")
+    extract_row = render("[terminal] ran `pytest -x` -> exit 1, 12 lines output", stats, "0123456789abcdef",
+                         body="FAILED tests/test_x.py::test_a - assert 1 == 2")
+    assert corpus_run.row_level(extract_row) == "extract"
+
+    header_stats = RenderStats(kept_lines=0, total_lines=12, kept_chars=0, total_chars=4800,
+                               omitted=(("all", 12),), rung="header")
+    assert corpus_run.row_level(header_only(extract_row, header_stats, "0123456789abcdef")) == "header"
+
+    assert corpus_run.row_level("[terminal] ran `pytest -x` -> exit 1, 12 lines output (earlier output trimmed)") == "hermes"

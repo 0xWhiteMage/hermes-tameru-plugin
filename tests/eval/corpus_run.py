@@ -52,6 +52,14 @@ def _call_id(seed: int, step: int) -> str:
     return f"call_{seed:02d}{step + 1:06d}"     # replay._play: one id per step, in order
 
 
+def row_level(row_text: str) -> str:
+    """The ladder rung a changed row was cut to; ``hermes`` when the row carries no Tameru header
+    (e.g. Hermes' own one-line summary)."""
+    from hermes_tameru_plugin.render import parse_header
+    h = parse_header(row_text)
+    return h["rung"] if h else "hermes"
+
+
 def measure(arm: str, mapped, *, label: str | None = None, split: str = "", seed: int = 0) -> dict:
     """One replay of ``arm`` on a mapped corpus scenario; the row (protocol3-shaped fields plus the corpus columns)."""
     import corpus_adapter as ca
@@ -145,7 +153,8 @@ def measure(arm: str, mapped, *, label: str | None = None, split: str = "", seed
                     terms[k].append([0, 0, 0, 0 if k == "effective" else row_prompt, size + over])
         fact_rows.append({"id": f.id, "kind": f.kind, "position": f.position, "status": status,
                           "value_present": ca.value_present(f, text), "row_present": row is not None,
-                          "row_shortened": row_short, "held_in_shortened_row": in_row})
+                          "row_shortened": row_short, "held_in_shortened_row": in_row,
+                          "row_rung": row_level(row_text) if row_short else None})
     questions = [{"id": q["id"], "stratum": q["stratum"], "held": ca.question_held(q, held)} for q in mapped.questions]
     answered = max(1, metrics["turns"] - metrics["failed_turns"])
     base = metrics["total_simulated_input_cost"]

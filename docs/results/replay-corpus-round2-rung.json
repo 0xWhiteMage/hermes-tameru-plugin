@@ -1,0 +1,3000 @@
+{
+ "arms": [
+  "engine_1_10_0"
+ ],
+ "errors": 0,
+ "windows": {
+  "128000": {
+   "shortened_fact_rows": 690,
+   "levels": {
+    "extract": {
+     "n": 43,
+     "held": 37,
+     "pct": 86.0,
+     "share": 6.2,
+     "not_held": 6,
+     "not_held_share": 1.1,
+     "status": {
+      "kept": 37,
+      "recoverable": 5,
+      "lost": 1
+     }
+    },
+    "errors": {
+     "n": 103,
+     "held": 78,
+     "pct": 75.7,
+     "share": 14.9,
+     "not_held": 25,
+     "not_held_share": 4.7,
+     "status": {
+      "kept": 78,
+      "recoverable": 25,
+      "lost": 0
+     }
+    },
+    "brief": {
+     "n": 248,
+     "held": 47,
+     "pct": 19.0,
+     "share": 35.9,
+     "not_held": 201,
+     "not_held_share": 38.1,
+     "status": {
+      "kept": 49,
+      "recoverable": 175,
+      "lost": 24
+     }
+    },
+    "header": {
+     "n": 243,
+     "held": 0,
+     "pct": 0.0,
+     "share": 35.2,
+     "not_held": 243,
+     "not_held_share": 46.0,
+     "status": {
+      "kept": 1,
+      "recoverable": 230,
+      "lost": 12
+     }
+    },
+    "superseded": {
+     "n": 52,
+     "held": 0,
+     "pct": 0.0,
+     "share": 7.5,
+     "not_held": 52,
+     "not_held_share": 9.8,
+     "status": {
+      "kept": 1,
+      "recoverable": 51,
+      "lost": 0
+     }
+    },
+    "hermes": {
+     "n": 1,
+     "held": 0,
+     "pct": 0.0,
+     "share": 0.1,
+     "not_held": 1,
+     "not_held_share": 0.2,
+     "status": {
+      "kept": 0,
+      "recoverable": 1,
+      "lost": 0
+     }
+    }
+   },
+   "by_kind": {
+    "natural": {
+     "extract": {
+      "n": 15,
+      "held": 14,
+      "pct": 93.3,
+      "share": 2.2,
+      "not_held": 1,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 14,
+       "recoverable": 1,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 8,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.2,
+      "not_held": 8,
+      "not_held_share": 1.5,
+      "status": {
+       "kept": 0,
+       "recoverable": 8,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 47,
+      "held": 9,
+      "pct": 19.1,
+      "share": 6.8,
+      "not_held": 38,
+      "not_held_share": 7.2,
+      "status": {
+       "kept": 10,
+       "recoverable": 37,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 98,
+      "held": 0,
+      "pct": 0.0,
+      "share": 14.2,
+      "not_held": 98,
+      "not_held_share": 18.6,
+      "status": {
+       "kept": 1,
+       "recoverable": 97,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 26,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.8,
+      "not_held": 26,
+      "not_held_share": 4.9,
+      "status": {
+       "kept": 0,
+       "recoverable": 26,
+       "lost": 0
+      }
+     }
+    },
+    "error": {
+     "extract": {
+      "n": 13,
+      "held": 12,
+      "pct": 92.3,
+      "share": 1.9,
+      "not_held": 1,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 12,
+       "recoverable": 1,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 88,
+      "held": 71,
+      "pct": 80.7,
+      "share": 12.8,
+      "not_held": 17,
+      "not_held_share": 3.2,
+      "status": {
+       "kept": 71,
+       "recoverable": 17,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 28,
+      "held": 21,
+      "pct": 75.0,
+      "share": 4.1,
+      "not_held": 7,
+      "not_held_share": 1.3,
+      "status": {
+       "kept": 21,
+       "recoverable": 7,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 11,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.6,
+      "not_held": 11,
+      "not_held_share": 2.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 11,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 11,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.6,
+      "not_held": 11,
+      "not_held_share": 2.1,
+      "status": {
+       "kept": 1,
+       "recoverable": 10,
+       "lost": 0
+      }
+     }
+    },
+    "buried": {
+     "extract": {
+      "n": 12,
+      "held": 11,
+      "pct": 91.7,
+      "share": 1.7,
+      "not_held": 1,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 11,
+       "recoverable": 1,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 45,
+      "held": 7,
+      "pct": 15.6,
+      "share": 6.5,
+      "not_held": 38,
+      "not_held_share": 7.2,
+      "status": {
+       "kept": 7,
+       "recoverable": 38,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 101,
+      "held": 0,
+      "pct": 0.0,
+      "share": 14.6,
+      "not_held": 101,
+      "not_held_share": 19.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 101,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 15,
+      "held": 0,
+      "pct": 0.0,
+      "share": 2.2,
+      "not_held": 15,
+      "not_held_share": 2.8,
+      "status": {
+       "kept": 0,
+       "recoverable": 15,
+       "lost": 0
+      }
+     }
+    },
+    "real": {
+     "extract": {
+      "n": 3,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.4,
+      "not_held": 3,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 0,
+       "recoverable": 2,
+       "lost": 1
+      }
+     },
+     "errors": {
+      "n": 7,
+      "held": 7,
+      "pct": 100.0,
+      "share": 1.0,
+      "not_held": 0,
+      "not_held_share": 0.0,
+      "status": {
+       "kept": 7,
+       "recoverable": 0,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 128,
+      "held": 10,
+      "pct": 7.8,
+      "share": 18.6,
+      "not_held": 118,
+      "not_held_share": 22.3,
+      "status": {
+       "kept": 11,
+       "recoverable": 93,
+       "lost": 24
+      }
+     },
+     "header": {
+      "n": 33,
+      "held": 0,
+      "pct": 0.0,
+      "share": 4.8,
+      "not_held": 33,
+      "not_held_share": 6.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 21,
+       "lost": 12
+      }
+     },
+     "hermes": {
+      "n": 1,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 1,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 1,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "by_style": {
+    "specific": {
+     "extract": {
+      "n": 19,
+      "held": 16,
+      "pct": 84.2,
+      "share": 2.8,
+      "not_held": 3,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 16,
+       "recoverable": 3,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 54,
+      "held": 42,
+      "pct": 77.8,
+      "share": 7.8,
+      "not_held": 12,
+      "not_held_share": 2.3,
+      "status": {
+       "kept": 42,
+       "recoverable": 12,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 120,
+      "held": 29,
+      "pct": 24.2,
+      "share": 17.4,
+      "not_held": 91,
+      "not_held_share": 17.2,
+      "status": {
+       "kept": 31,
+       "recoverable": 81,
+       "lost": 8
+      }
+     },
+     "header": {
+      "n": 129,
+      "held": 0,
+      "pct": 0.0,
+      "share": 18.7,
+      "not_held": 129,
+      "not_held_share": 24.4,
+      "status": {
+       "kept": 1,
+       "recoverable": 121,
+       "lost": 7
+      }
+     },
+     "superseded": {
+      "n": 27,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.9,
+      "not_held": 27,
+      "not_held_share": 5.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 27,
+       "lost": 0
+      }
+     }
+    },
+    "vague": {
+     "extract": {
+      "n": 24,
+      "held": 21,
+      "pct": 87.5,
+      "share": 3.5,
+      "not_held": 3,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 21,
+       "recoverable": 2,
+       "lost": 1
+      }
+     },
+     "errors": {
+      "n": 49,
+      "held": 36,
+      "pct": 73.5,
+      "share": 7.1,
+      "not_held": 13,
+      "not_held_share": 2.5,
+      "status": {
+       "kept": 36,
+       "recoverable": 13,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 128,
+      "held": 18,
+      "pct": 14.1,
+      "share": 18.6,
+      "not_held": 110,
+      "not_held_share": 20.8,
+      "status": {
+       "kept": 18,
+       "recoverable": 94,
+       "lost": 16
+      }
+     },
+     "header": {
+      "n": 114,
+      "held": 0,
+      "pct": 0.0,
+      "share": 16.5,
+      "not_held": 114,
+      "not_held_share": 21.6,
+      "status": {
+       "kept": 0,
+       "recoverable": 109,
+       "lost": 5
+      }
+     },
+     "superseded": {
+      "n": 25,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.6,
+      "not_held": 25,
+      "not_held_share": 4.7,
+      "status": {
+       "kept": 1,
+       "recoverable": 24,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 1,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 1,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 1,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "by_language": {
+    "en": {
+     "extract": {
+      "n": 26,
+      "held": 23,
+      "pct": 88.5,
+      "share": 3.8,
+      "not_held": 3,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 23,
+       "recoverable": 2,
+       "lost": 1
+      }
+     },
+     "errors": {
+      "n": 55,
+      "held": 42,
+      "pct": 76.4,
+      "share": 8.0,
+      "not_held": 13,
+      "not_held_share": 2.5,
+      "status": {
+       "kept": 42,
+       "recoverable": 13,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 115,
+      "held": 22,
+      "pct": 19.1,
+      "share": 16.7,
+      "not_held": 93,
+      "not_held_share": 17.6,
+      "status": {
+       "kept": 23,
+       "recoverable": 81,
+       "lost": 11
+      }
+     },
+     "header": {
+      "n": 115,
+      "held": 0,
+      "pct": 0.0,
+      "share": 16.7,
+      "not_held": 115,
+      "not_held_share": 21.8,
+      "status": {
+       "kept": 1,
+       "recoverable": 106,
+       "lost": 8
+      }
+     },
+     "superseded": {
+      "n": 24,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.5,
+      "not_held": 24,
+      "not_held_share": 4.5,
+      "status": {
+       "kept": 0,
+       "recoverable": 24,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 1,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 1,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 1,
+       "lost": 0
+      }
+     }
+    },
+    "zh": {
+     "extract": {
+      "n": 8,
+      "held": 7,
+      "pct": 87.5,
+      "share": 1.2,
+      "not_held": 1,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 7,
+       "recoverable": 1,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 26,
+      "held": 22,
+      "pct": 84.6,
+      "share": 3.8,
+      "not_held": 4,
+      "not_held_share": 0.8,
+      "status": {
+       "kept": 22,
+       "recoverable": 4,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 77,
+      "held": 19,
+      "pct": 24.7,
+      "share": 11.2,
+      "not_held": 58,
+      "not_held_share": 11.0,
+      "status": {
+       "kept": 20,
+       "recoverable": 52,
+       "lost": 5
+      }
+     },
+     "header": {
+      "n": 80,
+      "held": 0,
+      "pct": 0.0,
+      "share": 11.6,
+      "not_held": 80,
+      "not_held_share": 15.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 78,
+       "lost": 2
+      }
+     },
+     "superseded": {
+      "n": 19,
+      "held": 0,
+      "pct": 0.0,
+      "share": 2.8,
+      "not_held": 19,
+      "not_held_share": 3.6,
+      "status": {
+       "kept": 1,
+       "recoverable": 18,
+       "lost": 0
+      }
+     }
+    },
+    "mixed": {
+     "extract": {
+      "n": 9,
+      "held": 7,
+      "pct": 77.8,
+      "share": 1.3,
+      "not_held": 2,
+      "not_held_share": 0.4,
+      "status": {
+       "kept": 7,
+       "recoverable": 2,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 22,
+      "held": 14,
+      "pct": 63.6,
+      "share": 3.2,
+      "not_held": 8,
+      "not_held_share": 1.5,
+      "status": {
+       "kept": 14,
+       "recoverable": 8,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 56,
+      "held": 6,
+      "pct": 10.7,
+      "share": 8.1,
+      "not_held": 50,
+      "not_held_share": 9.5,
+      "status": {
+       "kept": 6,
+       "recoverable": 42,
+       "lost": 8
+      }
+     },
+     "header": {
+      "n": 48,
+      "held": 0,
+      "pct": 0.0,
+      "share": 7.0,
+      "not_held": 48,
+      "not_held_share": 9.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 46,
+       "lost": 2
+      }
+     },
+     "superseded": {
+      "n": 9,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.3,
+      "not_held": 9,
+      "not_held_share": 1.7,
+      "status": {
+       "kept": 0,
+       "recoverable": 9,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "superseded_later": {
+    "yes": 0,
+    "no": 52
+   }
+  },
+  "252000": {
+   "shortened_fact_rows": 1456,
+   "levels": {
+    "extract": {
+     "n": 93,
+     "held": 80,
+     "pct": 86.0,
+     "share": 6.4,
+     "not_held": 13,
+     "not_held_share": 1.2,
+     "status": {
+      "kept": 80,
+      "recoverable": 13,
+      "lost": 0
+     }
+    },
+    "errors": {
+     "n": 212,
+     "held": 160,
+     "pct": 75.5,
+     "share": 14.6,
+     "not_held": 52,
+     "not_held_share": 4.6,
+     "status": {
+      "kept": 161,
+      "recoverable": 45,
+      "lost": 6
+     }
+    },
+    "brief": {
+     "n": 381,
+     "held": 92,
+     "pct": 24.1,
+     "share": 26.2,
+     "not_held": 289,
+     "not_held_share": 25.7,
+     "status": {
+      "kept": 99,
+      "recoverable": 250,
+      "lost": 32
+     }
+    },
+    "header": {
+     "n": 643,
+     "held": 0,
+     "pct": 0.0,
+     "share": 44.2,
+     "not_held": 643,
+     "not_held_share": 57.2,
+     "status": {
+      "kept": 6,
+      "recoverable": 629,
+      "lost": 8
+     }
+    },
+    "superseded": {
+     "n": 124,
+     "held": 0,
+     "pct": 0.0,
+     "share": 8.5,
+     "not_held": 124,
+     "not_held_share": 11.0,
+     "status": {
+      "kept": 0,
+      "recoverable": 124,
+      "lost": 0
+     }
+    },
+    "hermes": {
+     "n": 3,
+     "held": 0,
+     "pct": 0.0,
+     "share": 0.2,
+     "not_held": 3,
+     "not_held_share": 0.3,
+     "status": {
+      "kept": 1,
+      "recoverable": 2,
+      "lost": 0
+     }
+    }
+   },
+   "by_kind": {
+    "natural": {
+     "extract": {
+      "n": 25,
+      "held": 24,
+      "pct": 96.0,
+      "share": 1.7,
+      "not_held": 1,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 24,
+       "recoverable": 1,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 12,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.8,
+      "not_held": 12,
+      "not_held_share": 1.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 12,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 71,
+      "held": 18,
+      "pct": 25.4,
+      "share": 4.9,
+      "not_held": 53,
+      "not_held_share": 4.7,
+      "status": {
+       "kept": 18,
+       "recoverable": 53,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 217,
+      "held": 0,
+      "pct": 0.0,
+      "share": 14.9,
+      "not_held": 217,
+      "not_held_share": 19.3,
+      "status": {
+       "kept": 6,
+       "recoverable": 211,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 59,
+      "held": 0,
+      "pct": 0.0,
+      "share": 4.1,
+      "not_held": 59,
+      "not_held_share": 5.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 59,
+       "lost": 0
+      }
+     }
+    },
+    "error": {
+     "extract": {
+      "n": 28,
+      "held": 25,
+      "pct": 89.3,
+      "share": 1.9,
+      "not_held": 3,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 25,
+       "recoverable": 3,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 179,
+      "held": 148,
+      "pct": 82.7,
+      "share": 12.3,
+      "not_held": 31,
+      "not_held_share": 2.8,
+      "status": {
+       "kept": 148,
+       "recoverable": 31,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 55,
+      "held": 43,
+      "pct": 78.2,
+      "share": 3.8,
+      "not_held": 12,
+      "not_held_share": 1.1,
+      "status": {
+       "kept": 43,
+       "recoverable": 12,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 36,
+      "held": 0,
+      "pct": 0.0,
+      "share": 2.5,
+      "not_held": 36,
+      "not_held_share": 3.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 36,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 25,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.7,
+      "not_held": 25,
+      "not_held_share": 2.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 25,
+       "lost": 0
+      }
+     }
+    },
+    "buried": {
+     "extract": {
+      "n": 29,
+      "held": 27,
+      "pct": 93.1,
+      "share": 2.0,
+      "not_held": 2,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 27,
+       "recoverable": 2,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 65,
+      "held": 15,
+      "pct": 23.1,
+      "share": 4.5,
+      "not_held": 50,
+      "not_held_share": 4.4,
+      "status": {
+       "kept": 15,
+       "recoverable": 50,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 218,
+      "held": 0,
+      "pct": 0.0,
+      "share": 15.0,
+      "not_held": 218,
+      "not_held_share": 19.4,
+      "status": {
+       "kept": 0,
+       "recoverable": 218,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 38,
+      "held": 0,
+      "pct": 0.0,
+      "share": 2.6,
+      "not_held": 38,
+      "not_held_share": 3.4,
+      "status": {
+       "kept": 0,
+       "recoverable": 38,
+       "lost": 0
+      }
+     }
+    },
+    "real": {
+     "extract": {
+      "n": 11,
+      "held": 4,
+      "pct": 36.4,
+      "share": 0.8,
+      "not_held": 7,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 4,
+       "recoverable": 7,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 21,
+      "held": 12,
+      "pct": 57.1,
+      "share": 1.4,
+      "not_held": 9,
+      "not_held_share": 0.8,
+      "status": {
+       "kept": 13,
+       "recoverable": 2,
+       "lost": 6
+      }
+     },
+     "brief": {
+      "n": 190,
+      "held": 16,
+      "pct": 8.4,
+      "share": 13.0,
+      "not_held": 174,
+      "not_held_share": 15.5,
+      "status": {
+       "kept": 23,
+       "recoverable": 135,
+       "lost": 32
+      }
+     },
+     "header": {
+      "n": 172,
+      "held": 0,
+      "pct": 0.0,
+      "share": 11.8,
+      "not_held": 172,
+      "not_held_share": 15.3,
+      "status": {
+       "kept": 0,
+       "recoverable": 164,
+       "lost": 8
+      }
+     },
+     "superseded": {
+      "n": 2,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 2,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 2,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 3,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.2,
+      "not_held": 3,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 1,
+       "recoverable": 2,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "by_style": {
+    "specific": {
+     "extract": {
+      "n": 43,
+      "held": 36,
+      "pct": 83.7,
+      "share": 3.0,
+      "not_held": 7,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 36,
+       "recoverable": 7,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 115,
+      "held": 85,
+      "pct": 73.9,
+      "share": 7.9,
+      "not_held": 30,
+      "not_held_share": 2.7,
+      "status": {
+       "kept": 86,
+       "recoverable": 24,
+       "lost": 5
+      }
+     },
+     "brief": {
+      "n": 187,
+      "held": 59,
+      "pct": 31.6,
+      "share": 12.8,
+      "not_held": 128,
+      "not_held_share": 11.4,
+      "status": {
+       "kept": 64,
+       "recoverable": 111,
+       "lost": 12
+      }
+     },
+     "header": {
+      "n": 325,
+      "held": 0,
+      "pct": 0.0,
+      "share": 22.3,
+      "not_held": 325,
+      "not_held_share": 28.9,
+      "status": {
+       "kept": 6,
+       "recoverable": 316,
+       "lost": 3
+      }
+     },
+     "superseded": {
+      "n": 60,
+      "held": 0,
+      "pct": 0.0,
+      "share": 4.1,
+      "not_held": 60,
+      "not_held_share": 5.3,
+      "status": {
+       "kept": 0,
+       "recoverable": 60,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 1,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 1,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 1,
+       "lost": 0
+      }
+     }
+    },
+    "vague": {
+     "extract": {
+      "n": 50,
+      "held": 44,
+      "pct": 88.0,
+      "share": 3.4,
+      "not_held": 6,
+      "not_held_share": 0.5,
+      "status": {
+       "kept": 44,
+       "recoverable": 6,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 97,
+      "held": 75,
+      "pct": 77.3,
+      "share": 6.7,
+      "not_held": 22,
+      "not_held_share": 2.0,
+      "status": {
+       "kept": 75,
+       "recoverable": 21,
+       "lost": 1
+      }
+     },
+     "brief": {
+      "n": 194,
+      "held": 33,
+      "pct": 17.0,
+      "share": 13.3,
+      "not_held": 161,
+      "not_held_share": 14.3,
+      "status": {
+       "kept": 35,
+       "recoverable": 139,
+       "lost": 20
+      }
+     },
+     "header": {
+      "n": 318,
+      "held": 0,
+      "pct": 0.0,
+      "share": 21.8,
+      "not_held": 318,
+      "not_held_share": 28.3,
+      "status": {
+       "kept": 0,
+       "recoverable": 313,
+       "lost": 5
+      }
+     },
+     "superseded": {
+      "n": 64,
+      "held": 0,
+      "pct": 0.0,
+      "share": 4.4,
+      "not_held": 64,
+      "not_held_share": 5.7,
+      "status": {
+       "kept": 0,
+       "recoverable": 64,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 2,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 2,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 1,
+       "recoverable": 1,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "by_language": {
+    "en": {
+     "extract": {
+      "n": 52,
+      "held": 45,
+      "pct": 86.5,
+      "share": 3.6,
+      "not_held": 7,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 45,
+       "recoverable": 7,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 101,
+      "held": 79,
+      "pct": 78.2,
+      "share": 6.9,
+      "not_held": 22,
+      "not_held_share": 2.0,
+      "status": {
+       "kept": 79,
+       "recoverable": 21,
+       "lost": 1
+      }
+     },
+     "brief": {
+      "n": 181,
+      "held": 42,
+      "pct": 23.2,
+      "share": 12.4,
+      "not_held": 139,
+      "not_held_share": 12.4,
+      "status": {
+       "kept": 48,
+       "recoverable": 116,
+       "lost": 17
+      }
+     },
+     "header": {
+      "n": 321,
+      "held": 0,
+      "pct": 0.0,
+      "share": 22.0,
+      "not_held": 321,
+      "not_held_share": 28.6,
+      "status": {
+       "kept": 4,
+       "recoverable": 312,
+       "lost": 5
+      }
+     },
+     "superseded": {
+      "n": 56,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.8,
+      "not_held": 56,
+      "not_held_share": 5.0,
+      "status": {
+       "kept": 0,
+       "recoverable": 56,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 1,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 1,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 1,
+       "lost": 0
+      }
+     }
+    },
+    "zh": {
+     "extract": {
+      "n": 22,
+      "held": 19,
+      "pct": 86.4,
+      "share": 1.5,
+      "not_held": 3,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 19,
+       "recoverable": 3,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 71,
+      "held": 54,
+      "pct": 76.1,
+      "share": 4.9,
+      "not_held": 17,
+      "not_held_share": 1.5,
+      "status": {
+       "kept": 54,
+       "recoverable": 13,
+       "lost": 4
+      }
+     },
+     "brief": {
+      "n": 111,
+      "held": 28,
+      "pct": 25.2,
+      "share": 7.6,
+      "not_held": 83,
+      "not_held_share": 7.4,
+      "status": {
+       "kept": 28,
+       "recoverable": 76,
+       "lost": 7
+      }
+     },
+     "header": {
+      "n": 211,
+      "held": 0,
+      "pct": 0.0,
+      "share": 14.5,
+      "not_held": 211,
+      "not_held_share": 18.8,
+      "status": {
+       "kept": 2,
+       "recoverable": 207,
+       "lost": 2
+      }
+     },
+     "superseded": {
+      "n": 45,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.1,
+      "not_held": 45,
+      "not_held_share": 4.0,
+      "status": {
+       "kept": 0,
+       "recoverable": 45,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 1,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 1,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 1,
+       "recoverable": 0,
+       "lost": 0
+      }
+     }
+    },
+    "mixed": {
+     "extract": {
+      "n": 19,
+      "held": 16,
+      "pct": 84.2,
+      "share": 1.3,
+      "not_held": 3,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 16,
+       "recoverable": 3,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 40,
+      "held": 27,
+      "pct": 67.5,
+      "share": 2.7,
+      "not_held": 13,
+      "not_held_share": 1.2,
+      "status": {
+       "kept": 28,
+       "recoverable": 11,
+       "lost": 1
+      }
+     },
+     "brief": {
+      "n": 89,
+      "held": 22,
+      "pct": 24.7,
+      "share": 6.1,
+      "not_held": 67,
+      "not_held_share": 6.0,
+      "status": {
+       "kept": 23,
+       "recoverable": 58,
+       "lost": 8
+      }
+     },
+     "header": {
+      "n": 111,
+      "held": 0,
+      "pct": 0.0,
+      "share": 7.6,
+      "not_held": 111,
+      "not_held_share": 9.9,
+      "status": {
+       "kept": 0,
+       "recoverable": 110,
+       "lost": 1
+      }
+     },
+     "superseded": {
+      "n": 23,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.6,
+      "not_held": 23,
+      "not_held_share": 2.0,
+      "status": {
+       "kept": 0,
+       "recoverable": 23,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 1,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 1,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 1,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "superseded_later": {
+    "yes": 0,
+    "no": 124
+   }
+  },
+  "500000": {
+   "shortened_fact_rows": 2222,
+   "levels": {
+    "extract": {
+     "n": 177,
+     "held": 147,
+     "pct": 83.1,
+     "share": 8.0,
+     "not_held": 30,
+     "not_held_share": 1.8,
+     "status": {
+      "kept": 147,
+      "recoverable": 30,
+      "lost": 0
+     }
+    },
+    "errors": {
+     "n": 275,
+     "held": 200,
+     "pct": 72.7,
+     "share": 12.4,
+     "not_held": 75,
+     "not_held_share": 4.5,
+     "status": {
+      "kept": 203,
+      "recoverable": 57,
+      "lost": 15
+     }
+    },
+    "brief": {
+     "n": 623,
+     "held": 197,
+     "pct": 31.6,
+     "share": 28.0,
+     "not_held": 426,
+     "not_held_share": 25.4,
+     "status": {
+      "kept": 201,
+      "recoverable": 382,
+      "lost": 40
+     }
+    },
+    "header": {
+     "n": 909,
+     "held": 0,
+     "pct": 0.0,
+     "share": 40.9,
+     "not_held": 909,
+     "not_held_share": 54.2,
+     "status": {
+      "kept": 13,
+      "recoverable": 883,
+      "lost": 13
+     }
+    },
+    "superseded": {
+     "n": 229,
+     "held": 0,
+     "pct": 0.0,
+     "share": 10.3,
+     "not_held": 229,
+     "not_held_share": 13.6,
+     "status": {
+      "kept": 2,
+      "recoverable": 227,
+      "lost": 0
+     }
+    },
+    "hermes": {
+     "n": 9,
+     "held": 0,
+     "pct": 0.0,
+     "share": 0.4,
+     "not_held": 9,
+     "not_held_share": 0.5,
+     "status": {
+      "kept": 2,
+      "recoverable": 7,
+      "lost": 0
+     }
+    }
+   },
+   "by_kind": {
+    "natural": {
+     "extract": {
+      "n": 50,
+      "held": 44,
+      "pct": 88.0,
+      "share": 2.3,
+      "not_held": 6,
+      "not_held_share": 0.4,
+      "status": {
+       "kept": 44,
+       "recoverable": 6,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 12,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.5,
+      "not_held": 12,
+      "not_held_share": 0.7,
+      "status": {
+       "kept": 0,
+       "recoverable": 12,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 134,
+      "held": 30,
+      "pct": 22.4,
+      "share": 6.0,
+      "not_held": 104,
+      "not_held_share": 6.2,
+      "status": {
+       "kept": 30,
+       "recoverable": 104,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 299,
+      "held": 0,
+      "pct": 0.0,
+      "share": 13.5,
+      "not_held": 299,
+      "not_held_share": 17.8,
+      "status": {
+       "kept": 7,
+       "recoverable": 292,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 105,
+      "held": 0,
+      "pct": 0.0,
+      "share": 4.7,
+      "not_held": 105,
+      "not_held_share": 6.3,
+      "status": {
+       "kept": 0,
+       "recoverable": 105,
+       "lost": 0
+      }
+     }
+    },
+    "error": {
+     "extract": {
+      "n": 54,
+      "held": 47,
+      "pct": 87.0,
+      "share": 2.4,
+      "not_held": 7,
+      "not_held_share": 0.4,
+      "status": {
+       "kept": 47,
+       "recoverable": 7,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 210,
+      "held": 172,
+      "pct": 81.9,
+      "share": 9.5,
+      "not_held": 38,
+      "not_held_share": 2.3,
+      "status": {
+       "kept": 172,
+       "recoverable": 38,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 123,
+      "held": 100,
+      "pct": 81.3,
+      "share": 5.5,
+      "not_held": 23,
+      "not_held_share": 1.4,
+      "status": {
+       "kept": 100,
+       "recoverable": 23,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 51,
+      "held": 0,
+      "pct": 0.0,
+      "share": 2.3,
+      "not_held": 51,
+      "not_held_share": 3.0,
+      "status": {
+       "kept": 1,
+       "recoverable": 50,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 38,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.7,
+      "not_held": 38,
+      "not_held_share": 2.3,
+      "status": {
+       "kept": 0,
+       "recoverable": 38,
+       "lost": 0
+      }
+     }
+    },
+    "buried": {
+     "extract": {
+      "n": 56,
+      "held": 51,
+      "pct": 91.1,
+      "share": 2.5,
+      "not_held": 5,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 51,
+       "recoverable": 5,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 138,
+      "held": 44,
+      "pct": 31.9,
+      "share": 6.2,
+      "not_held": 94,
+      "not_held_share": 5.6,
+      "status": {
+       "kept": 44,
+       "recoverable": 94,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 292,
+      "held": 0,
+      "pct": 0.0,
+      "share": 13.1,
+      "not_held": 292,
+      "not_held_share": 17.4,
+      "status": {
+       "kept": 0,
+       "recoverable": 292,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 69,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.1,
+      "not_held": 69,
+      "not_held_share": 4.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 69,
+       "lost": 0
+      }
+     }
+    },
+    "real": {
+     "extract": {
+      "n": 17,
+      "held": 5,
+      "pct": 29.4,
+      "share": 0.8,
+      "not_held": 12,
+      "not_held_share": 0.7,
+      "status": {
+       "kept": 5,
+       "recoverable": 12,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 53,
+      "held": 28,
+      "pct": 52.8,
+      "share": 2.4,
+      "not_held": 25,
+      "not_held_share": 1.5,
+      "status": {
+       "kept": 31,
+       "recoverable": 7,
+       "lost": 15
+      }
+     },
+     "brief": {
+      "n": 228,
+      "held": 23,
+      "pct": 10.1,
+      "share": 10.3,
+      "not_held": 205,
+      "not_held_share": 12.2,
+      "status": {
+       "kept": 27,
+       "recoverable": 161,
+       "lost": 40
+      }
+     },
+     "header": {
+      "n": 267,
+      "held": 0,
+      "pct": 0.0,
+      "share": 12.0,
+      "not_held": 267,
+      "not_held_share": 15.9,
+      "status": {
+       "kept": 5,
+       "recoverable": 249,
+       "lost": 13
+      }
+     },
+     "superseded": {
+      "n": 17,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.8,
+      "not_held": 17,
+      "not_held_share": 1.0,
+      "status": {
+       "kept": 2,
+       "recoverable": 15,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 9,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.4,
+      "not_held": 9,
+      "not_held_share": 0.5,
+      "status": {
+       "kept": 2,
+       "recoverable": 7,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "by_style": {
+    "specific": {
+     "extract": {
+      "n": 79,
+      "held": 67,
+      "pct": 84.8,
+      "share": 3.6,
+      "not_held": 12,
+      "not_held_share": 0.7,
+      "status": {
+       "kept": 67,
+       "recoverable": 12,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 154,
+      "held": 110,
+      "pct": 71.4,
+      "share": 6.9,
+      "not_held": 44,
+      "not_held_share": 2.6,
+      "status": {
+       "kept": 113,
+       "recoverable": 35,
+       "lost": 6
+      }
+     },
+     "brief": {
+      "n": 302,
+      "held": 132,
+      "pct": 43.7,
+      "share": 13.6,
+      "not_held": 170,
+      "not_held_share": 10.1,
+      "status": {
+       "kept": 136,
+       "recoverable": 148,
+       "lost": 18
+      }
+     },
+     "header": {
+      "n": 473,
+      "held": 0,
+      "pct": 0.0,
+      "share": 21.3,
+      "not_held": 473,
+      "not_held_share": 28.2,
+      "status": {
+       "kept": 12,
+       "recoverable": 456,
+       "lost": 5
+      }
+     },
+     "superseded": {
+      "n": 117,
+      "held": 0,
+      "pct": 0.0,
+      "share": 5.3,
+      "not_held": 117,
+      "not_held_share": 7.0,
+      "status": {
+       "kept": 0,
+       "recoverable": 117,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 4,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.2,
+      "not_held": 4,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 0,
+       "recoverable": 4,
+       "lost": 0
+      }
+     }
+    },
+    "vague": {
+     "extract": {
+      "n": 98,
+      "held": 80,
+      "pct": 81.6,
+      "share": 4.4,
+      "not_held": 18,
+      "not_held_share": 1.1,
+      "status": {
+       "kept": 80,
+       "recoverable": 18,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 121,
+      "held": 90,
+      "pct": 74.4,
+      "share": 5.4,
+      "not_held": 31,
+      "not_held_share": 1.8,
+      "status": {
+       "kept": 90,
+       "recoverable": 22,
+       "lost": 9
+      }
+     },
+     "brief": {
+      "n": 321,
+      "held": 65,
+      "pct": 20.2,
+      "share": 14.4,
+      "not_held": 256,
+      "not_held_share": 15.3,
+      "status": {
+       "kept": 65,
+       "recoverable": 234,
+       "lost": 22
+      }
+     },
+     "header": {
+      "n": 436,
+      "held": 0,
+      "pct": 0.0,
+      "share": 19.6,
+      "not_held": 436,
+      "not_held_share": 26.0,
+      "status": {
+       "kept": 1,
+       "recoverable": 427,
+       "lost": 8
+      }
+     },
+     "superseded": {
+      "n": 112,
+      "held": 0,
+      "pct": 0.0,
+      "share": 5.0,
+      "not_held": 112,
+      "not_held_share": 6.7,
+      "status": {
+       "kept": 2,
+       "recoverable": 110,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 5,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.2,
+      "not_held": 5,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 2,
+       "recoverable": 3,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "by_language": {
+    "en": {
+     "extract": {
+      "n": 100,
+      "held": 85,
+      "pct": 85.0,
+      "share": 4.5,
+      "not_held": 15,
+      "not_held_share": 0.9,
+      "status": {
+       "kept": 85,
+       "recoverable": 15,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 130,
+      "held": 99,
+      "pct": 76.2,
+      "share": 5.9,
+      "not_held": 31,
+      "not_held_share": 1.8,
+      "status": {
+       "kept": 99,
+       "recoverable": 25,
+       "lost": 6
+      }
+     },
+     "brief": {
+      "n": 298,
+      "held": 89,
+      "pct": 29.9,
+      "share": 13.4,
+      "not_held": 209,
+      "not_held_share": 12.5,
+      "status": {
+       "kept": 91,
+       "recoverable": 185,
+       "lost": 22
+      }
+     },
+     "header": {
+      "n": 438,
+      "held": 0,
+      "pct": 0.0,
+      "share": 19.7,
+      "not_held": 438,
+      "not_held_share": 26.1,
+      "status": {
+       "kept": 8,
+       "recoverable": 423,
+       "lost": 7
+      }
+     },
+     "superseded": {
+      "n": 108,
+      "held": 0,
+      "pct": 0.0,
+      "share": 4.9,
+      "not_held": 108,
+      "not_held_share": 6.4,
+      "status": {
+       "kept": 1,
+       "recoverable": 107,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 6,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.3,
+      "not_held": 6,
+      "not_held_share": 0.4,
+      "status": {
+       "kept": 1,
+       "recoverable": 5,
+       "lost": 0
+      }
+     }
+    },
+    "zh": {
+     "extract": {
+      "n": 42,
+      "held": 33,
+      "pct": 78.6,
+      "share": 1.9,
+      "not_held": 9,
+      "not_held_share": 0.5,
+      "status": {
+       "kept": 33,
+       "recoverable": 9,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 87,
+      "held": 64,
+      "pct": 73.6,
+      "share": 3.9,
+      "not_held": 23,
+      "not_held_share": 1.4,
+      "status": {
+       "kept": 65,
+       "recoverable": 18,
+       "lost": 4
+      }
+     },
+     "brief": {
+      "n": 197,
+      "held": 70,
+      "pct": 35.5,
+      "share": 8.9,
+      "not_held": 127,
+      "not_held_share": 7.6,
+      "status": {
+       "kept": 71,
+       "recoverable": 116,
+       "lost": 10
+      }
+     },
+     "header": {
+      "n": 304,
+      "held": 0,
+      "pct": 0.0,
+      "share": 13.7,
+      "not_held": 304,
+      "not_held_share": 18.1,
+      "status": {
+       "kept": 4,
+       "recoverable": 297,
+       "lost": 3
+      }
+     },
+     "superseded": {
+      "n": 79,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.6,
+      "not_held": 79,
+      "not_held_share": 4.7,
+      "status": {
+       "kept": 0,
+       "recoverable": 79,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 1,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.0,
+      "not_held": 1,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 1,
+       "recoverable": 0,
+       "lost": 0
+      }
+     }
+    },
+    "mixed": {
+     "extract": {
+      "n": 35,
+      "held": 29,
+      "pct": 82.9,
+      "share": 1.6,
+      "not_held": 6,
+      "not_held_share": 0.4,
+      "status": {
+       "kept": 29,
+       "recoverable": 6,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 58,
+      "held": 37,
+      "pct": 63.8,
+      "share": 2.6,
+      "not_held": 21,
+      "not_held_share": 1.3,
+      "status": {
+       "kept": 39,
+       "recoverable": 14,
+       "lost": 5
+      }
+     },
+     "brief": {
+      "n": 128,
+      "held": 38,
+      "pct": 29.7,
+      "share": 5.8,
+      "not_held": 90,
+      "not_held_share": 5.4,
+      "status": {
+       "kept": 39,
+       "recoverable": 81,
+       "lost": 8
+      }
+     },
+     "header": {
+      "n": 167,
+      "held": 0,
+      "pct": 0.0,
+      "share": 7.5,
+      "not_held": 167,
+      "not_held_share": 10.0,
+      "status": {
+       "kept": 1,
+       "recoverable": 163,
+       "lost": 3
+      }
+     },
+     "superseded": {
+      "n": 42,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.9,
+      "not_held": 42,
+      "not_held_share": 2.5,
+      "status": {
+       "kept": 1,
+       "recoverable": 41,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 2,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 2,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 0,
+       "recoverable": 2,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "superseded_later": {
+    "yes": 10,
+    "no": 219
+   }
+  },
+  "1000000": {
+   "shortened_fact_rows": 3029,
+   "levels": {
+    "extract": {
+     "n": 217,
+     "held": 179,
+     "pct": 82.5,
+     "share": 7.2,
+     "not_held": 38,
+     "not_held_share": 1.6,
+     "status": {
+      "kept": 181,
+      "recoverable": 35,
+      "lost": 1
+     }
+    },
+    "errors": {
+     "n": 345,
+     "held": 266,
+     "pct": 77.1,
+     "share": 11.4,
+     "not_held": 79,
+     "not_held_share": 3.4,
+     "status": {
+      "kept": 267,
+      "recoverable": 66,
+      "lost": 12
+     }
+    },
+    "brief": {
+     "n": 874,
+     "held": 258,
+     "pct": 29.5,
+     "share": 28.9,
+     "not_held": 616,
+     "not_held_share": 26.5,
+     "status": {
+      "kept": 275,
+      "recoverable": 547,
+      "lost": 52
+     }
+    },
+    "header": {
+     "n": 1237,
+     "held": 0,
+     "pct": 0.0,
+     "share": 40.8,
+     "not_held": 1237,
+     "not_held_share": 53.2,
+     "status": {
+      "kept": 36,
+      "recoverable": 1195,
+      "lost": 6
+     }
+    },
+    "superseded": {
+     "n": 345,
+     "held": 0,
+     "pct": 0.0,
+     "share": 11.4,
+     "not_held": 345,
+     "not_held_share": 14.8,
+     "status": {
+      "kept": 5,
+      "recoverable": 340,
+      "lost": 0
+     }
+    },
+    "hermes": {
+     "n": 11,
+     "held": 0,
+     "pct": 0.0,
+     "share": 0.4,
+     "not_held": 11,
+     "not_held_share": 0.5,
+     "status": {
+      "kept": 4,
+      "recoverable": 6,
+      "lost": 1
+     }
+    }
+   },
+   "by_kind": {
+    "natural": {
+     "extract": {
+      "n": 58,
+      "held": 49,
+      "pct": 84.5,
+      "share": 1.9,
+      "not_held": 9,
+      "not_held_share": 0.4,
+      "status": {
+       "kept": 50,
+       "recoverable": 8,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 11,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.4,
+      "not_held": 11,
+      "not_held_share": 0.5,
+      "status": {
+       "kept": 0,
+       "recoverable": 11,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 175,
+      "held": 40,
+      "pct": 22.9,
+      "share": 5.8,
+      "not_held": 135,
+      "not_held_share": 5.8,
+      "status": {
+       "kept": 43,
+       "recoverable": 132,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 418,
+      "held": 0,
+      "pct": 0.0,
+      "share": 13.8,
+      "not_held": 418,
+      "not_held_share": 18.0,
+      "status": {
+       "kept": 7,
+       "recoverable": 411,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 158,
+      "held": 0,
+      "pct": 0.0,
+      "share": 5.2,
+      "not_held": 158,
+      "not_held_share": 6.8,
+      "status": {
+       "kept": 0,
+       "recoverable": 158,
+       "lost": 0
+      }
+     }
+    },
+    "error": {
+     "extract": {
+      "n": 67,
+      "held": 59,
+      "pct": 88.1,
+      "share": 2.2,
+      "not_held": 8,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 59,
+       "recoverable": 8,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 279,
+      "held": 229,
+      "pct": 82.1,
+      "share": 9.2,
+      "not_held": 50,
+      "not_held_share": 2.1,
+      "status": {
+       "kept": 229,
+       "recoverable": 50,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 152,
+      "held": 121,
+      "pct": 79.6,
+      "share": 5.0,
+      "not_held": 31,
+      "not_held_share": 1.3,
+      "status": {
+       "kept": 121,
+       "recoverable": 31,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 108,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.6,
+      "not_held": 108,
+      "not_held_share": 4.6,
+      "status": {
+       "kept": 0,
+       "recoverable": 108,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 59,
+      "held": 0,
+      "pct": 0.0,
+      "share": 1.9,
+      "not_held": 59,
+      "not_held_share": 2.5,
+      "status": {
+       "kept": 0,
+       "recoverable": 59,
+       "lost": 0
+      }
+     }
+    },
+    "buried": {
+     "extract": {
+      "n": 68,
+      "held": 63,
+      "pct": 92.6,
+      "share": 2.2,
+      "not_held": 5,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 63,
+       "recoverable": 5,
+       "lost": 0
+      }
+     },
+     "brief": {
+      "n": 163,
+      "held": 51,
+      "pct": 31.3,
+      "share": 5.4,
+      "not_held": 112,
+      "not_held_share": 4.8,
+      "status": {
+       "kept": 51,
+       "recoverable": 112,
+       "lost": 0
+      }
+     },
+     "header": {
+      "n": 419,
+      "held": 0,
+      "pct": 0.0,
+      "share": 13.8,
+      "not_held": 419,
+      "not_held_share": 18.0,
+      "status": {
+       "kept": 0,
+       "recoverable": 419,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 108,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.6,
+      "not_held": 108,
+      "not_held_share": 4.6,
+      "status": {
+       "kept": 0,
+       "recoverable": 108,
+       "lost": 0
+      }
+     }
+    },
+    "real": {
+     "extract": {
+      "n": 24,
+      "held": 8,
+      "pct": 33.3,
+      "share": 0.8,
+      "not_held": 16,
+      "not_held_share": 0.7,
+      "status": {
+       "kept": 9,
+       "recoverable": 14,
+       "lost": 1
+      }
+     },
+     "errors": {
+      "n": 55,
+      "held": 37,
+      "pct": 67.3,
+      "share": 1.8,
+      "not_held": 18,
+      "not_held_share": 0.8,
+      "status": {
+       "kept": 38,
+       "recoverable": 5,
+       "lost": 12
+      }
+     },
+     "brief": {
+      "n": 384,
+      "held": 46,
+      "pct": 12.0,
+      "share": 12.7,
+      "not_held": 338,
+      "not_held_share": 14.5,
+      "status": {
+       "kept": 60,
+       "recoverable": 272,
+       "lost": 52
+      }
+     },
+     "header": {
+      "n": 292,
+      "held": 0,
+      "pct": 0.0,
+      "share": 9.6,
+      "not_held": 292,
+      "not_held_share": 12.6,
+      "status": {
+       "kept": 29,
+       "recoverable": 257,
+       "lost": 6
+      }
+     },
+     "superseded": {
+      "n": 20,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.7,
+      "not_held": 20,
+      "not_held_share": 0.9,
+      "status": {
+       "kept": 5,
+       "recoverable": 15,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 11,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.4,
+      "not_held": 11,
+      "not_held_share": 0.5,
+      "status": {
+       "kept": 4,
+       "recoverable": 6,
+       "lost": 1
+      }
+     }
+    }
+   },
+   "by_style": {
+    "specific": {
+     "extract": {
+      "n": 100,
+      "held": 86,
+      "pct": 86.0,
+      "share": 3.3,
+      "not_held": 14,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 87,
+       "recoverable": 13,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 184,
+      "held": 139,
+      "pct": 75.5,
+      "share": 6.1,
+      "not_held": 45,
+      "not_held_share": 1.9,
+      "status": {
+       "kept": 140,
+       "recoverable": 36,
+       "lost": 8
+      }
+     },
+     "brief": {
+      "n": 443,
+      "held": 175,
+      "pct": 39.5,
+      "share": 14.6,
+      "not_held": 268,
+      "not_held_share": 11.5,
+      "status": {
+       "kept": 185,
+       "recoverable": 235,
+       "lost": 23
+      }
+     },
+     "header": {
+      "n": 650,
+      "held": 0,
+      "pct": 0.0,
+      "share": 21.5,
+      "not_held": 650,
+      "not_held_share": 27.9,
+      "status": {
+       "kept": 20,
+       "recoverable": 628,
+       "lost": 2
+      }
+     },
+     "superseded": {
+      "n": 171,
+      "held": 0,
+      "pct": 0.0,
+      "share": 5.6,
+      "not_held": 171,
+      "not_held_share": 7.4,
+      "status": {
+       "kept": 3,
+       "recoverable": 168,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 4,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 4,
+      "not_held_share": 0.2,
+      "status": {
+       "kept": 2,
+       "recoverable": 2,
+       "lost": 0
+      }
+     }
+    },
+    "vague": {
+     "extract": {
+      "n": 117,
+      "held": 93,
+      "pct": 79.5,
+      "share": 3.9,
+      "not_held": 24,
+      "not_held_share": 1.0,
+      "status": {
+       "kept": 94,
+       "recoverable": 22,
+       "lost": 1
+      }
+     },
+     "errors": {
+      "n": 161,
+      "held": 127,
+      "pct": 78.9,
+      "share": 5.3,
+      "not_held": 34,
+      "not_held_share": 1.5,
+      "status": {
+       "kept": 127,
+       "recoverable": 30,
+       "lost": 4
+      }
+     },
+     "brief": {
+      "n": 431,
+      "held": 83,
+      "pct": 19.3,
+      "share": 14.2,
+      "not_held": 348,
+      "not_held_share": 15.0,
+      "status": {
+       "kept": 90,
+       "recoverable": 312,
+       "lost": 29
+      }
+     },
+     "header": {
+      "n": 587,
+      "held": 0,
+      "pct": 0.0,
+      "share": 19.4,
+      "not_held": 587,
+      "not_held_share": 25.2,
+      "status": {
+       "kept": 16,
+       "recoverable": 567,
+       "lost": 4
+      }
+     },
+     "superseded": {
+      "n": 174,
+      "held": 0,
+      "pct": 0.0,
+      "share": 5.7,
+      "not_held": 174,
+      "not_held_share": 7.5,
+      "status": {
+       "kept": 2,
+       "recoverable": 172,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 7,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.2,
+      "not_held": 7,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 2,
+       "recoverable": 4,
+       "lost": 1
+      }
+     }
+    }
+   },
+   "by_language": {
+    "en": {
+     "extract": {
+      "n": 118,
+      "held": 103,
+      "pct": 87.3,
+      "share": 3.9,
+      "not_held": 15,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 103,
+       "recoverable": 14,
+       "lost": 1
+      }
+     },
+     "errors": {
+      "n": 165,
+      "held": 127,
+      "pct": 77.0,
+      "share": 5.4,
+      "not_held": 38,
+      "not_held_share": 1.6,
+      "status": {
+       "kept": 127,
+       "recoverable": 32,
+       "lost": 6
+      }
+     },
+     "brief": {
+      "n": 433,
+      "held": 125,
+      "pct": 28.9,
+      "share": 14.3,
+      "not_held": 308,
+      "not_held_share": 13.2,
+      "status": {
+       "kept": 132,
+       "recoverable": 273,
+       "lost": 28
+      }
+     },
+     "header": {
+      "n": 601,
+      "held": 0,
+      "pct": 0.0,
+      "share": 19.8,
+      "not_held": 601,
+      "not_held_share": 25.8,
+      "status": {
+       "kept": 13,
+       "recoverable": 585,
+       "lost": 3
+      }
+     },
+     "superseded": {
+      "n": 166,
+      "held": 0,
+      "pct": 0.0,
+      "share": 5.5,
+      "not_held": 166,
+      "not_held_share": 7.1,
+      "status": {
+       "kept": 2,
+       "recoverable": 164,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 7,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.2,
+      "not_held": 7,
+      "not_held_share": 0.3,
+      "status": {
+       "kept": 1,
+       "recoverable": 5,
+       "lost": 1
+      }
+     }
+    },
+    "zh": {
+     "extract": {
+      "n": 59,
+      "held": 45,
+      "pct": 76.3,
+      "share": 1.9,
+      "not_held": 14,
+      "not_held_share": 0.6,
+      "status": {
+       "kept": 46,
+       "recoverable": 13,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 112,
+      "held": 88,
+      "pct": 78.6,
+      "share": 3.7,
+      "not_held": 24,
+      "not_held_share": 1.0,
+      "status": {
+       "kept": 89,
+       "recoverable": 20,
+       "lost": 3
+      }
+     },
+     "brief": {
+      "n": 265,
+      "held": 80,
+      "pct": 30.2,
+      "share": 8.7,
+      "not_held": 185,
+      "not_held_share": 8.0,
+      "status": {
+       "kept": 87,
+       "recoverable": 165,
+       "lost": 13
+      }
+     },
+     "header": {
+      "n": 406,
+      "held": 0,
+      "pct": 0.0,
+      "share": 13.4,
+      "not_held": 406,
+      "not_held_share": 17.5,
+      "status": {
+       "kept": 13,
+       "recoverable": 393,
+       "lost": 0
+      }
+     },
+     "superseded": {
+      "n": 115,
+      "held": 0,
+      "pct": 0.0,
+      "share": 3.8,
+      "not_held": 115,
+      "not_held_share": 4.9,
+      "status": {
+       "kept": 3,
+       "recoverable": 112,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 2,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 2,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 2,
+       "recoverable": 0,
+       "lost": 0
+      }
+     }
+    },
+    "mixed": {
+     "extract": {
+      "n": 40,
+      "held": 31,
+      "pct": 77.5,
+      "share": 1.3,
+      "not_held": 9,
+      "not_held_share": 0.4,
+      "status": {
+       "kept": 32,
+       "recoverable": 8,
+       "lost": 0
+      }
+     },
+     "errors": {
+      "n": 68,
+      "held": 51,
+      "pct": 75.0,
+      "share": 2.2,
+      "not_held": 17,
+      "not_held_share": 0.7,
+      "status": {
+       "kept": 51,
+       "recoverable": 14,
+       "lost": 3
+      }
+     },
+     "brief": {
+      "n": 176,
+      "held": 53,
+      "pct": 30.1,
+      "share": 5.8,
+      "not_held": 123,
+      "not_held_share": 5.3,
+      "status": {
+       "kept": 56,
+       "recoverable": 109,
+       "lost": 11
+      }
+     },
+     "header": {
+      "n": 230,
+      "held": 0,
+      "pct": 0.0,
+      "share": 7.6,
+      "not_held": 230,
+      "not_held_share": 9.9,
+      "status": {
+       "kept": 10,
+       "recoverable": 217,
+       "lost": 3
+      }
+     },
+     "superseded": {
+      "n": 64,
+      "held": 0,
+      "pct": 0.0,
+      "share": 2.1,
+      "not_held": 64,
+      "not_held_share": 2.8,
+      "status": {
+       "kept": 0,
+       "recoverable": 64,
+       "lost": 0
+      }
+     },
+     "hermes": {
+      "n": 2,
+      "held": 0,
+      "pct": 0.0,
+      "share": 0.1,
+      "not_held": 2,
+      "not_held_share": 0.1,
+      "status": {
+       "kept": 1,
+       "recoverable": 1,
+       "lost": 0
+      }
+     }
+    }
+   },
+   "superseded_later": {
+    "yes": 9,
+    "no": 336
+   }
+  }
+ }
+}
