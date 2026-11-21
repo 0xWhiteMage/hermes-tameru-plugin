@@ -9,14 +9,17 @@ adapter; ranking and vetoes are the engine's.
 """
 from __future__ import annotations
 
+import time
 from dataclasses import replace as dataclass_replace
 
 from .config import TameruSettings
 from .hermes_compat import (
     SKILL_PRUNED_MARKER_PREFIX,
+    collect_protected_skill_names,
     is_persisted_block,
     message_budget_tokens,
     refused_summary,
+    tool_calls_by_id,
 )
 from .payload import content_hint, parse_payload
 from .query import _is_scaffolding, build_query, usable_query
@@ -28,7 +31,10 @@ from .tameru.plan import CacheState, Candidate, PlanInput, PlanItem, plan as eng
 from .tameru.transcript import build_selector_query
 
 PLAN_K = 3                  # engine-side hysteresis between non-trigger acts
-PLAN_H = 0                  # forecast horizon: no proactive warm-step acts
+PLAN_H = 0                  # trigger-path forecast horizon (the trigger itself does not need one)
+PLAN_WARM_H = 3             # forecast horizon for a warm-step act (the forecast exception)
+PLAN_MARGIN_STEPS = 6       # extra runway steps a warm act must leave beyond H
+PLAN_GROWTH_STEPS = 6       # steps the warm-step growth estimate averages over
 PLAN_LOSS_PROFILE = "replay-2026-11-21"
 PLAN_EV_STRENGTH = {"save_space": "less", "balanced": "normal", "preserve_detail": "more"}
 PLAN_DEFAULT_STEP_TOKENS = 4000   # n_eff divisor until per-step growth is observed
@@ -55,6 +61,19 @@ def step_tokens(engine) -> int:
         ordered = sorted(samples)
         return max(1, ordered[len(ordered) // 2])
     return PLAN_DEFAULT_STEP_TOKENS
+
+
+def mean_step_tokens(engine, steps: int = PLAN_GROWTH_STEPS) -> float:
+    """Mean tokens the prompt added per step over the last ``steps`` growth samples; 0 when unseen."""
+    samples = list(engine._plan_growth)[-steps:]
+    return sum(samples) / len(samples) if samples else 0.0
+
+
+def _steps_since_last_act(engine) -> int | None:
+    last = getattr(engine, "_plan_last_act", None)
+    if last is None:
+        return None
+    return max(0, getattr(engine, "_responses", 0) - last)
 
 
 def _spill_note(content: str) -> str:
@@ -203,10 +222,7 @@ def plan_rows(engine, result, call_id_to_tool, min_prune_chars, rest, kw, scope)
     step = step_tokens(engine)
     projected = max(0, body_tokens - max(0, demote_chars - scope.plan_room) // 4)
     n_eff = min(200.0, max(0.0, (trigger - projected) / step)) if trigger else 0.0
-    steps_since = (
-        None if getattr(engine, "_plan_last_act", None) is None
-        else max(0, getattr(engine, "_responses", 0) - engine._plan_last_act)
-    )
+    steps_since = _steps_since_last_act(engine)
     try:
         policy = dataclass_replace(HERMES_POLICY, max_risk=ceiling, ev=EVPolicy(
             price_profile=settings.price_profile,
@@ -270,3 +286,112 @@ def apply_plan_row(engine, result, idx, entry, scope, settings) -> bool:
                                f"superseded by msg {entry['succ_idx']} ({entry['succ_kind']})"),
         )
     return engine._commit_header_or_errors(result, idx, content, tool, ref, pl, scope, line)
+
+
+# ---- the forecast exception: a warm-step act at Hermes' proactive-prune checkpoint ---------------
+#
+# Hermes calls ``prune_tool_results_only`` before every post-tool request. Under ``plan`` the engine's
+# ``plan()`` decides whether this call commits: inside the forecast horizon the adapter shadows the
+# pass Hermes would run (same boundary, spared round, dedupe and skill protection, same demote-call
+# arguments), builds the compact-mode ``PlanInput`` over the rows the prune would demote, and the
+# engine's runway gate decides. Only an acted plan reaches the native pass, where Hermes' own commit
+# gates (min reclaim, regrowth rearm) still apply; a declined plan never rewrites the prompt.
+
+def warm_prune(engine, parent, messages, current_tokens, *args, **kwargs):
+    """``prune_tool_results_only`` under the ``plan`` policy: a warm-step ``plan()`` gates the act."""
+    from .engine import _SCOPE                      # late: engine delegates here
+    scope = engine._new_scope(messages)
+    token = _SCOPE.set(scope)
+    started = time.perf_counter()
+    try:
+        with engine._activity.lifecycle_lock:
+            if not engine._pass_is_current(scope):
+                return messages, 0
+        body = message_budget_tokens(messages)
+        trigger = engine._policy_threshold_tokens()
+        growth = mean_step_tokens(engine)
+        steps_to_trigger = int(max(0, trigger - body) / growth) if growth > 0 else None
+        steps_since = _steps_since_last_act(engine)
+        gate = None
+        if growth <= 0:
+            gate = "no_runway"
+        elif steps_to_trigger is None or steps_to_trigger > PLAN_WARM_H:
+            gate = "no_forecast"
+        elif steps_since is not None and steps_since < PLAN_K:
+            gate = "hysteresis"
+        if gate is not None:
+            engine._telemetry.count("plan_warm", acted=False, gate=gate)
+            return messages, 0
+        # The shadow mirrors the real pass's inputs exactly: boundary (count tail, spared pending
+        # round), deduped working copy, protected skills and the pass-2 demote-call arguments.
+        result = [m.copy() for m in messages]
+        call_id_to_tool = tool_calls_by_id(result)
+        boundary = engine._prune_boundary(result, getattr(engine, "protect_last_n", 0), None)
+        try:
+            spared = engine._spared_pending_tool_round(result)
+        except Exception:
+            spared = range(0)
+        if spared:
+            boundary = min(boundary, spared.start)
+            scope.boundary = boundary
+        engine._dedupe_tool_results(result)
+        protected = collect_protected_skill_names(result, boundary)
+        min_prune = engine._raw_native("proactive_prune_min_result_chars", 8000)
+        plan_rows(engine, result, call_id_to_tool, min_prune, (protected,), {}, scope)
+        if scope.plan_input is None:
+            engine._telemetry.count("plan_warm", acted=False, gate="error")
+            return messages, 0
+        try:
+            scope.plan_input = dataclass_replace(
+                scope.plan_input, event="step",
+                steps_to_trigger=steps_to_trigger,
+                growth_tokens_per_step=growth,
+                margin_steps=PLAN_MARGIN_STEPS, H=PLAN_WARM_H,
+                cache=CacheState(warm=True, n_eff=scope.plan_input.cache.n_eff))
+            scope.plan_obj = engine_plan(scope.plan_input)
+            scope.plan_actions = {int(a.id): a for a in scope.plan_obj.actions}
+        except Exception:
+            engine._telemetry.count("error", where="plan")
+            scope.plan_entries = {}
+            return messages, 0
+        engine._telemetry.count(
+            "plan_warm", acted=scope.plan_obj.acted, gate=scope.plan_obj.gate,
+            blocked=scope.plan_blocked, items=len(scope.plan_input.items))
+        if not scope.plan_obj.acted:
+            return messages, 0
+        # An acted plan opens Hermes' pre-gate only; its reclaim and rearm gates still decide, and
+        # the ladder renders each row's rung through the same commit machinery as the trigger pass.
+        scope.native_options["proactive_prune_tokens"] = 1
+        with engine._telemetry.hold() as held:
+            res = parent(messages, current_tokens, *args, **kwargs)
+        final_scope = _SCOPE.get()
+        if res[0] is messages or res[1] <= 0:
+            engine._telemetry.count("plan_warm_no_commit")
+            return messages, 0
+        count = 0
+        if final_scope is not None:
+            with engine._activity.lifecycle_lock:
+                if engine._publish_pass_state(final_scope):
+                    held.apply()
+                    count = engine._activity.confirm(final_scope.changes.values(), res[0])
+                    engine._activity.refresh(res[0])
+            engine._activity_registry.notify(engine, count)
+        engine._plan_warm_pending.append(getattr(engine, "_responses", 0))
+        engine._telemetry.count("plan_warm_commit")
+        return res
+    finally:
+        engine._close_pass(scope)
+        _SCOPE.reset(token)
+        engine._telemetry.time(time.perf_counter() - started)
+
+
+def note_compaction(engine) -> None:
+    """A committed compaction marks warm acts within ``H + margin_steps`` as failed prevention."""
+    pending = getattr(engine, "_plan_warm_pending", None) or []
+    if not pending:
+        return
+    now = getattr(engine, "_responses", 0)
+    failed = sum(1 for step in pending if now - step <= PLAN_WARM_H + PLAN_MARGIN_STEPS)
+    if failed:
+        engine._telemetry.count("plan_warm_act_failed", failed)
+    engine._plan_warm_pending = []

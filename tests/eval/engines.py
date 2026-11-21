@@ -156,8 +156,27 @@ def tameru_autotune_off() -> Any:
 @register("HP1")
 def hp1() -> Any:
     """The plugin under ``policy_mode: plan`` — the engine's ``plan()`` in compact mode at Hermes' own
-    cache-broken moments only (no plugin-supplied proactive prune), EV strength ``normal`` (balanced
-    preference), price profile ``anthropic-sonnet-5.5-5m``."""
+    cache-broken moments only (no plugin-supplied proactive prune: ``plan_forecast`` off), EV strength
+    ``normal`` (balanced preference), price profile ``anthropic-sonnet-5.5-5m``."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(
+        settings=TameruSettings(
+            policy_mode="plan",
+            preference="balanced",
+            price_profile="anthropic-sonnet-5.5-5m",
+            plan_forecast=False,
+        ),
+        quiet_mode=True,
+    )
+
+
+@register("HP2")
+def hp2() -> Any:
+    """HP1 plus the forecast exception: at Hermes' proactive-prune checkpoint a warm-step ``plan()``
+    (``H = 3``, ``margin_steps = 6``, ``K = 3``) may act early when its own projected prompt leaves
+    enough runway; the trigger pass is unchanged."""
     from hermes_tameru_plugin.config import TameruSettings
     from hermes_tameru_plugin.engine import TameruContextEngine
 

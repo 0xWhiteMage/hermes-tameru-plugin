@@ -48,6 +48,7 @@ class TameruSettings:
     enabled: bool = True                       # kill switch -> pure stock ContextCompressor behaviour
     policy_mode: str = "adaptive"             # adaptive | legacy | plan
     price_profile: str = "anthropic-sonnet-5.5-5m"   # engine prices.json profile the ``plan`` policy's EV check prices with
+    plan_forecast: bool = True                  # off: under ``policy_mode: plan`` the forecast exception does not run — proactive checkpoints delegate to the native pass (TAMERU_PLAN_FORECAST=off)
     autotune: bool = True                     # adaptive mode retunes itself from live session signals
     lazy_tool: bool = False                   # off by default: send the recovery tool only once a result has been shortened (needs Hermes' llm_request middleware; TAMERU_LAZY_TOOL=on)
     net_estimate: bool = False                # off by default: /tameru stats adds a signed estimate of what the cleanups saved or cost (TAMERU_NET_ESTIMATE=on)
@@ -242,6 +243,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "enabled": _parse_bool,
     "policy_mode": _choice(POLICY_MODES),
     "price_profile": _parse_price_profile,
+    "plan_forecast": _parse_bool,
     "autotune": _parse_bool,
     "manifest": _parse_bool,
     "edits": _parse_bool,

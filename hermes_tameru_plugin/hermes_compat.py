@@ -387,6 +387,52 @@ def tool_calls_by_id(messages: list[dict]) -> dict[str, tuple[str, Any]]:
     return calls(messages)
 
 
+_SKILL_PRUNE_RECENT_WINDOW = 10     # mirror of ``agent.context_compressor._SKILL_PRUNE_RECENT_WINDOW``
+
+
+def _local_skill_view_call_sites(messages: list[dict]) -> list[tuple[int, str]]:
+    """Local mirror of ``agent.context_compressor._skill_view_call_sites``."""
+    sites: list[tuple[int, str]] = []
+    for i, msg in enumerate(messages):
+        if msg.get("role") != "assistant":
+            continue
+        for tc in msg.get("tool_calls") or []:
+            fn = _tc_get(tc, "function", {})
+            args_str = _tc_get(fn, "arguments")
+            if _tc_get(fn, "name") != "skill_view" or not isinstance(args_str, str):
+                continue
+            skill = _local_json_dict(args_str).get("name", "")
+            if isinstance(skill, str) and skill:
+                sites.append((i, skill))
+    return sites
+
+
+def _local_collect_protected_skill_names(messages: list[dict], prune_boundary: int) -> set[str]:
+    """Local mirror of ``agent.context_compressor._collect_protected_skill_names``."""
+    total = len(messages)
+    if not total:
+        return set()
+    recent_start = max(0, total - _SKILL_PRUNE_RECENT_WINDOW)
+    tail_start = max(0, prune_boundary)
+    tail_user_texts = [
+        m["content"].lower() for m in messages[tail_start:]
+        if m.get("role") == "user" and isinstance(m.get("content"), str) and m["content"]
+    ]
+    return {
+        skill.lower() for idx, skill in _local_skill_view_call_sites(messages)
+        if idx >= min(recent_start, tail_start) or any(skill.lower() in text for text in tail_user_texts)
+    }
+
+
+def collect_protected_skill_names(messages: list[dict], prune_boundary: int) -> set[str]:
+    """Skill names Hermes' proactive prune protects; the local mirror when Hermes is absent."""
+    collect = _prefer(
+        "agent.context_compressor", "_collect_protected_skill_names",
+        _local_collect_protected_skill_names,
+    )
+    return collect(messages, prune_boundary)
+
+
 def _local_message_budget_tokens(messages: list[dict]) -> int:
     """Local mirror of ``agent.context_compressor._estimate_msg_budget_tokens`` summed over ``messages`` (chars/4)."""
     total = 0

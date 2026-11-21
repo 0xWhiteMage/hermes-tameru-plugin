@@ -15,7 +15,12 @@ All notable changes to this project are documented here. The format follows
   setting (default `anthropic-sonnet-5.5-5m`) prices the EV check; `preference` maps to EV strength.
   Replay-only dev-corpus numbers: [docs/REPLAY-PLAN-P3.md](docs/REPLAY-PLAN-P3.md) — the registered
   cache-break gate passes at every window (breaks equal stock, where the incumbent policy fails), cost
-  is neutral vs stock, and ~0.6-1.4 more facts per session survive.
+  is neutral vs stock, and ~0.6-1.4 more facts per session survive. The **forecast exception** is wired
+  at Hermes' proactive-prune checkpoint: a warm-step `plan()` (`H = 3`, `margin_steps = 6`, `K = 3`)
+  may act early when its own projected prompt leaves enough runway — replay arm HP2 halves compactions
+  at 252K/500K but pays +0.2-0.5 prefix breaks per session, so the strict breaks-≤-stock gate does not
+  pass at any window and cost runs +3 to +11% over stock; the failed-prevention share is 0.5% / 0% at
+  252K / 500K but 64% at 128K.
 - Vendored engine at `fd93aa7` (Tameru 1.10.x + `tameru.plan`, EV `decide`, loss/price profiles).
 
 ## [1.10.0] - Unreleased

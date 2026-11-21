@@ -83,6 +83,20 @@ def test_no_plugin_prune_trigger_under_plan():
     assert getattr(bare, "proactive_prune_tokens", 0) in (0, None)
 
 
+def test_plan_forecast_off_delegates_to_parent():
+    """``plan_forecast=False`` reproduces the HP1 arm: proactive checkpoints delegate untouched."""
+    engine = TameruContextEngine(
+        settings=TameruSettings(policy_mode="plan", plan_forecast=False),
+        quiet_mode=True, config_context_length=64_000,
+    )
+    chat = Chat()
+    chat.tool("terminal", {"command": "tail app.log"}, server_log())
+    messages = chat.finish()
+    out, count = engine.prune_tool_results_only(messages, current_tokens=50_000)
+    assert out is messages and count == 0
+    assert getattr(engine, "_plan_warm_pending", []) == []
+
+
 def test_warm_prune_call_without_trigger_does_not_plan():
     """With no trigger armed (Hermes' proactive prune off) a call returns the input and plans nothing."""
     engine = plan_engine(proactive_prune_tokens=0)
@@ -93,6 +107,93 @@ def test_warm_prune_call_without_trigger_does_not_plan():
     assert out is messages and count == 0
     scope = engine_module._SCOPE.get()
     assert scope is None or scope.plan_input is None
+
+
+# ---- the forecast exception (warm-step acts) -----------------------------------------------------
+
+
+def _growth(engine, step: int = 200, n: int = 8, end: int = 0) -> None:
+    """Feed ``observe_body`` ``n`` steady growth samples of ``step`` tokens ending at ``end``."""
+    from hermes_tameru_plugin import plan_pass
+
+    for i in range(1, n + 1):
+        plan_pass.observe_body(engine, end - step * (n - i))
+
+
+def test_warm_step_commits_inside_horizon_with_runway():
+    """Near the trigger (≤ H steps out) an act that leaves ≥ H + margin runway commits."""
+    from hermes_tameru_plugin.hermes_compat import message_budget_tokens
+
+    engine = plan_engine()
+    chat = Chat()
+    chat.tool("terminal", {"command": "tail a.log"}, server_log())
+    chat.tool("terminal", {"command": "tail b.log"}, server_log(seed=2))
+    messages = chat.finish()
+    body = message_budget_tokens(messages)
+    _growth(engine, step=200, end=body)
+    engine.threshold_tokens = body + 600          # steps_to_trigger = 3 ≤ H
+    out, count = engine.prune_tool_results_only(messages, current_tokens=body)
+    assert out is not messages and count > 0
+    assert rungs(out), "a warm act renders plan rungs"
+    events = engine._telemetry.snapshot()["events"]
+    assert events.get("plan_warm_commit", {}).get("count", 0) == 1
+
+
+def test_warm_step_outside_horizon_declines_without_items():
+    """Beyond ``steps_to_trigger > H`` the pass stands down before any row is shadowed."""
+    from hermes_tameru_plugin.hermes_compat import message_budget_tokens
+
+    engine = plan_engine()
+    chat = Chat()
+    chat.tool("terminal", {"command": "tail a.log"}, server_log())
+    messages = chat.finish()
+    body = message_budget_tokens(messages)
+    _growth(engine, step=200, end=body)
+    engine.threshold_tokens = body + 2_000        # steps_to_trigger = 10 > H
+    out, count = engine.prune_tool_results_only(messages, current_tokens=body)
+    assert out is messages and count == 0
+
+
+def test_warm_step_without_runway_declines():
+    """An act whose projected prompt leaves < H + margin runway stands down with no_runway."""
+    from hermes_tameru_plugin.hermes_compat import message_budget_tokens
+
+    engine = plan_engine()
+    chat = Chat()
+    chat.tool("terminal", {"command": "tail a.log"}, server_log())
+    messages = chat.finish()
+    body = message_budget_tokens(messages)
+    _growth(engine, step=2_000, end=body)
+    engine.threshold_tokens = body + 2_000        # inside H; the act saves < 9 steps of growth
+    out, count = engine.prune_tool_results_only(messages, current_tokens=body)
+    assert out is messages and count == 0
+
+
+def test_warm_step_respects_hysteresis():
+    from hermes_tameru_plugin.hermes_compat import message_budget_tokens
+
+    engine = plan_engine()
+    chat = Chat()
+    chat.tool("terminal", {"command": "tail a.log"}, server_log())
+    messages = chat.finish()
+    body = message_budget_tokens(messages)
+    _growth(engine, step=200, end=body)
+    engine.threshold_tokens = body + 600
+    engine._plan_last_act, engine._responses = 0, 1   # acted one step ago: K = 3 blocks
+    out, count = engine.prune_tool_results_only(messages, current_tokens=body)
+    assert out is messages and count == 0
+
+
+def test_warm_act_failed_prevention_is_counted():
+    """A compaction within H + margin of a warm act marks it as failed prevention."""
+    from hermes_tameru_plugin import plan_pass
+
+    engine = plan_engine()
+    engine._responses = 10
+    engine._plan_warm_pending = [9, 1]           # 1 step ago: fails; 9 steps ago: at the boundary
+    plan_pass.note_compaction(engine)
+    assert engine._telemetry.snapshot()["events"]["plan_warm_act_failed"]["count"] == 2
+    assert engine._plan_warm_pending == []
 
 
 # ---- the PlanInput ---------------------------------------------------------------------------
@@ -247,8 +348,12 @@ def test_plan_code_has_no_adaptive_constants():
         inspect.getsource(plan_pass.ev_strength),
         inspect.getsource(plan_pass.observe_body),
         inspect.getsource(plan_pass.step_tokens),
+        inspect.getsource(plan_pass.warm_prune),
+        inspect.getsource(plan_pass.mean_step_tokens),
+        inspect.getsource(plan_pass.note_compaction),
     ]
     src = "\n".join(sources)
     for constant in ("0.60", "0.85", "0.15"):
         assert not re.search(rf"(?<![\d.]){re.escape(constant)}(?![\d])", src), constant
     assert plan_pass.PLAN_K == 3 and plan_pass.PLAN_H == 0
+    assert plan_pass.PLAN_WARM_H == 3 and plan_pass.PLAN_MARGIN_STEPS == 6

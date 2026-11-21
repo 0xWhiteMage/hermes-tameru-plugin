@@ -409,6 +409,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         self._plan_growth: deque = deque(maxlen=64)     # plan policy: observed per-step body growth (tokens)
         self._plan_last_body: int | None = None         # plan policy: last observed body size
         self._plan_last_act: int | None = None          # plan policy: ``_responses`` value of the last planned act
+        self._plan_warm_pending: list[int] = []          # plan policy: ``_responses`` steps of unverified warm acts
         self._edits = EditState()
         self._chat_store = None            # per-chat records live in the plugin's own durable state (chat_store); None means memory only
         self._edits_inflight: list[str] = []
@@ -1068,11 +1069,13 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         if not (self._settings.enabled and self._seams.demote):
             return parent(messages, current_tokens, *args, **kwargs)
         if self._settings.policy_mode == "plan":
+            if not self._settings.plan_forecast:
+                return parent(messages, current_tokens, *args, **kwargs)
             from . import plan_pass
             plan_pass.observe_body(self, message_budget_tokens(messages))
-            # No proactive warm-cache pruning under this policy: a standalone prune call delegates
-            # to Hermes' native pass untouched — only a compaction trigger plans (via ``compress``).
-            return parent(messages, current_tokens, *args, **kwargs)
+            # The forecast exception: at Hermes' proactive-prune checkpoint a warm-step ``plan()``
+            # decides whether this call commits; a declined plan never reaches the native pass.
+            return plan_pass.warm_prune(self, parent, messages, current_tokens, *args, **kwargs)
         if self._policy.controls.mode not in ("legacy", "plan"):
             return self._adaptive_prune(messages, current_tokens, *args, **kwargs)
         scope = self._new_scope(messages)
@@ -1209,6 +1212,10 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             final_scope = scope
         # prepare only when the parent produced a committed-looking new candidate;
         # a no-op result carries no cache, telemetry or UI claim.
+        if isinstance(result, list) and result and result is not messages:
+            if self._settings.policy_mode == "plan":
+                from . import plan_pass
+                plan_pass.note_compaction(self)
         if isinstance(result, list) and result and result is not messages and (
             getattr(self, "compression_count", 0) > count_before
             or any(context_state(change, [m for m in result if m.get("role") == "tool"]) == "present"
@@ -1248,6 +1255,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         if (
             scope is None or scope.full or not self._token_tail
             or not (self._settings.enabled and self._seams.demote and self._settings.prune_tail == "tokens")
+            or (scope.settings or self._settings).policy_mode == "plan"
         ):
             return None
         return scope

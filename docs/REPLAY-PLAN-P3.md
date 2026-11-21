@@ -119,3 +119,95 @@ own proactive gate does not run) commits about twice per session downstream of t
 post-compaction transcript: 2.83 breaks vs stock's 2.0. Every commit is Hermes' own pass with Hermes'
 own line; the plugin neither initiates nor plans it — but the strict breaks-≤-stock comparison reads
 +0.83 there. `effective` at 64K is +4.5% vs stock [+2.5, +8.0].
+
+## HP2: the forecast exception (P3-12, engine `plan()` warm-step + adapter)
+
+HP2 = HP1 plus the warm-step act: at Hermes' proactive-prune checkpoint (every post-tool request's
+`prune_tool_results_only` call) the adapter shadows the pass Hermes would run — same boundary, spared
+round, dedupe and skill protection, same demote-call arguments — builds the compact-mode `PlanInput`
+over the rows the prune would demote, and asks `plan()` with `event: step`, `cache.warm: true`,
+`H = 3`, `margin_steps = 6`, `K = 3`, `steps_to_trigger` and `growth_tokens_per_step` (mean of the last
+6 growth samples). The engine's runway gate — `(trigger − projected_after)/growth ≥ H + margin_steps`
+— decides; only an acted plan reaches the native pass, where Hermes' own reclaim/rearm gates still
+apply. Engine-side the exception is additive to protocol 3 (`growth_tokens_per_step`, `margin_steps`,
+new gate code `no_runway`); trigger, cold-cache and prefix-rewrite events are unchanged. The new
+`plan_forecast` setting (default on) gates the warm path so the `HP1` replay arm stays reproducible:
+`HP1` = `policy_mode: plan` + `plan_forecast: off`, `HP2` = the same with it on.
+
+### weighted `effective_real` change % (Hermes weights 1/5), cluster 95% CI
+
+| comparison | 128K | 252K | 500K |
+|---|---|---|---|
+| HP2 − stock | +3.2 [+2.1, +4.3] | +11.2 [+9.6, +12.8] | +4.1 [+3.3, +5.1] |
+| HP2 − HP1 | +3.1 [+2.1, +4.1] | +11.4 [+9.9, +13.0] | +3.9 [+3.1, +4.8] |
+| HP2 − engine 1.10.0 | +16.5 [+15.0, +18.0] | +93.5 [+90.1, +96.9] | +48.2 [+46.9, +49.6] |
+| HP2 − engine 1.9.0 | +16.3 [+14.8, +17.7] | +93.2 [+89.8, +96.7] | +48.1 [+46.8, +49.5] |
+| HP2 − stock `effective` | +3.6 [+2.5, +4.7] | +11.7 [+10.2, +13.3] | +5.2 [+4.3, +6.1] |
+| HP2 − stock `effective_finder` | +5.5 [+4.2, +7.0] | +30.8 [+25.4, +36.6] | +29.8 [+22.1, +38.2] |
+
+### cache breaks, compactions, warm acts, facts
+
+| arm@window | n | prefix_breaks | compactions | prune_commits | kept | lost | recoverable |
+|---|---|---|---|---|---|---|---|
+| stock@128K | 132 | 2.11 / 278 | 2.11 / 278 | 0 | 0.74 | 3.26 | 0 |
+| HP1@128K | 132 | 2.11 / 279 | 2.11 / 279 | 0 | 1.31 | 2.29 | 0.40 |
+| HP2@128K | 132 | 2.31 / 305 | 1.96 / 258 | 47 | 1.29 | 2.27 | 0.45 |
+| e1.10.0@128K | 132 | 6.41 / 846 | 0.29 / 38 | 808 | 1.60 | 0.39 | 2.02 |
+| stock@252K | 132 | 1.93 / 255 | 1.93 / 255 | 0 | 1.34 | 6.66 | 0 |
+| HP1@252K | 132 | 1.96 / 258 | 1.96 / 258 | 0 | 2.36 | 4.64 | 1.01 |
+| HP2@252K | 132 | 2.42 / 320 | 0.93 / 123 | 197 | 3.16 | 3.11 | 1.73 |
+| e1.10.0@252K | 132 | 4.98 / 657 | 0 / 0 | 657 | 3.20 | 0.24 | 4.56 |
+| stock@500K | 132 | 1.99 / 262 | 1.99 / 262 | 0 | 1.26 | 10.74 | 0 |
+| HP1@500K | 132 | 1.99 / 262 | 1.99 / 262 | 0 | 2.65 | 8.74 | 0.61 |
+| HP2@500K | 132 | 2.16 / 285 | 1.17 / 154 | 131 | 3.40 | 6.77 | 1.83 |
+| e1.10.0@500K | 132 | 4.51 / 595 | 0 / 0 | 595 | 4.88 | 0.37 | 6.75 |
+
+### warm acts (forecast exception telemetry, per window)
+
+| window | checks | acted | no_forecast | no_runway | hysteresis | commits (/sess) | native no-commit | failed ≤H+M | fail share |
+|---|---|---|---|---|---|---|---|---|---|
+| 128K | 3863 | 47 | 2851 | 953 | 12 | 47 (0.36) | 0 | 30 | **63.8%** |
+| 252K | 7913 | 304 | 7110 | 499 | 0 | 197 (1.49) | 107 | 1 | **0.5%** |
+| 500K | 16814 | 167 | 16233 | 414 | 0 | 131 (0.99) | 36 | 0 | **0.0%** |
+
+### rungs (fact rows shortened, HP2 vs HP1 vs P2c incumbent)
+
+| rung | HP2 held% (n) | HP1 held% (n) | P2c held% (n) — 128K / 252K / 500K |
+|---|---|---|---|
+| extract | 94 / 96 / 100 (16/27/17) | 100 / 100 / 100 | 86 / 86 / 85 |
+| errors | 75 / 70 / 90 (12/37/29) | 70 / 70 / 82 | 75 / 75 / 73 |
+| brief | 53 / 43 / 51 (32/175/207) | 52 / 43 / 38 | 21 / 25 / 34 |
+| header | 0 / 0 / 0 | 0 / 0 / 0 | 0 / 0 / 0 |
+| superseded | 0 / 0 / 0 (0/2/7) | 0 / 0 / 0 | 0 / 0 / 0 |
+
+### 64K development matrix (refactor / smallrows, seeds 0-5)
+
+| shape | arm | breaks/session | compactions/session | warm commits | facts kept |
+|---|---|---|---|---|---|
+| refactor | stock | 2.0 | 2.0 | 0 | 13.0 |
+| refactor | HP2 | 2.17 | 2.17 | 0 | 12.83 |
+| smallrows | stock | 2.0 | 2.0 | 0 | 10.0 |
+| smallrows | HP2 | 2.0 | 2.0 | 0 | 10.33 |
+
+No warm act fired at 64K on either shape (the horizon + runway gates declined); `refactor` seed 2
+compacted three times vs stock's two (+0.17 breaks, −0.17 kept). `effective` at 64K: +3.1% [+2.0, +4.6].
+
+### What the HP2 numbers say
+
+- **The mechanism works as designed**: warm acts fire only inside the horizon (gates: `no_forecast`
+  dominates at every window, then `no_runway`, then a trace of `hysteresis`), commit through Hermes'
+  own gates (107 native no-commits at 252K), and **halve compactions** at 252K/500K (0.93 vs 1.93,
+  1.17 vs 1.99) — sessions with ≥1 compaction drop to 77% / 83% from ~100%.
+- **The strict breaks-≤-stock gate fails at every window** (+0.20 / +0.49 / +0.17 per session): each
+  warm commit is itself a prefix rewrite, so ~1.5 warm commits per prevented compaction nets a small
+  break increase — still 2-3× better than the incumbent's break load (6.4 / 5.0 / 4.5).
+- **Cost is worse than stock and HP1** (+3-11% weighted): at these densities the rewrite price of the
+  warm commits exceeds the compaction saving. `effective_finder` is much worse at the larger windows
+  (the finder-priced suffix re-reads land behind a broken prefix).
+- **The failed-prevention requirement (≤5%) passes at 252K/500K (0.5% / 0%) but fails at 128K
+  (63.8%)**: the dense small-window sessions compact inside H+margin despite a passing runway
+  projection — mean-growth underestimates bursty per-step token adds there. H/margin and the growth
+  estimator are the P5 tuning surface.
+- Facts kept improve further over HP1 (3.16 / 3.40 vs 2.36 / 2.65 at 252K / 500K) — the extra moments
+  catch facts the trigger pass would have lost — and retention by rung holds (extract ~96-100%,
+  errors 70-90%, header 0%).
