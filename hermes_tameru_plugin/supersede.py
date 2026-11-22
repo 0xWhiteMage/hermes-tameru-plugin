@@ -62,6 +62,7 @@ _PATH_KEYS = ("path", "file_path", "file", "target", "filename")
 _SEARCH_PATH_KEYS = ("path", "file_path", "file", "filename")  # ``search_files`` target: a mode
 _OPEN = float("inf")  # end of a read with no ``limit``
 SCAN_LIMIT = 32  # later rows a lookup considers; keeps a pass linear when many rows share a key
+_MAX_READ_LINES = 2000  # Hermes clamps a ``read_file`` ``limit`` to ``tool_output.max_lines`` (2000)
 _STUB_MAX = 400  # Hermes' stub length bound (``_is_summary_stub``)
 _STEER_DISPLAY_KIND = "steer"  # Hermes' /steer rows trail the pending round without answering it
 
@@ -322,8 +323,8 @@ def _assess(call: ToolCall) -> _Outcome:
         next_offset = _as_int(payload.get("next_offset"))
         if next_offset is not None:
             span = (span[0], min(span[1], next_offset - 1))
-        else:
-            span = None
+        elif span[1] == _OPEN or span[1] - span[0] >= _MAX_READ_LINES:
+            span = None  # cut at an unknown line (no limit, or a limit Hermes clamped)
     return _Outcome(ok=not failed and changed, live=live, span=span)
 
 
