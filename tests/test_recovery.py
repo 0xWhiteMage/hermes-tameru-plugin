@@ -233,6 +233,12 @@ def test_expand_is_exact_about_line_breaks_and_text():
     assert "⟪HERMES-CONTEXT-COMPRESSION" in out["content"], "original text is returned untouched"
 
 
+def test_recovered_surrogates_are_escaped_for_utf8_transport_without_changing_text():
+    original = "日本語 🙂\ud800\n\udcff\n"
+    answer = expand(stocked(original), {"ref": REF})
+    assert json.loads(answer.encode("utf-8"))["content"] == original
+
+
 def test_expand_accepts_loose_ref_and_numeric_spellings():
     store = stocked()
     assert call(store, ref=" REF=AB12CD34 ")["total_lines"] == 10

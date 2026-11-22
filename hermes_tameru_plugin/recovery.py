@@ -363,7 +363,7 @@ class OriginalStore:
 
 # ---- the tool --------------------------------------------------------------------------------
 def _error(message: str, **extra: Any) -> str:
-    return json.dumps({"error": message, **extra}, ensure_ascii=False)
+    return json.dumps({"error": message, **extra}, ensure_ascii=True)
 
 
 def _positive_int(args: dict, key: str) -> int | None:
@@ -587,7 +587,7 @@ def _expand(
         result["matched_lines"] = returned
         if capped:
             result["lines_capped"] = capped
-    answer = json.dumps(result, ensure_ascii=False)
+    answer = json.dumps(result, ensure_ascii=True)
     if is_untrusted_tool(tool) or has_untrusted_wrapper(original):
         return wrap_untrusted(tool if is_untrusted_tool(tool) else EXPAND_TOOL_NAME, answer)
     return answer
