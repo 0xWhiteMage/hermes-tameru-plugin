@@ -46,7 +46,7 @@ def _read() -> dict:
         if isinstance(days, dict):
             return {d: v for d, v in days.items() if isinstance(d, str) and isinstance(v, dict)
                     and all(type(v.get(key, 0)) is int and v.get(key, 0) >= 0 for key in ("cleanups", "tokens"))}
-    except (OSError, ValueError, TypeError, AttributeError):
+    except (OSError, ValueError, TypeError, AttributeError, RecursionError):
         pass
     return {}
 
