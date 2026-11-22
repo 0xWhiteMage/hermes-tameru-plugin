@@ -436,8 +436,8 @@ def test_compression_threshold_is_none_on_bad_config(compat, cfg):
     assert compat.compression_threshold("m", "p", cfg) is None
 
 
-@pytest.mark.stub_only
-def test_compression_threshold_is_none_without_agent_init(compat):
+def test_compression_threshold_is_none_without_agent_init(compat, monkeypatch):
+    monkeypatch.setitem(sys.modules, "agent.agent_init", None)
     assert compat.compression_threshold("gpt-5.5", "openai-codex", {"threshold": 0.5}) is None
 
 
