@@ -344,6 +344,17 @@ def test_an_invalid_value_falls_through_to_the_next_layer(hermes_config):
     assert len(warnings) == 1 and ENV + "MIN_TOOL_CHARS" in warnings[0]
 
 
+@pytest.mark.parametrize("raw, patterns", [
+    ("(unclosed", ["TODO"]),
+    (r"\d+", [r"\bID-\d{1,8}\b"]),
+])
+def test_invalid_protect_patterns_env_falls_back_to_yaml(hermes_config, raw, patterns):
+    hermes_config(plugin_config(protect_patterns=patterns))
+    settings, warnings = load_settings(env={ENV + "PROTECT_PATTERNS": raw})
+    assert settings.protect_patterns == tuple(patterns)
+    assert len(warnings) == 1 and ENV + "PROTECT_PATTERNS" in warnings[0]
+
+
 def test_one_bad_value_does_not_spoil_the_others(hermes_config):
     hermes_config(plugin_config(min_savings="lots", brief_chars=700))
     settings, warnings = load_settings(env={ENV + "LEDGER": "1"})
