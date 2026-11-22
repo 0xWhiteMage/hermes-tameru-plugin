@@ -149,19 +149,23 @@ class EditsMixin:
             if verb == "cancel":
                 gone = self._edits.cancel()
                 return {"message": f"Cancelled {gone} pending change{'' if gone == 1 else 's'}."}
-            matches = [c for c in self._activity.rows() if len(ref) >= 8 and c.ref.startswith(ref)]
+            refs = {c.ref for c in self._activity.rows()}
+            if verb == "unkeep":
+                refs.update(self._edits.pins())
+            matches = [key for key in refs if len(ref) >= 8 and key.startswith(ref)]
             if len(matches) > 1:
                 raise PolicyError("That reference matches more than one output. Use the full reference.")
-            change = matches[0] if matches else None
-            if change is None:
+            if not matches:
                 raise PolicyError("Tameru has no shortened output with that reference in this chat.")
-            if not change.live:
-                raise PolicyError("That output is no longer shortened in this chat.")
+            full_ref = matches[0]
             if verb == "unkeep":
-                dropped = self._edits.drop(change.ref)
+                dropped = self._edits.drop(full_ref)
                 from .session_edits import save
                 save(self)
                 return {"message": "Unpinned." if dropped else "That output was not kept."}
+            change = self._activity.get(full_ref)
+            if not change.live:
+                raise PolicyError("That output is no longer shortened in this chat.")
             if verb not in ("keep", "restore"):
                 raise PolicyError("Use keep, unkeep, restore or cancel.")
             if change.external:

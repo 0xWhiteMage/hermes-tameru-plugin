@@ -235,6 +235,29 @@ def test_a_keep_does_not_expire_and_unkeep_lets_it_go():
     assert engine._edits_overlay(out) is None
 
 
+@pytest.mark.parametrize("missing", [False, True])
+def test_a_keep_can_be_removed_after_its_shortened_row_changes_or_disappears(missing):
+    engine, out, idx, ref, original = _shortened()
+    engine.edit_change("keep", ref)
+    messages = [] if missing else [*out[:idx], dict(out[idx], content="Hermes changed it"), *out[idx + 1:]]
+    engine._activity.refresh(messages)
+    with pytest.raises(PolicyError, match="no longer shortened"):
+        engine.edit_change("restore", ref)
+    assert engine.edit_change("unkeep", ref)["message"] == "Unpinned."
+    assert engine._edits.pins() == []
+    assert engine.edit_change("unkeep", ref)["message"] == "That output was not kept."
+
+
+def test_a_keep_can_be_removed_after_its_activity_record_is_evicted():
+    engine, out, idx, ref, original = _shortened()
+    engine.edit_change("keep", ref)
+    engine._activity.clear()
+    assert engine.edit_change("unkeep", ref)["message"] == "Unpinned."
+    assert engine._edits.pins() == []
+    with pytest.raises(PolicyError, match="no shortened output"):
+        engine.edit_change("unkeep", ref)
+
+
 def test_a_keep_survives_a_restart_and_applies_again_once_the_row_is_back():
     db = _MetaDB()
     engine, out, idx, ref, original = _shortened(db)
