@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 
 import pytest
 from engine_support import Chat, demote, make_engine, pytest_failure_with_passes
@@ -118,6 +119,17 @@ def test_ask_refuses_a_reference_this_chat_never_shortened():
     engine, _, _, _ = _engine_with_one_shortened_output()
     out = _json(engine, "ask " + "0" * 16)
     assert out["ok"] is False and "no shortened output" in out["error"]
+
+
+def test_ask_refuses_an_ambiguous_short_reference():
+    engine, ref, shortened, _ = _engine_with_one_shortened_output()
+    change = engine._activity.get(ref)
+    refs = ["12345678aaaaaaaa", "12345678bbbbbbbb"]
+    engine._activity.clear()
+    engine._activity.confirm([replace(change, ref=ref) for ref in refs], [shortened])
+    out = _json(engine, "ask 12345678")
+    assert out["ok"] is False and "full reference" in out["error"]
+    assert _json(engine, f"ask {refs[0]}")["ref"] == refs[0]
 
 
 def test_the_help_text_lists_show_and_ask():

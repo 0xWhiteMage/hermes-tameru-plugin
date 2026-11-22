@@ -458,7 +458,10 @@ class SessionRegistry:
         if not parts or not re.fullmatch(r"(?:[0-9a-f]{16}|[0-9a-f]{8})", parts[0]):
             raise ValueError("Invalid command arguments.")
         ref = parts[0]
-        change = next((c for c in engine._activity.rows() if c.ref.startswith(ref)), None)
+        matches = [c for c in engine._activity.rows() if c.ref.startswith(ref)]
+        if len(matches) > 1:
+            raise PolicyError("That reference matches more than one output. Use the full reference.")
+        change = matches[0] if matches else None
         if change is None:
             raise PolicyError("Tameru has no shortened output with that reference in this chat.")
         rest = " ".join(parts[1:]).strip()
