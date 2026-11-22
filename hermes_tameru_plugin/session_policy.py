@@ -66,7 +66,7 @@ def set_controls(engine, updates, *, session_id, lifecycle_id, reset=False):
         if (not reset and candidate.mode == 'legacy'
                 and any(key != 'mode' and getattr(candidate, key) != getattr(state.controls, key)
                         for key in updates)):
-            raise PolicyError('Select Adaptive or Fixed before changing adaptive preferences.')
+            raise PolicyError('Select Adaptive before changing adaptive preferences.')
         try:
             durable = _persist(db, sid, None if reset else _record(candidate))
         except PolicyError:
@@ -81,6 +81,12 @@ def set_controls(engine, updates, *, session_id, lifecycle_id, reset=False):
         state.has_override = not reset
         state.controls_source = ('default' if reset else 'session') if durable else 'memory'
         state.controls_issue = None
+        if durable and (reset or 'preference' in updates):
+            from .session_tuner import save
+
+            save(engine)
+            if not _current(engine, owner):
+                raise PolicyError('The active session changed. Open context details again.')
         return engine.get_policy_status()
 
 
@@ -106,7 +112,10 @@ def bind_controls(engine, *, rotation=False):
         parsed = _decode(record) if record is not None else None
         if not _current(engine, owner):
             return
-        state.controls = parsed or state.defaults
+        controls = parsed or state.defaults
+        if controls.preference != state.controls.preference:
+            state.tuner.set_bias(PREFERENCE_BIAS[controls.preference])
+        state.controls = controls
         state.has_override = parsed is not None
         state.controls_source = 'session' if parsed is not None else 'default'
         state.controls_issue = ('Saved preferences were invalid; using defaults.'

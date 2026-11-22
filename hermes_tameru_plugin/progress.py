@@ -7,6 +7,8 @@ codes and plain sentences, never transcript text, request bodies or credentials.
 from __future__ import annotations
 
 import time
+from decimal import Decimal
+from fractions import Fraction
 from typing import Any
 
 SCHEMA = 3
@@ -78,14 +80,14 @@ def build_snapshot(engine) -> dict[str, Any]:
         "state": "paused" if policy.paused else "watching",
         "gauge": {
             "used": used, "basis": basis,
-            "fill_pct": round(100 * used / limit) if used is not None and _number(limit) else None,
+            "fill_pct": round(Fraction(100 * used, limit)) if used is not None and _number(limit) else None,
             "cleanup_at": _number(plan.activation_tokens) if plan is not None else None,
             "host_at": _number(getattr(engine, "threshold_tokens", None)) or None,
             "limit": budget.usable_input_tokens, "window": budget.window_tokens,
         },
         "savings": {
             "tokens": freed, "commits": policy.commit_count, "latency_ms": _latency(timeline),
-            "saved_pct": (round(100 * freed / limit) if freed and _number(limit) else None),
+            "saved_pct": (round(Fraction(100 * freed, limit)) if freed and _number(limit) else None),
             "estimate": True,
             "shortened": sum(1 for row in rows if row.live),
             "originals": sum(1 for row in rows if row.live and engine._activity.original_check(row.ref) != "unavailable"),
@@ -108,7 +110,10 @@ def fmt_tokens(value: Any) -> str:
     if n is None:
         return "?"
     if n >= 1_000_000:
-        return f"{n / 1_000_000:.1f}M".replace(".0M", "M")
+        try:
+            return f"{n / 1_000_000:.1f}M".replace(".0M", "M")
+        except OverflowError:
+            return f"{Decimal(n):.1E}"
     if n >= 10_000:
         return f"{n / 1000:.0f}K"
     if n >= 1000:

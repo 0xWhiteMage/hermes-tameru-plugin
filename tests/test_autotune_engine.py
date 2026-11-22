@@ -161,6 +161,33 @@ def test_posture_persists_and_a_new_engine_restores_it():
     assert other._policy.tuner.bias == 0.0 and other._policy.paused is False
 
 
+def test_a_policy_only_record_seeds_the_tuner_before_restoring_a_saved_bias():
+    db = _MetaDB()
+    store = ChatStore(db.state)
+    assert store.write("s1", "policy", {"version": 1, "controls": {
+        "mode": "adaptive", "preference": "preserve_detail", "activation": "auto", "recent": "auto",
+    }})
+    assert _bound(db)._policy.tuner.bias == 1.0
+    assert store.write("s1", "tuner", {"version": 1, "paused": True, "tuner": Tuner(0).state()})
+    restored = _bound(db)
+    assert restored._policy.tuner.bias == 0.0 and restored._policy.paused is True
+
+
+def test_a_new_policy_preference_and_reset_replace_the_previously_saved_bias():
+    from hermes_tameru_plugin.session_tuner import set_posture
+
+    db = _MetaDB()
+    engine = _bound(db)
+    owner = dict(session_id="s1", lifecycle_id=engine._activity.lifecycle_id)
+    set_posture(engine, **owner, bias=-0.6, paused=True)
+    engine.set_policy_controls({"preference": "preserve_detail"}, **owner)
+    restored = _bound(db)
+    assert restored._policy.tuner.bias == 1.0 and restored._policy.paused is True
+    engine.set_policy_controls({}, **owner, reset=True)
+    restored = _bound(db)
+    assert restored._policy.tuner.bias == 0.0 and restored._policy.paused is True
+
+
 def test_an_adjustment_is_saved_and_restored():
     db = _MetaDB()
     engine = _bound(db)

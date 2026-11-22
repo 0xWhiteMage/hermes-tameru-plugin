@@ -16,6 +16,19 @@ from hermes_tameru_plugin.render import make_ref, parse_header
 TASK = "tests/test_orders.py::test_reserve_stock_rollback failed"
 
 
+def test_an_overflowing_input_budget_override_leaves_the_host_cap_in_place(hermes_home, monkeypatch):
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    monkeypatch.setenv("TAMERU_HERMES_INPUT_BUDGET_TOKENS", "1" + "0" * 310)
+    engine = TameruContextEngine(config_context_length=128_000, threshold_tokens_cap=40_000, max_tokens=8_000)
+    status = engine.get_status()["tameru"]
+    budget = status["policy"]["budget"]
+    assert engine.threshold_tokens_cap == 40_000
+    assert budget["input_limit_tokens"] is None
+    assert budget["usable_input_tokens"] == 120_000 and budget["source"] == "host"
+    assert "input_budget_tokens is out of range; ignored" in status["warnings"]
+
+
 class _Db:
     """A usable session store: reads history, commits compactions."""
 

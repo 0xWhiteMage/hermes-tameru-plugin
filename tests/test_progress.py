@@ -32,6 +32,16 @@ def test_token_formatting(value, text):
     assert fmt_tokens(value) == text
 
 
+def test_progress_renders_a_large_reported_count_without_float_overflow():
+    engine = _bound()
+    engine.last_real_prompt_tokens = 10**320
+    engine.max_tokens = 0
+    engine._tameru_native_max_tokens = 0
+    snapshot = build_snapshot(engine)
+    assert snapshot["gauge"]["fill_pct"] > 10**310
+    assert "1.0E+320" in render_text(snapshot)
+
+
 def test_a_fresh_snapshot_is_complete_and_quiet():
     snap = build_snapshot(_bound())
     assert snap["schema"] == SCHEMA == 3 and snap["state"] == "watching"
@@ -176,15 +186,19 @@ def test_latency_averages_recent_passes_and_ignores_other_events():
 
 def test_a_commit_event_names_what_it_touched_how_long_it_took_and_the_mode():
     from types import SimpleNamespace as NS
+    from hermes_tameru_plugin.adaptive import _PROACTIVE_TIMING
     from hermes_tameru_plugin.policy import Controls
     engine = _bound()
     engine._policy.tuner.set_bias(1)
-    engine._policy.pass_started = __import__("time").perf_counter()
     plan = NS(stage="standard", input_tokens=100, reason="pressure", controls=Controls())
     changes = {f"r{i}": NS(ref=f"{i:016x}", tool=t) for i, t in enumerate(["terminal", "read_file", "terminal"] + ["x"] * 10)}
-    scope = NS(plan=plan, policy_after_tokens=600, policy_before_tokens=1000, full=False, full_local=False,
-               policy_stage_index=0, changes=changes)
-    engine._record_commit(scope)
+    scope = engine._new_scope([], policy_after_tokens=600, policy_before_tokens=1000, changes=changes)
+    scope.plan = plan
+    timer = _PROACTIVE_TIMING.set((engine, scope.serial, __import__("time").perf_counter()))
+    try:
+        engine._record_commit(scope)
+    finally:
+        _PROACTIVE_TIMING.reset(timer)
     event = engine._policy.events[-1]
     assert event["kind"] == "commit" and event["before"] == 1000 and event["after"] == 600
     assert event["mode"] == "detail" and type(event["ms"]) is int
@@ -197,6 +211,10 @@ def test_a_commit_without_changes_or_timing_still_records_cleanly():
     from types import SimpleNamespace as NS
     from hermes_tameru_plugin.policy import Controls
     engine = _bound()
+    engine._policy.paused = True
+    engine.prune_tool_results_only([], current_tokens=0)
+    decline = engine._policy.events[-1]
+    assert decline["kind"] == "decline" and type(decline["ms"]) is int
     plan = NS(stage="light", input_tokens=1, reason="r", controls=Controls())
     engine._record_commit(NS(plan=plan, policy_after_tokens=None, policy_before_tokens=10, full=True, full_local=False,
                              policy_stage_index=0))

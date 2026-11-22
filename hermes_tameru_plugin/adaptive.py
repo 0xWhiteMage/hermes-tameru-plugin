@@ -8,8 +8,10 @@ existing host/plugin policy and reuses only the scope-sensitive native gates her
 from __future__ import annotations
 
 import inspect
+import math
 import time
 from collections import deque
+from contextvars import ContextVar
 from dataclasses import asdict, dataclass
 from typing import Any
 
@@ -24,6 +26,7 @@ _GROWTH_SAMPLES = 4
 _EVENTS = 40
 _QUIET_REASONS = {"ample_room", "not_considered", "activation_disabled"}
 _WIRE_KEYS = ("role", "content", "tool_call_id", "tool_calls", "name")
+_PROACTIVE_TIMING: ContextVar[tuple[Any, int, float] | None] = ContextVar("tameru_proactive_timing", default=None)
 
 
 _FULL_PRUNE_MIN_CHARS = 1000     # a full compaction prunes results from this size, not from the 8000 of a proactive pass: Hermes' summarizer then reads stubs, not raw rows (stock floor 200; 200 lost a recall fact, 2500+ brings the loss back)
@@ -37,6 +40,16 @@ def _positive_native(value: Any) -> int:
         return 0
 
 
+def _input_budget_limit(settings: TameruSettings) -> int | None:
+    limit = settings.input_budget_tokens
+    if not settings.enabled or type(limit) is not int or limit <= 0:
+        return None
+    try:
+        return limit if math.isfinite(limit) else None
+    except OverflowError:
+        return None
+
+
 def native_budget_kwargs(settings: TameruSettings, values: dict, supported: set[str]) -> dict:
     result = dict(values)
     if not settings.enabled:
@@ -44,7 +57,7 @@ def native_budget_kwargs(settings: TameruSettings, values: dict, supported: set[
     reserve = settings.output_reserve_tokens
     if reserve is not None and "max_tokens" in supported:
         result["max_tokens"] = max(reserve, _positive_native(result.get("max_tokens")))
-    limit = settings.input_budget_tokens
+    limit = _input_budget_limit(settings)
     if limit is not None and "threshold_tokens_cap" in supported:
         ceiling = max(1, int(limit * 0.85))
         prior = _positive_native(result.get("threshold_tokens_cap"))
@@ -114,7 +127,6 @@ class PolicyRuntime:
         self.decline_streak = 0             # consecutive "considered, nothing to reclaim" checks
         self.commits_since_host = 0         # Tameru commits since Hermes last compacted
         self.checks_since_commit = 99       # policy checks since Tameru's last commit
-        self.pass_started: float | None = None   # perf_counter() of the current proactive pass
         self.events: deque[dict] = deque(maxlen=_EVENTS)    # scalars + short reason codes, never text
         self.saved_tokens = 0               # cumulative reclaim of this session's Tameru commits
         self.commit_count = 0
@@ -213,6 +225,8 @@ class AdaptiveMixin:
 
     # ---- controls --------------------------------------------------------------
     def _init_policy(self, settings: TameruSettings) -> None:
+        if settings.enabled and settings.input_budget_tokens is not None and _input_budget_limit(settings) is None:
+            self._warnings.append("input_budget_tokens is out of range; ignored")
         self._policy = PolicyRuntime(Controls(
             mode=settings.policy_mode, preference=settings.preference,
             activation=settings.activation, recent=settings.recent_protection,
@@ -294,7 +308,7 @@ class AdaptiveMixin:
     # ---- budget ----------------------------------------------------------------
     def _request_budget(self) -> RequestBudget:
         settings = self._settings
-        input_limit = settings.input_budget_tokens if settings.enabled else None
+        input_limit = _input_budget_limit(settings)
         configured_reserve = settings.output_reserve_tokens if settings.enabled else None
         native_reserve = getattr(self, "max_tokens", None)
         if type(native_reserve) is not int or native_reserve <= 0:
@@ -364,7 +378,7 @@ class AdaptiveMixin:
         scope = self._new_scope(messages)
         token = _SCOPE.set(scope)
         started = time.perf_counter()
-        self._policy.pass_started = started
+        timer = _PROACTIVE_TIMING.set((self, scope.serial, started))
         try:
             try:
                 body = message_budget_tokens(messages)
@@ -410,6 +424,7 @@ class AdaptiveMixin:
         finally:
             self._close_pass(scope)
             _SCOPE.reset(token)
+            _PROACTIVE_TIMING.reset(timer)
             self._telemetry.time(time.perf_counter() - started)
 
     def _observe_policy_body(self, body: int) -> None:
@@ -425,10 +440,12 @@ class AdaptiveMixin:
             self._policy.growth.clear()
         self._policy.last_body_tokens = body
 
-    def _pass_ms(self) -> int | None:
-        """Milliseconds since the current proactive pass began, or None outside one."""
-        started = self._policy.pass_started
-        return None if started is None else max(0, round((time.perf_counter() - started) * 1000))
+    def _pass_ms(self, scope) -> int | None:
+        timing = _PROACTIVE_TIMING.get()
+        if (timing is None or timing[0] is not self or timing[1] != scope.serial
+                or not self._transactions.active or not self._pass_is_current(scope)):
+            return None
+        return max(0, round((time.perf_counter() - timing[2]) * 1000))
 
     def _record_check(self, kind: str, planning: PlanningInput, body: int, reason: str,
                       anchor, plan: Plan | None) -> None:
@@ -448,7 +465,7 @@ class AdaptiveMixin:
                 self._policy.decline_streak = 0
             if kind == "decline" and reason not in _QUIET_REASONS:
                 self._event("decline", tokens=planning.current_tokens, reason=reason,
-                            mode=self._policy.tuner.mode(), ms=self._pass_ms())
+                            mode=self._policy.tuner.mode(), ms=self._pass_ms(anchor))
 
     # ---- candidate stages ------------------------------------------------------------
     def _adaptive_candidates(self, native_pruner, messages, protect_tail_count,
@@ -573,7 +590,7 @@ class AdaptiveMixin:
                     tools.append(name[:32])
             self._event("commit", before=scope.policy_before_tokens, after=after, stage=plan.stage,
                         method=method, mode=self._policy.tuner.mode(), refs=refs, tools=tools,
-                        ms=self._pass_ms(), parent_lines=int(getattr(scope, "parent_lines", 0) or 0))
+                        ms=self._pass_ms(scope), parent_lines=int(getattr(scope, "parent_lines", 0) or 0))
             if scope.policy_stage_index > 0:
                 self._telemetry.count("escalation")
 

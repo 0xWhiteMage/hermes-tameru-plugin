@@ -883,7 +883,7 @@ def test_policy_command_preserves_safe_errors_and_never_echoes_history():
     engine.bind_session_state(session_db=None, session_id="s1")
     command = engine._activity_registry.command
     out = command("policy recent=long", session_id="s1")
-    assert "Select Adaptive or Fixed" in out and "Use /tameru" not in out
+    assert "Select Adaptive before changing adaptive preferences." in out and "Use /tameru" not in out
 
     engine = _bound_engine("s1")
     chat = Chat(TASK)
