@@ -195,7 +195,7 @@ def _activation(controls: Controls, current: PlanningInput, host_trigger: int, l
     return activation
 
 
-def _stages(controls: Controls, current: PlanningInput, limit: int | None, projected: float | None) -> tuple[str, ...]:
+def _stages(current: PlanningInput, limit: int | None, projected: float | None) -> tuple[str, ...]:
     if current.force:
         return ("strong",)
     # The development matrix showed the standalone light stage never repays its
@@ -204,10 +204,10 @@ def _stages(controls: Controls, current: PlanningInput, limit: int | None, proje
     usable = STAGES[1:]
     if current.full:
         return usable
-    light_ceiling, strong_floor = (0.65, 0.85) if limit is not None else (0.75, 1.00)
+    light_ceiling = 0.65 if limit is not None else 0.75
     if projected is None or projected < light_ceiling:
         return usable[:1]
-    return usable[:2] if projected < strong_floor else usable
+    return usable
 
 
 def _retention(controls: Controls, base: Retention, stage: str, limit: int | None,
@@ -244,9 +244,6 @@ def _reason(invalid: str | None, full: bool, activation: int, consider: bool) ->
 def plans(controls: Controls, current: PlanningInput, tuning: Tuning | None = None) -> tuple[Plan, ...]:
     """Return permitted candidates, least destructive first.
 
-    Fixed mode keeps the standard retention budget at every pressure. It shares
-    activation, cache batching and request accounting with adaptive mode, so it
-    can isolate the value of occupancy-dependent retention in comparisons.
     Legacy mode is implemented by the existing host/plugin policy, not here.
     ``tuning`` (the self-tuner's live numbers) replaces the preference's fixed row when given.
     """
@@ -266,7 +263,7 @@ def plans(controls: Controls, current: PlanningInput, tuning: Tuning | None = No
     urgent = current.full or (projected is not None and projected >= (0.95 if limit is not None else 1.00))
     reason = _reason(invalid, current.full, activation, bool(consider))
     result = []
-    for stage in _stages(controls, current, limit, projected):
+    for stage in _stages(current, limit, projected):
         result.append(Plan(
             controls=controls, stage=stage, consider=bool(consider), reason=reason,
             input_tokens=current.current_tokens, input_complete=current.input_complete,
