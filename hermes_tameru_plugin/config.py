@@ -215,6 +215,8 @@ def _parse_str_tuple(raw: Any) -> tuple[str, ...]:
 
 MAX_PROTECT_PATTERNS = 32
 MAX_PROTECT_PATTERN_CHARS = 200
+MAX_PROTECT_REPEAT = 32
+MAX_PROTECT_COST = 256
 
 
 def _validate_protect_structure(pattern: str) -> None:
@@ -222,46 +224,64 @@ def _validate_protect_structure(pattern: str) -> None:
     from re import _parser as parser
 
     repeats = (const.MAX_REPEAT, const.MIN_REPEAT, const.POSSESSIVE_REPEAT)
+    cost = 1
 
-    def walk(sub: Any) -> None:
+    def walk(sub: Any) -> bool:
+        nonlocal cost
+        has_repeats = False
         for op, value in sub:
             if op in (const.GROUPREF, const.GROUPREF_EXISTS):
                 raise ValueError("protect patterns must not contain backreferences or conditional groups")
             if op in repeats:
                 if value[1] == const.MAXREPEAT:
                     raise ValueError("protect patterns must not contain unbounded quantifiers; use bounded repeats")
+                if value[1] > MAX_PROTECT_REPEAT:
+                    raise ValueError(f"protect repeat maximum must be at most {MAX_PROTECT_REPEAT}")
+                cost *= value[1] + 1
+                has_repeats = True
                 walk(value[2])
             elif op == const.SUBPATTERN:
-                walk(value[3])
+                has_repeats |= walk(value[3])
             elif op == const.BRANCH:
-                for branch in value[1]:
-                    walk(branch)
+                repeated_branches = [walk(branch) for branch in value[1]]
+                if any(repeated_branches):
+                    cost *= len(value[1])
+                    has_repeats = True
             elif op in (const.ASSERT, const.ASSERT_NOT):
-                walk(value[1])
+                has_repeats |= walk(value[1])
             elif op == const.ATOMIC_GROUP:
-                walk(value)
+                has_repeats |= walk(value)
+            if cost > MAX_PROTECT_COST:
+                raise ValueError(f"protect pattern backtracking cost must be at most {MAX_PROTECT_COST}")
+        return has_repeats
 
     walk(parser.parse(pattern))
 
 
-def _parse_patterns(raw: Any) -> tuple[str, ...]:
+def _parse_patterns(raw: Any, warn: Callable[[str], None] | None = None) -> tuple[str, ...]:
     """Like ``_parse_str_tuple``, and every entry must compile (an env value splits on commas)."""
     from .recovery import _backtracking_risk
 
     patterns = _parse_str_tuple(raw)
     if len(patterns) > MAX_PROTECT_PATTERNS:
         raise ValueError(f"at most {MAX_PROTECT_PATTERNS} protect patterns are allowed")
+    if any(len(pattern) > MAX_PROTECT_PATTERN_CHARS for pattern in patterns):
+        raise ValueError(f"protect patterns must be at most {MAX_PROTECT_PATTERN_CHARS} characters")
+    accepted = []
     for pattern in patterns:
-        if len(pattern) > MAX_PROTECT_PATTERN_CHARS:
-            raise ValueError(f"protect patterns must be at most {MAX_PROTECT_PATTERN_CHARS} characters")
         try:
             re.compile(pattern)
             _validate_protect_structure(pattern)
-        except (re.error, OverflowError, RecursionError) as exc:
-            raise ValueError(f"invalid regex {pattern!r}: {exc}") from None
-        if _backtracking_risk(pattern):
-            raise ValueError("protect patterns must not contain nested repeats or repeated alternation")
-    return patterns
+            if _backtracking_risk(pattern):
+                raise ValueError("protect patterns must not contain nested repeats or repeated alternation")
+        except (re.error, ValueError, OverflowError, RecursionError) as exc:
+            reason = f"invalid regex {pattern!r}: {exc}"
+            if warn is None:
+                raise ValueError(reason) from None
+            warn(reason)
+        else:
+            accepted.append(pattern)
+    return tuple(accepted)
 
 
 _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
@@ -429,7 +449,10 @@ def _load_settings(ctx: Any, env: Mapping[str, str], warnings: list[str]) -> Tam
         ]
         for label, raw in candidates:
             try:
-                chosen[name] = parse(raw)
+                if name == "protect_patterns":
+                    chosen[name] = _parse_patterns(raw, lambda reason: warnings.append(f"{label}: {reason}; ignored"))
+                else:
+                    chosen[name] = parse(raw)
             except ValueError as exc:
                 warnings.append(f"{label}={_short(raw)}: {exc}; ignored")
             else:

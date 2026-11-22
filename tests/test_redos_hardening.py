@@ -47,6 +47,9 @@ def test_persisted_wrapper_notice_variants(notice_lines, newline):
     [r'(a)\1'], [r'(?P<name>a)(?P=name)'],
     [r'(?=(a)\1)'], [r'(?>a*x)'], [r'a{1,}x'], [r'a+?x'],
     [r'a*+x'], [r'a*x'], [r'a+x'], [r'(?:(a)?(?(1)b|c))'],
+    [r'.{0,4294967294}x'], [r'.{0,999}.{0,999}.{0,999}x'],
+    [r'.{0,16}.{0,16}x'], [r'.{0,33}x'], [r'.?' * 9 + 'x'],
+    [r'(?:.{0,11}a|.{0,11}b)x'],
 ])
 def test_unsafe_protect_patterns_warn_and_fall_back(monkeypatch, raw):
     config = {'plugins': {'entries': {'tameru': {'settings': {'protect_patterns': raw}}}}}
@@ -58,18 +61,32 @@ def test_unsafe_protect_patterns_warn_and_fall_back(monkeypatch, raw):
     assert warnings[0].endswith('; ignored')
 
 
-def test_unsafe_protect_patterns_env_falls_back_to_valid_config(monkeypatch):
+def test_unsafe_protect_patterns_env_drops_only_invalid_entry(monkeypatch):
     config = {'plugins': {'entries': {'tameru': {'settings': {'protect_patterns': [r'\bERROR\b']}}}}}
     monkeypatch.setattr(cfg, 'read_hermes_config', lambda: (config, config))
-    settings, warnings = cfg.load_settings(env={cfg.ENV_PREFIX + 'PROTECT_PATTERNS': '(a+)+$'})
-    assert settings.protect_patterns == (r'\bERROR\b',)
+    settings, warnings = cfg.load_settings(env={cfg.ENV_PREFIX + 'PROTECT_PATTERNS': 'TODO,(a+)+$'})
+    assert settings.protect_patterns == ('TODO',)
     assert len(warnings) == 1
+    assert '(a+)+$' in warnings[0]
+
+
+def test_mixed_protect_patterns_keep_valid_entries(monkeypatch):
+    patterns = ['TODO', '(unclosed', r'\bERROR\b', r'.{0,4294967294}x', '^Traceback']
+    config = {'plugins': {'entries': {'tameru': {'settings': {'protect_patterns': patterns}}}}}
+    monkeypatch.setattr(cfg, 'read_hermes_config', lambda: (config, config))
+    settings, warnings = cfg.load_settings(env={})
+    assert settings.protect_patterns == ('TODO', r'\bERROR\b', '^Traceback')
+    assert len(warnings) == 2
+    assert '(unclosed' in warnings[0]
+    assert '.{0,4294967294}x' in warnings[1]
 
 
 @pytest.mark.parametrize('raw, expected', [
     ([], ()), ('', ()), (' foo,bar,foo ', ('foo', 'bar')),
-    ([r'\bID-\d{12}\b', r'(foo|bar)', r'error\s{1,8}\w{1,32}'],
-     (r'\bID-\d{12}\b', r'(foo|bar)', r'error\s{1,8}\w{1,32}')),
+    ([r'\bID-\d{12}\b', r'(foo|bar)', r'error\s{1,8}\w{1,24}'],
+     (r'\bID-\d{12}\b', r'(foo|bar)', r'error\s{1,8}\w{1,24}')),
+    ([r'[A-Z]{2,8}-\d{1,6}', r'\d{12}', r'.{0,32}x', r'.?' * 8 + 'x'],
+     (r'[A-Z]{2,8}-\d{1,6}', r'\d{12}', r'.{0,32}x', r'.?' * 8 + 'x')),
     (['a' * 200], ('a' * 200,)),
     ([f'pattern{i}' for i in range(32)], tuple(f'pattern{i}' for i in range(32))),
     (','.join(f'pattern{i}' for i in range(32)) + ',',

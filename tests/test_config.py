@@ -304,7 +304,7 @@ BAD_ENV = [
     ("enabled", "maybe"), ("enabled", ""), ("min_tool_chars", "abc"), ("min_tool_chars", "-1"),
     ("min_tool_chars", "1.5"), ("max_extract_chars", "0"), ("brief_chars", "x"), ("min_savings", "1.0"),
     ("min_savings", "-0.1"), ("brief_share", "1.5"), ("min_savings", "nan"), ("min_savings", "inf"), ("min_savings", "high"),
-    ("max_risk", "extreme"), ("prune_tail", "weeks"), ("protect_patterns", "ok,(unclosed"), ("store_max_entries", "-5"),
+    ("max_risk", "extreme"), ("prune_tail", "weeks"), ("protect_patterns", "(unclosed"), ("store_max_entries", "-5"),
     ("default_proactive_prune_tokens", "-1"), ("default_proactive_prune_ratio", "1.5"), ("small_window_prune_ratio", "1.5"),
     ("retained_extract_budget_ratio", "1.0"), ("retained_extract_budget_ratio", "-0.1"),
     ("retained_extract_budget_ratio", "nan"), ("retained_extract_budget_ratio", "wide"),
