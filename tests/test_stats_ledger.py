@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -49,6 +50,28 @@ def test_the_summary_covers_only_the_asked_days():
 def test_a_corrupt_file_reads_as_empty_and_is_replaced(folder):
     (folder / "stats-ledger.json").write_text("{not json")
     assert ledger.summary() is None
+    assert ledger.record_cleanup(50) and ledger.summary()["tokens"] == 50
+
+
+@pytest.mark.parametrize("values", [
+    {"cleanups": "broken", "tokens": 100},
+    {"cleanups": 1, "tokens": None},
+    {"cleanups": True, "tokens": -100},
+    {"cleanups": 1, "tokens": []},
+])
+def test_invalid_daily_counters_do_not_poison_future_writes(folder, values):
+    path = folder / "stats-ledger.json"
+    path.write_text(json.dumps({"version": 1, "days": {ledger._day(): values}}))
+    assert ledger.summary() is None
+    assert ledger.record_cleanup(50)
+    assert ledger.summary() == {"days": 7, "active_days": 1, "cleanups": 1, "tokens": 50}
+
+
+def test_deeply_nested_json_is_ignored_instead_of_escaping_the_stats_command(folder):
+    depth = sys.getrecursionlimit() + 100
+    (folder / "stats-ledger.json").write_text("[" * depth + "0" + "]" * depth)
+    assert ledger.summary() is None
+    assert "Last 7 days" not in _command("stats", stats_ledger=True)
     assert ledger.record_cleanup(50) and ledger.summary()["tokens"] == 50
 
 

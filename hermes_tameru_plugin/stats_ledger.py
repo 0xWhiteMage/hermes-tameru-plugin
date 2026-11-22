@@ -44,7 +44,8 @@ def _read() -> dict:
         record = json.loads(_path().read_text(encoding="utf-8"))
         days = record.get("days") if isinstance(record, dict) and record.get("version") == VERSION else None
         if isinstance(days, dict):
-            return {d: v for d, v in days.items() if isinstance(d, str) and isinstance(v, dict)}
+            return {d: v for d, v in days.items() if isinstance(d, str) and isinstance(v, dict)
+                    and all(type(v.get(key, 0)) is int and v.get(key, 0) >= 0 for key in ("cleanups", "tokens"))}
     except (OSError, ValueError, TypeError, AttributeError):
         pass
     return {}
