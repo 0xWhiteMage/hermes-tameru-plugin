@@ -54,14 +54,15 @@ SOFTWARE.
 ## Tameru compaction engine
 
 `hermes_tameru_plugin/tameru/` is vendored from
-<https://github.com/0xWhiteMage/tameru-compaction-system> (`src/tameru/`), Apache-2.0, same copyright
-holder as this repository: Copyright 2026 Benjamin Ang. The bundled engine is version **1.9.0**,
-synced from commit `9f1f1c45e432e63119f6fa0cd232bb27b476e05b`, as recorded by `VENDORED_FROM`
-in the plugin-owned `tameru/__init__.py`. Other engine modules remain upstream copies.
+<https://github.com/0xWhiteMage/tameru-compaction-system> (`src/tameru/`). The engine repository
+is now Apache-2.0-licensed, since commit `ed8bcff6e7de66852d19ee2f1fcc53724b6bbb3e`.
+The vendored **1.9.0** snapshot at `9f1f1c45e432e63119f6fa0cd232bb27b476e05b` was published
+under MIT and is distributed here, by the same copyright holder (Copyright 2026 Benjamin Ang),
+as part of this Apache-2.0 work. Its pin is recorded by `VENDORED_FROM` in the plugin-owned
+`tameru/__init__.py`; other engine modules remain upstream copies.
 
-The pinned source revision predates the engine's Apache-2.0 relicensing in commit
-`ed8bcff6e7de66852d19ee2f1fcc53724b6bbb3e`. Its original MIT notice is retained below, along with
-the historical benchmark code's notice; this does not change the plugin's Apache-2.0 license.
+The snapshot's original MIT notice is retained below, along with the historical benchmark
+code's notice.
 
 ## Repository-only Tameru data
 
