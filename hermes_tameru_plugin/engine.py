@@ -1070,6 +1070,10 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         if not (self._settings.enabled and self._seams.demote):
             return parent(messages, current_tokens, *args, **kwargs)
         if self._settings.policy_mode == "plan":
+            if not self._settings.plan_native_warm_prunes:
+                # HP5: the per-request warm prune spends a cache break the plan policy does not
+                # authorize — decline so Hermes' flow reaches should_compress / compaction.
+                return messages, 0
             if not self._settings.plan_forecast:
                 return parent(messages, current_tokens, *args, **kwargs)
             from . import plan_pass

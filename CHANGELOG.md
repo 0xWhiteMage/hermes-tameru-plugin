@@ -31,6 +31,11 @@ All notable changes to this project are documented here. The format follows
   −1.8 one-sided upper) with breaks ≤ stock on the main windows and ~2x fact retention; it is not
   adopted because the strict 64K break comparison reads +0.83 on `refactor` (native Hermes prune
   commits downstream of the changed transcript; the deep reset itself halves compactions there).
+  **`plan_native_warm_prunes`** (default on) closes that gap: off, the per-request warm-cache prune
+  is declined under `policy_mode: plan` so the only prefix rewrites are compactions. Replay arm HP5
+  keeps HP4's cost/fact profile on the main windows and lands 64K breaks exactly on stock (2.0 vs
+  2.0, both shapes) — the first arm to pass every stated gate: cost upper bound < 0 at 128K and
+  252K, breaks ≤ stock at every window and at 64K, facts ≥ stock.
 - Vendored engine at `fd93aa7` (Tameru 1.10.x + `tameru.plan`, EV `decide`, loss/price profiles).
 
 ## [1.10.0] - Unreleased

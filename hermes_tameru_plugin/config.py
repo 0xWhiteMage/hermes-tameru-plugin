@@ -54,6 +54,9 @@ class TameruSettings:
     # policy_mode="plan": at a compaction also demote the protected tail's older tool results
     # (everything except the most recent step's pending round) through the same plan allocation.
     plan_deep_tail: bool = False
+    # policy_mode="plan": off declines the per-request proactive (warm-cache) prune outright —
+    # Hermes' flow then continues to should_compress and compacts when over threshold.
+    plan_native_warm_prunes: bool = True
     autotune: bool = True                     # adaptive mode retunes itself from live session signals
     lazy_tool: bool = False                   # off by default: send the recovery tool only once a result has been shortened (needs Hermes' llm_request middleware; TAMERU_LAZY_TOOL=on)
     net_estimate: bool = False                # off by default: /tameru stats adds a signed estimate of what the cleanups saved or cost (TAMERU_NET_ESTIMATE=on)
@@ -252,6 +255,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "plan_replace_compaction": _parse_bool,
     "plan_replace_margin_steps": _min_int(0),
     "plan_deep_tail": _parse_bool,
+    "plan_native_warm_prunes": _parse_bool,
     "autotune": _parse_bool,
     "manifest": _parse_bool,
     "edits": _parse_bool,

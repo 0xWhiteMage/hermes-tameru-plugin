@@ -239,3 +239,24 @@ def hp4() -> Any:
         ),
         quiet_mode=True,
     )
+
+
+@register("HP5")
+def hp5() -> Any:
+    """HP5: HP4 plus ``plan_native_warm_prunes`` off — the per-request proactive (warm-cache) prune
+    is declined outright, so the only prefix rewrites left are compactions (whose internal pass 2
+    and the deep tail still run). One break per trigger, never more."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(
+        settings=TameruSettings(
+            policy_mode="plan",
+            preference="balanced",
+            price_profile="anthropic-sonnet-5.5-5m",
+            plan_forecast=False,
+            plan_deep_tail=True,
+            plan_native_warm_prunes=False,
+        ),
+        quiet_mode=True,
+    )

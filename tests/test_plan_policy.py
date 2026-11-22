@@ -426,3 +426,45 @@ def test_deep_tail_off_keeps_tail_verbatim():
     tail_contents = [messages[i].get("content") for i in range(boundary, len(messages))]
     out, count = prune_pass(engine, messages, full=True)
     assert [m.get("content") for m in out[boundary:]] == tail_contents
+
+
+# ---- plan_native_warm_prunes (HP5) ---------------------------------------------------------------
+
+
+def test_plan_native_warm_prunes_parsing():
+    assert TameruSettings().plan_native_warm_prunes is True
+    assert _SETTING_PARSERS["plan_native_warm_prunes"]("off") is False
+
+
+def test_native_warm_prunes_off_declines_the_per_request_prune(monkeypatch):
+    """``plan_native_warm_prunes`` off: the per-request proactive prune returns Hermes' no-op
+    contract ``(messages, 0)``, and the flow's next step — ``compress`` over threshold — still
+    compacts."""
+    from engine_support import fake_summary_llm
+
+    engine = make_engine(TameruSettings(
+        small_window_threshold_tokens=0, policy_mode="plan", plan_forecast=False,
+        plan_deep_tail=True, plan_native_warm_prunes=False))
+    chat = Chat()
+    for i in range(4):
+        chat.tool("terminal", {"command": f"tail -n {100 + i} app.log"}, server_log(i))
+    messages = chat.finish("what failed?")
+    fake_summary_llm(monkeypatch)
+    out, count = engine.prune_tool_results_only(messages, current_tokens=200_000)
+    assert count == 0 and out is messages, "the warm prune is declined with Hermes' no-op shape"
+    candidate = engine.compress(messages, 200_000, force=True)
+    assert isinstance(candidate, list) and candidate is not messages, "the trigger still compacts"
+
+
+def test_native_warm_prunes_default_on_delegates_to_parent():
+    """Default ``plan_native_warm_prunes=True`` is today's behaviour: the per-request checkpoint
+    delegates to Hermes' native prune (the HP1-HP4 arms)."""
+    engine = TameruContextEngine(
+        settings=TameruSettings(policy_mode="plan", plan_forecast=False),
+        quiet_mode=True, config_context_length=64_000,
+    )
+    chat = Chat()
+    chat.tool("terminal", {"command": "tail app.log"}, server_log())
+    messages = chat.finish()
+    out, count = engine.prune_tool_results_only(messages, current_tokens=50_000)
+    assert out is messages and count == 0   # native gate decides; not a blanket decline

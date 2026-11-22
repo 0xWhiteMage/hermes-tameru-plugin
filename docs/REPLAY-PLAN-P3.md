@@ -380,3 +380,51 @@ identical to the committed P2c stock rows apart from timing and the post-P2c per
   gate but not the 64K refactor break comparison. It is also the closest any arm has come: the
   remaining gap is native-prune activity on the post-compaction transcript, which suggests the next
   lever is suppressing or absorbing those native commits rather than changing the demotion.
+
+## P3-15 — HP5: `plan_native_warm_prunes` off (no warm-cache prunes under policy plan)
+
+HP4's only miss was 64K `refactor`, where Hermes' *native* proactive prunes fired ~1.8x per session
+on the changed post-compaction transcript. S4 reserves warm-cache acts for prevented compactions;
+HP5 declines the per-request prune outright under `policy_mode: plan` — `prune_tool_results_only`
+returns Hermes' no-op `(messages, 0)` (`engine.py:1073-1076`) so the flow reaches `should_compress`
+and compacts over threshold (`turn_preflight.py:402` -> `:300`). Pass 2 inside `compress()`
+(`context_compressor_window.py:42`), overflow/error paths and the deep tail are untouched.
+
+Rows: `build/p3-plan/rows-dev-hp5.jsonl` (132 dev x 3 windows x 2 arms; stock re-run 0 content diffs
+vs committed P2c apart from timing + post-P2c per-fact rung keys). 64K: `matrix64-hp5.json`.
+Report: `build/p3-plan/report-hp5.{json,txt}`.
+
+### Weighted `effective_real` change % (u1)
+
+| arm | 128K | 252K | 500K |
+|---|---|---|---|
+| HP5 vs stock | −1.21 [−1.68, −0.72] (−0.80) | −1.77 [−2.24, −1.30] (−1.38) | −0.97 [−1.21, −0.73] (−0.77) |
+| HP5 vs HP4 | +0.0 | +0.0 | +0.0 |
+| HP5 vs e110 | +11.59 | +69.11 | +41.07 |
+
+### Breaks / compactions / prunes and facts
+
+| arm@window | prefix_breaks | compactions | prune_commits | kept |
+|---|---|---|---|---|
+| stock | 2.106 / 1.932 / 1.985 | 2.106 / 1.932 / 1.985 | 0 | 0.74 / 1.34 / 1.26 |
+| HP5 | 2.098 / 1.917 / 1.985 | 2.098 / 1.917 / 1.985 | 0 | 1.24 / 2.68 / 2.93 |
+
+64K (`matrix64-hp5.json`): refactor breaks 2.0 vs 2.0 (compactions 2.0 vs 2.0, prune_commits 0),
+smallrows identical, `effective` −1.2% [−2.8, −0.0]. Rungs (HP5 == HP4): extract 96-100% held,
+errors 86-92%, brief 42-47%, header ~0%. `effective_finder` +0.2 / +9.5 / +9.0 vs stock.
+
+### Candidate-bar verdict — **all gates pass**
+
+| gate | HP5 |
+|---|---|
+| cost u1 < 0 @128K | pass (−0.80) |
+| cost u1 < 0 @252K | pass (−1.38) |
+| breaks ≤ stock, main windows | pass (2.098 / 1.917 / 1.985 vs 2.106 / 1.932 / 1.985) |
+| breaks ≤ stock @64K both shapes | pass (2.0 vs 2.0 refactor; 2.0 vs 2.0 smallrows) |
+| facts ≥ stock | pass (1.24 / 2.68 / 2.93 vs 0.74 / 1.34 / 1.26) |
+
+- On the main windows HP5 is byte-identical to HP4 — the native warm prunes only ever fired at 64K.
+  Declining them removes exactly the +0.83 breaks that failed HP4 and returns the session to
+  stock's compaction-only trajectory.
+- This is the first arm to satisfy the search criterion end to end: cheaper than stock at every
+  gated window, no extra prefix breaks anywhere, ~2x fact retention.
