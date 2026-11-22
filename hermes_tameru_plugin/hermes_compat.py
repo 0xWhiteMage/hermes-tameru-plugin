@@ -40,8 +40,9 @@ MESSAGE_UID_KEY = "message_uid"
 # Fix-all R1: tolerant of small format changes: any attributes in any order (or none), tag case, CRLF, trailing
 # blanks, a notice of 0-4 lines, extra blank lines, and a re-wrapped (nested) header. The notice must still end
 # in a blank line, so a page that merely quotes the tag a few lines down is not taken for a spill.
+# The lookahead tests for a nonblank notice without partitioning the line around every nonspace.
 _UNTRUSTED_WRAP_HEAD_RE = re.compile(
-    r"<untrusted_tool_result\b[^>\n]*>[ \t]*\r?\n(?:[^\n]*\S[^\n]*\n){0,4}?(?:[ \t]*\r?\n)+[ \t]*",
+    r"<untrusted_tool_result\b[^>\n]*>[ \t]*\r?\n(?:(?=[^\n]*\S)[^\n]*\n){0,4}?(?:[ \t]*\r?\n)+[ \t]*",
     re.IGNORECASE,
 )
 _UNTRUSTED_WRAP_MAX_DEPTH = 3

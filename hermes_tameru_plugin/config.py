@@ -213,14 +213,28 @@ def _parse_str_tuple(raw: Any) -> tuple[str, ...]:
     return tuple(out)
 
 
+MAX_PROTECT_PATTERNS = 32
+MAX_PROTECT_PATTERN_CHARS = 200
+
+
 def _parse_patterns(raw: Any) -> tuple[str, ...]:
     """Like ``_parse_str_tuple``, and every entry must compile (an env value splits on commas)."""
+    from .recovery import _backtracking_risk
+
+    items = raw.split(",", MAX_PROTECT_PATTERNS) if isinstance(raw, str) else raw
+    if isinstance(items, (list, tuple)):
+        if len(items) > MAX_PROTECT_PATTERNS:
+            raise ValueError(f"at most {MAX_PROTECT_PATTERNS} protect patterns are allowed")
+        if any(isinstance(item, str) and len(item) > MAX_PROTECT_PATTERN_CHARS for item in items):
+            raise ValueError(f"protect patterns must be at most {MAX_PROTECT_PATTERN_CHARS} characters")
     patterns = _parse_str_tuple(raw)
     for pattern in patterns:
         try:
             re.compile(pattern)
         except (re.error, OverflowError, RecursionError) as exc:
             raise ValueError(f"invalid regex {pattern!r}: {exc}") from None
+        if _backtracking_risk(pattern):
+            raise ValueError("protect patterns must not contain nested repeats or repeated alternation")
     return patterns
 
 
