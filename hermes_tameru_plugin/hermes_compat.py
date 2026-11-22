@@ -67,7 +67,6 @@ def is_persisted_block(content: Any) -> bool:
 # ``agent.tool_dispatch_helpers._maybe_wrap_untrusted``: the result of a high-risk tool (web, browser, MCP) is put
 # in a delimited block that tells the model to treat it as data. Anything this plugin later hands the model that
 # was cut from such a result (a rendered row's body, a ``tameru_expand`` answer) has to stay inside a block like it.
-UNTRUSTED_TAG = "<untrusted_tool_result"
 UNTRUSTED_CLOSE = "</untrusted_tool_result>"
 _UNTRUSTED_TOOL_NAMES = frozenset({"web_extract", "web_search"})
 _UNTRUSTED_TOOL_PREFIXES = ("browser_", "mcp_")

@@ -139,16 +139,11 @@ REF_CHARS = 16          # 64 bits (fix-all R7); LEGACY_REF_CHARS-long refs of ol
 LEGACY_REF_CHARS = 8
 
 
-def ref_matches(ref: str, key: str) -> bool:
-    """True when the header ref ``ref`` names the stored ``key`` (equal, or a legacy 8-hex prefix of it)."""
-    return ref == key or (len(ref) == LEGACY_REF_CHARS and len(key) == REF_CHARS and key.startswith(ref))
-
-
 def make_ref(msg: dict, original: str) -> str:
     """16 hex chars naming ``original`` in ``msg``: ``sha256(uid|sha256(original))[:16]``.
 
-    Rows rendered before the 1.4.1 fix-all round carry the first 8 of these 16 chars; lookups accept both
-    (``ref_matches``), so an old ref still finds its original.
+    Rows rendered before the 1.4.1 fix-all round carry the first 8 of these 16 chars; lookups accept both,
+    so an old ref still finds its original.
 
     ``uid`` is the first non-empty of ``_tool_call_uid``, ``message_uid``, ``tool_call_id`` (Hermes
     keeps the first two across restarts and session-db round trips), else "".
