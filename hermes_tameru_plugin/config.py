@@ -85,6 +85,7 @@ class TameruSettings:
     store_max_entries: int = 512
     store_max_chars: int = 32_000_000
     pass_char_budget: int = 4_000_000          # inner chars Tameru may process per pass; beyond -> parent_line
+    pass_wall_ms: int = 6000                   # wall-clock bound per pass (the never-block bound); past it the extract/brief rungs are skipped (TAMERU_PASS_WALL_MS)
     retained_extract_budget_chars: int = 6000  # bodies (extract/brief) the newest rendered rows may keep in all (the floor)
     retained_extract_budget_ratio: float = 0.10  # ...at least this many chars per token of Hermes' compaction threshold; 0 = fixed
     retained_error_budget_chars: int = 8000    # "errors" rows (header + one line per error template) kept in all
@@ -284,6 +285,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "store_max_entries": _min_int(0),
     "store_max_chars": _min_int(0),
     "pass_char_budget": _min_int(0),
+    "pass_wall_ms": _min_int(0),
     "retained_extract_budget_chars": _min_int(0),
     "retained_extract_budget_ratio": _parse_savings,
     "retained_error_budget_chars": _min_int(0),

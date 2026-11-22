@@ -61,7 +61,7 @@ def test_defaults_match_the_contract():
         "expand_tool": True, "expand_grep_timeout": 2.0, "expand_grep_line_chars": 20_000, "store_max_entries": 512, "store_max_chars": 32_000_000,
         "policy_mode": "adaptive", "price_profile": "anthropic-sonnet-5.5-5m", "plan_forecast": True, "plan_replace_compaction": False, "plan_replace_margin_steps": 12, "plan_deep_tail": False, "plan_native_warm_prunes": True, "autotune": True, "manifest": True, "edits": True, "pins": True, "lazy_tool": False, "net_estimate": False, "stats_ledger": False, "preference": "balanced", "activation": "auto", "recent_protection": "auto",
         "input_budget_tokens": None, "output_reserve_tokens": None,
-        "pass_char_budget": 4_000_000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "small_window_threshold_tokens": 54_400, "errors_row_chars": 1600, "prune_tail": "tokens",
+        "pass_char_budget": 4_000_000, "pass_wall_ms": 6000, "retained_extract_budget_chars": 6000, "retained_extract_budget_ratio": 0.10, "retained_error_budget_chars": 8000, "small_window_threshold_tokens": 54_400, "errors_row_chars": 1600, "prune_tail": "tokens",
         "supersession": True, "ledger": True, "telemetry_log": "", "default_proactive_prune_tokens": 48_000, "default_proactive_prune_ratio": 0.75, "small_window_prune_ratio": 0.60,
         "default_proactive_prune_min_result_chars": 8000, "reprune_target_ratio": 0.30, "prune_regrowth_ratio": 0.20,
     }
@@ -112,6 +112,7 @@ ENV_SAMPLES = {
     "store_max_entries": ("10", 10),
     "store_max_chars": ("1000", 1000),
     "pass_char_budget": ("0", 0),
+    "pass_wall_ms": ("0", 0),
     "retained_extract_budget_chars": ("2000", 2000),
     "retained_extract_budget_ratio": ("0.25", 0.25),
     "retained_error_budget_chars": ("100", 100),

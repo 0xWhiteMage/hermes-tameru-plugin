@@ -31,6 +31,7 @@ import json
 import re
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as _FutureTimeout
 from collections import OrderedDict, deque
 from contextvars import ContextVar
 from dataclasses import asdict, dataclass, field, replace as dataclass_replace
@@ -113,6 +114,7 @@ from .render import (
     for_summary,
 )
 from .supersede import SupersessionIndex, build_index, superseded_by
+from .tameru.content_cache import content_key
 from .tameru.compress_context import (
     InliningGapMarker,
     ENGINE_VERSION,
@@ -146,6 +148,8 @@ _BODYLESS = frozenset({"header", "superseded"})   # rungs that keep no text of t
 _ERROR_LINE_CHARS = 300                            # an errors row keeps at most this much of one exemplar line
 _FIXED_RETRIES = 2                                 # fixed-budget extract attempts after an oversized one
 _MEMO_ENTRIES = 2048
+# Results past the engine's hard limit are never analysed: they render as the header rung with the recovery ref.
+_TOO_LARGE_CHARS = 8_000_000
 _MEMO_MAX_TEXT = 50_000       # a bigger extract is recomputed rather than held
 _MEMO_MAX_CHARS = 4_000_000   # ...and the memo as a whole holds at most this many chars of extracts
 _LINE_BREAK_RE = re.compile(r"\r\n|\r|\n")
@@ -172,6 +176,22 @@ class _Extract(NamedTuple):
     @property
     def compression_risk(self) -> str | None:
         return self.risk
+
+
+class _EnginePool:
+    """One-thread executor for engine calls; a copy is a fresh one, so a cloned agent shares nothing."""
+
+    def __init__(self) -> None:
+        self._ex = ThreadPoolExecutor(max_workers=1, thread_name_prefix="tameru-engine")
+
+    def submit(self, *args: Any, **kwargs: Any) -> Any:
+        return self._ex.submit(*args, **kwargs)
+
+    def __copy__(self) -> "_EnginePool":
+        return type(self)()
+
+    def __deepcopy__(self, memo: dict) -> "_EnginePool":
+        return type(self)()
 
 
 class _Memo:
@@ -286,6 +306,15 @@ class _Pass:
     policy_stage_index: int = 0
     full_local: bool = False
     prepared_prune: Any = None                  # one native replay: input, candidate, count, held telemetry
+    wall_ms: int = 0                            # wall-clock budget of this pass (0 = none)
+    started: float = 0.0                        # perf_counter at scope creation
+    wall_fired: int = 0                         # demotes the wall cut to header rungs
+
+    def wall_left_ms(self) -> float:
+        """Milliseconds of the wall budget still open; ``inf`` when the pass has none."""
+        if not self.wall_ms:
+            return float("inf")
+        return self.wall_ms - (time.perf_counter() - self.started) * 1000
 
 
 @dataclass
@@ -419,6 +448,11 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         self._timing_ring: deque = deque(maxlen=8)   # (api ms, first-chunk ms or None) of the last replies
         self._usage_ring: deque = deque(maxlen=8)    # (prompt, cache_read, cache_write, input) of the last replies; ints or None
         self._memo = _Memo()
+        # engine calls run on a single worker thread: a pass bounds its wait with result(timeout), and tool-result
+        # time precomputes the engine's content-keyed analyses so the next pass's inline calls start warm
+        self._pool = _EnginePool()
+        self._warm: list = []                     # submitted warm jobs; a new pass cancels the ones still queued
+        self._wall_fired = 0                      # passes cut short by the pass_wall_ms bound (telemetry)
         self._transactions = _Transactions()
         self._init_policy(self._settings)
         self._activity = ActivityState()
@@ -821,6 +855,34 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         if callable(callback):
             callback(messages, usage, **kwargs)
         self._observe_activity(messages)
+        self._warm_recent_results(messages)
+
+    def _warm_recent_results(self, messages) -> None:
+        """Background: analyse the recent big tool results so a later pass's engine calls hit the content cache."""
+        try:
+            calls = tool_calls_by_id(messages or [])
+            self._warm = [fut for fut in self._warm if not fut.done()]
+            warmed = 0
+            for msg in reversed(messages or []):
+                if warmed >= 4:
+                    break
+                if not isinstance(msg, dict) or msg.get("role") != "tool":
+                    continue
+                content = msg.get("content")
+                if not isinstance(content, str) or not (self._settings.min_tool_chars <= len(content) <= _TOO_LARGE_CHARS):
+                    continue
+                try:
+                    pl = parse_payload(content)
+                except Exception:
+                    continue
+                if not pl.inner or len(pl.inner) > _TOO_LARGE_CHARS:
+                    continue
+                tool, raw_args = calls.get(msg.get("tool_call_id") or "", ("unknown", ""))
+                hint = content_hint(tool, _json_args(raw_args), pl.inner)
+                self._warm.append(self._pool.submit(compress_context, pl.inner, [], **self._engine_options(hint)))
+                warmed += 1
+        except Exception:
+            pass  # warming is best-effort: it must never cost the user a turn
 
     def activity_snapshot(self):
         with self._activity.lifecycle_lock:
@@ -974,6 +1036,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
 
     def _new_scope(self, messages: list[dict] | None, **fields: Any) -> _Pass:
         with self._activity.lifecycle_lock:
+            for fut in self._warm:
+                fut.cancel()  # the pool has one thread: a pass never queues behind warm jobs
+            self._warm.clear()
             self._transactions.clear()
             fields.setdefault("settings", self._settings)
             plan = fields.get("plan")
@@ -981,6 +1046,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                 fields["settings"] = self._settings_for_plan(plan)
             self._transactions.active = True
             return _Pass(budget=self._settings.pass_char_budget, messages=messages,
+                         wall_ms=fields["settings"].pass_wall_ms, started=time.perf_counter(),
                          owner=self, lifecycle_id=self._activity.lifecycle_id,
                          base_store=self._store, base_memo=self._memo,
                          serial=self._transactions.serial,
@@ -1506,6 +1572,13 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         # extract or brief may not take the room the rows still to come in this pass need for their briefs.
         free = scope.room - self._reserved_after(scope, result, idx, call_id_to_tool, min_prune_chars)
         own_limit = min(limit, free)
+        # wall-clock: past the pass budget the extract/brief rungs are skipped (the header rung still applies)
+        left_ms = scope.wall_left_ms()
+        if left_ms <= 0:
+            own_limit = 0
+            scope.wall_fired += 1
+            if scope.wall_fired == 1:
+                self._wall_fired += 1  # one count per pass the wall cut short
         hint = content_hint(tool, args, pl.inner)
         for rung, build in (
             ("extract", lambda: self._extract_row(line, pl, ref, query, hint, own_limit)),
@@ -1629,29 +1702,31 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         self, inner: str, query: list[str], hint: str | None, ratio: float | None,
         selector_query: str | None = None,
     ) -> _Extract | None:
-        """Memoized ``compress_context`` of ``inner`` (None when the engine raised)."""
+        """Memoized ``compress_context`` of ``inner`` (None when the engine raised, timed out, or the text is `too_large`)."""
+        if len(inner) > _TOO_LARGE_CHARS:
+            return None  # the ladder's header rung carries the recovery ref; no analysis is sent
         key = (
-            _digest(inner), _digest(json.dumps(query, ensure_ascii=False)), ENGINE_VERSION,
-            self._settings_sha, hint, ratio, selector_query,
+            content_key(ENGINE_VERSION, "extract", inner,
+                        (_digest(json.dumps(query, ensure_ascii=False)), self._settings_sha, hint, ratio, selector_query)),
         )
         found = self._working_memo().get(key)
         if found is not None:
             return found
-        settings = self._pass_settings()
         fixed = {} if ratio is None else {"mode": "fixed", "budget_ratio": ratio}
         if selector_query is not None:
             fixed["selector_query"] = selector_query
+        fut = None
         try:
-            res = compress_context(
-                inner, query, ccr=False, citations=False, content_hint=hint,
-                pin_patterns=list(settings.protect_patterns) or None, gap_marker=elision_marker,
-                inline_short_gaps=True,
-                anchor_errors=settings.anchor_errors,
-                prose_brief=settings.prose_brief,
-                recursion_markers=(TAMERU_TAG.strip(),), min_savings_ratio=settings.min_savings,
-                **fixed,
-            )
+            fut = self._pool.submit(compress_context, inner, query, **self._engine_options(hint), **fixed)
+            res = fut.result(timeout=self._call_wall_s())
+        except _FutureTimeout:
+            if fut is not None:
+                fut.cancel()  # a queued call whose wait timed out must not run later
+            self._note_wall_fired()  # the wait ran out inside the wall: this pass was cut short
+            return None
         except Exception:
+            if fut is not None:
+                fut.cancel()
             return None
         holder = _SCOPE.get()
         if holder is not None and holder.owner is self:
@@ -1660,6 +1735,37 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         if len(out.text) <= _MEMO_MAX_TEXT:
             self._working_memo().put(key, out)
         return out
+
+    def _note_wall_fired(self) -> None:
+        """A wall-bound engine call ran out of wait: the pass it belongs to was cut short (counted once per pass)."""
+        scope = _SCOPE.get()
+        if scope is not None and scope.owner is self:
+            scope.wall_fired += 1
+            if scope.wall_fired == 1:
+                self._wall_fired += 1
+        else:
+            self._wall_fired += 1
+
+    def _engine_options(self, hint: str | None) -> dict:
+        """The ``compress_context`` option set every call shares, so a warm job and the later inline call analyse identically."""
+        settings = self._pass_settings()
+        return dict(
+            ccr=False, citations=False, content_hint=hint,
+            pin_patterns=list(settings.protect_patterns) or None, gap_marker=elision_marker,
+            inline_short_gaps=True,
+            anchor_errors=settings.anchor_errors,
+            prose_brief=settings.prose_brief,
+            recursion_markers=(TAMERU_TAG.strip(),), min_savings_ratio=settings.min_savings,
+        )
+
+    def _call_wall_s(self) -> float:
+        """Seconds an inline engine call may still take: the pass's remaining wall budget, else the pass bound itself."""
+        scope = _SCOPE.get()
+        if scope is not None and scope.owner is self and scope.wall_ms:
+            return max(0.05, scope.wall_left_ms() / 1000)
+        if self._settings.pass_wall_ms:
+            return max(0.05, self._settings.pass_wall_ms / 1000)  # no host step waits past the bound
+        return 30.0
 
     def _acceptable(self, out: _Extract | None, fingerprints: dict[str, str]) -> bool:
         """The engine's ``decide`` under ``HERMES_POLICY`` (not fail-open, within ``max_risk``, every error of the original kept)."""

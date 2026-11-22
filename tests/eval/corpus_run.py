@@ -178,6 +178,7 @@ def measure(arm: str, mapped, *, label: str | None = None, split: str = "", seed
                     "requests": result["price_log"]["requests"], "summaries": result["price_log"]["summaries"],
                     "readback_terms": terms, "compress_events": len(compress_at), "threshold_tokens": metrics["threshold_tokens"]},
         "wall_s": round(wall, 2), "engine_seconds": round(result["timing"]["engine_seconds"], 2),
+        "wall_budget_fired": getattr(made[-1], "_wall_fired", 0),
         "score_s": round(time.perf_counter() - started - wall, 2),
     }
 

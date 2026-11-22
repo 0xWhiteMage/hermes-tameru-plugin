@@ -36,6 +36,17 @@ All notable changes to this project are documented here. The format follows
   keeps HP4's cost/fact profile on the main windows and lands 64K breaks exactly on stock (2.0 vs
   2.0, both shapes) — the first arm to pass every stated gate: cost upper bound < 0 at 128K and
   252K, breaks ≤ stock at every window and at 64K, facts ≥ stock.
+- **Never-block pass (S7):** engine calls run on a single worker thread (`_EnginePool`) bounded by
+  `result(timeout)` against the new `pass_wall_ms` wall-clock bound (default 6000 ms — the never-block
+  bound, not a truncation cutoff; a wall that fires routinely would make outputs timing-dependent): past it the
+  extract/brief rungs are skipped (the header rung still applies), so a step never waits long inside an
+  engine call. Results past the engine's hard limit (>8M chars) get no analysis and fall straight to the
+  header rung with the recovery ref. `on_turn_complete` warms the vendored engine's content-keyed analysis
+  cache on the same thread for the recent big results — with the same option set and content hint the
+  inline call uses, and pending warm jobs are cancelled the moment a pass opens so it never queues behind
+  them — and `_Memo` keys extracts by the engine's `content_key`. Vendored engine at `c02c5d1` (S7 content
+  cache + `too_large`; the same bytes as the earlier `00c0271` pin — the engine's release branch history was
+  rewritten before its first push).
 - Vendored engine at `fd93aa7` (Tameru 1.10.x + `tameru.plan`, EV `decide`, loss/price profiles).
 
 ## [1.10.0] - Unreleased
