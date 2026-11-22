@@ -351,6 +351,7 @@ def test_plan_code_has_no_adaptive_constants():
         inspect.getsource(plan_pass.warm_prune),
         inspect.getsource(plan_pass.mean_step_tokens),
         inspect.getsource(plan_pass.note_compaction),
+        inspect.getsource(plan_pass.replace_compaction),
     ]
     src = "\n".join(sources)
     for constant in ("0.60", "0.85", "0.15"):

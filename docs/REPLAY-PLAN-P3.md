@@ -211,3 +211,101 @@ compacted three times vs stock's two (+0.17 breaks, −0.17 kept). `effective` a
 - Facts kept improve further over HP1 (3.16 / 3.40 vs 2.36 / 2.65 at 252K / 500K) — the extra moments
   catch facts the trigger pass would have lost — and retention by rung holds (extract ~96-100%,
   errors 70-90%, header 0%).
+
+## HP3: replace the compaction with one deep prune (P3-13, `plan_replace_compaction`)
+
+Hermes calls the proactive `prune_tool_results_only` checkpoint before each post-tool request and
+`compress()` when `should_compress` fires (`turn_preflight.py:402`, `:300`;
+`context_compressor_prune.py:37`, `context_compressor.py:5422`). The incumbent avoids compactions by
+committing its prune *before* the threshold check; HP3 instead acts *inside* `compress`
+(`engine.py:1197`): a trigger `plan()` with `replace_compaction` aims a deep prune — same shadow the
+native pass would demote — at `trigger − growth × margin_steps` (`plan_pass.replace_compaction:398`).
+On `reaches_target` the prune commits through `super().prune_tool_results_only` and the compaction is
+skipped (the replay counts it as a prune via the `_plan_replace_rows` marker, `replay.py:526`); on any
+decline Hermes compacts exactly as HP1. `plan_forecast` off — no warm acts. Arms: HP3-m12 / HP3-m24.
+
+### weighted `effective_real` change % (Hermes weights 1/5), cluster 95% CI, one-sided upper bound u1
+
+| comparison | 128K | 252K | 500K |
+|---|---|---|---|
+| HP3-m12 − stock | +36.4 [+32.4, +40.5] u1 +39.8 | +21.2 [+19.4, +22.9] u1 +22.6 | +10.9 [+9.9, +11.9] u1 +11.7 |
+| HP3-m12 − HP1 | +36.4 [+32.3, +40.6] | +21.4 [+19.6, +23.2] | +10.7 [+9.7, +11.7] |
+| HP3-m12 − HP2 | +32.6 [+28.5, +36.8] | +9.4 [+7.7, +11.3] | +6.6 [+5.7, +7.6] |
+| HP3-m12 − e1.10.0 | +53.9 [+49.2, +58.7] | +116.3 [+112.4, +120.3] | +58.1 [+56.9, +59.3] |
+| HP3-m24 − stock | +28.7 [+25.3, +32.0] u1 +31.5 | +19.8 [+18.1, +21.5] u1 +21.3 | +10.8 [+9.8, +11.8] u1 +11.6 |
+| HP3-m24 − HP1 | +28.6 [+25.3, +31.9] | +20.0 [+18.3, +21.8] | +10.6 [+9.6, +11.5] |
+| HP3-m24 − HP2 | +25.0 [+21.7, +28.4] | +8.2 [+6.4, +10.1] | +6.5 [+5.6, +7.5] |
+| HP3-m24 − e1.10.0 | +45.1 [+41.3, +48.8] | +113.2 [+109.3, +117.2] | +58.0 [+56.8, +59.2] |
+| HP3-m12 − stock `effective` | +37.6 | +22.7 | +13.7 |
+| HP3-m12 − stock `effective_finder` | +42.5 | +73.5 | +104.6 |
+| HP3-m24 − stock `effective` | +29.6 | +21.1 | +13.6 |
+| HP3-m24 − stock `effective_finder` | +32.3 | +66.3 | +101.9 |
+
+### breaks / compactions / replace prunes per session, facts kept
+
+| arm@window | breaks | compactions | replace prunes | kept | lost | recoverable |
+|---|---|---|---|---|---|---|
+| stock@128K | 2.11 | 2.11 | 0 | 0.74 | 3.26 | 0 |
+| HP1@128K | 2.11 | 2.11 | 0 | 1.31 | 2.29 | 0.40 |
+| HP2@128K | 2.31 | 1.96 | 47 | 1.29 | 2.27 | 0.45 |
+| HP3-m12@128K | 3.77 | 1.06 | 357 | 1.54 | 1.79 | 0.67 |
+| HP3-m24@128K | 3.41 | 1.30 | 279 | 1.44 | 1.96 | 0.60 |
+| e1.10.0@128K | 6.41 | 0.29 | 808 | 1.60 | 0.39 | 2.02 |
+| stock@252K | 1.93 | 1.93 | 0 | 1.34 | 6.66 | 0 |
+| HP1@252K | 1.96 | 1.96 | 0 | 2.36 | 4.64 | 1.01 |
+| HP2@252K | 2.42 | 0.93 | 197 | 3.16 | 3.11 | 1.73 |
+| HP3-m12@252K | 2.60 | 0.08 | 332 | 4.53 | 0.60 | 2.87 |
+| HP3-m24@252K | 2.55 | 0.21 | 308 | 4.27 | 1.17 | 2.56 |
+| e1.10.0@252K | 4.98 | 0 | 657 | 3.20 | 0.24 | 4.56 |
+| stock@500K | 1.99 | 1.99 | 0 | 1.26 | 10.74 | 0 |
+| HP1@500K | 1.99 | 1.99 | 0 | 2.65 | 8.74 | 0.61 |
+| HP2@500K | 2.16 | 1.17 | 131 | 3.40 | 6.77 | 1.83 |
+| HP3-m12@500K | 2.24 | 0 | 296 | 6.98 | 0.28 | 4.74 |
+| HP3-m24@500K | 2.24 | 0.02 | 292 | 6.88 | 0.48 | 4.64 |
+| e1.10.0@500K | 4.51 | 0 | 595 | 4.88 | 0.37 | 6.75 |
+
+### reaches_target share and native commit gate (telemetry, per window)
+
+| arm@window | calls | reached | reach share | commits | native no-commit | commit share of reached |
+|---|---|---|---|---|---|---|
+| HP3-m12@128K | 497 | 391 | 78.7% | 357 | 34 | 91.3% |
+| HP3-m24@128K | 450 | 310 | 68.9% | 279 | 31 | 90.0% |
+| HP3-m12@252K | 343 | 332 | 96.8% | 332 | 0 | 100% |
+| HP3-m24@252K | 336 | 308 | 91.7% | 308 | 0 | 100% |
+| HP3-m12@500K | 296 | 296 | 100% | 296 | 0 | 100% |
+| HP3-m24@500K | 295 | 292 | 99.0% | 292 | 0 | 100% |
+
+### 64K development matrix (refactor / smallrows, seeds 0-5)
+
+| shape | arm | breaks/session | compactions/session | prunes/session | kept | effective vs stock |
+|---|---|---|---|---|---|---|
+| refactor | stock | 2.0 | 2.0 | 0 | 13.0 | — |
+| refactor | HP3-m12 = HP3-m24 | 3.17 | 0.17 | 3.0 | 13.33 | +8.2% [+3.0, +15.9] |
+| smallrows | stock | 2.0 | 2.0 | 0 | 10.0 | — |
+| smallrows | HP3-m12 = HP3-m24 | 2.0 | 2.0 | 0 | 10.33 | +8.2% pooled above |
+
+(The two margins land on identical trajectories at 64K — the reachability outcome is the same on these
+shapes.)
+
+### What the HP3 numbers say
+
+- **The mechanism does exactly what it was designed to do**: compactions nearly vanish (m12: 1.06 /
+  0.08 / 0 per session — at 500K zero sessions compacted at all), each trigger moment spends its one
+  cache break on a deep prune (reach share 79-100%, rising with window size), and rungs follow the
+  plan — extracts 92-95% held, headers 0%, no `brief` rung in replace mode.
+- **Both candidate bars fail decisively.** Cost vs stock is *worse* at every window: the one-sided
+  upper bounds are +39.8 / +22.6 / +11.7 (m12) and +31.5 / +21.3 / +11.6 (m24) — nowhere near < 0.
+  Two compounding causes: a replace-prune leaves `margin_steps` of runway where a compaction resets
+  far deeper, so sessions re-trigger more often (breaks 3.77 / 2.60 / 2.24 vs stock 2.11 / 1.93 /
+  1.99 — the gate fails at every window and at 64K refactor 3.17 vs 2.0); and the extract-rich
+  post-prune prompt is much bigger than a compaction's summarized middle, so every later request
+  re-reads it (`effective_finder` +32 to +105%).
+- **m24 is uniformly cheaper and gentler than m12** (fewer commits → fewer breaks and less retained
+  extract, at the cost of more fallback compactions) — the margin trades reachability for break count
+  in the predicted direction.
+- **Fact retention is the best seen so far**: kept 4.53 / 6.98 at 252K/500K vs stock 1.34 / 1.26 and
+  even the incumbent's 3.20 / 4.88 — extracts at compaction depth keep almost everything (lost 0.28 at
+  500K). The trade is unusable as-is for cost, but it marks where the retention ceiling sits.
+- **Verdict: not adopted** — the deep prune alone cannot beat a compaction's reset on either cost or
+  break count at these margins; a viable hybrid would need the prune to leave compaction-scale
+  runway, which is exactly what `reaches_target` already refuses.

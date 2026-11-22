@@ -188,3 +188,33 @@ def hp2() -> Any:
         ),
         quiet_mode=True,
     )
+
+
+def _hp3(margin_steps: int) -> Any:
+    """HP3: at the compaction moment a trigger ``plan()`` with ``replace_compaction`` may commit one
+    deep prune through the native proactive-prune machinery when it alone leaves
+    ``margin_steps`` of runway; no warm acts (``plan_forecast`` off)."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(
+        settings=TameruSettings(
+            policy_mode="plan",
+            preference="balanced",
+            price_profile="anthropic-sonnet-5.5-5m",
+            plan_forecast=False,
+            plan_replace_compaction=True,
+            plan_replace_margin_steps=margin_steps,
+        ),
+        quiet_mode=True,
+    )
+
+
+@register("HP3-m12")
+def hp3_m12() -> Any:
+    return _hp3(12)
+
+
+@register("HP3-m24")
+def hp3_m24() -> Any:
+    return _hp3(24)

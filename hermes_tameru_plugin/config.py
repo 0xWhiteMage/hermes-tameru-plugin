@@ -49,6 +49,8 @@ class TameruSettings:
     policy_mode: str = "adaptive"             # adaptive | legacy | plan
     price_profile: str = "anthropic-sonnet-5.5-5m"   # engine prices.json profile the ``plan`` policy's EV check prices with
     plan_forecast: bool = True                  # off: under ``policy_mode: plan`` the forecast exception does not run — proactive checkpoints delegate to the native pass (TAMERU_PLAN_FORECAST=off)
+    plan_replace_compaction: bool = False       # on: under ``policy_mode: plan`` a trigger plan may replace a compaction with one deep prune when it alone leaves the runway (TAMERU_PLAN_REPLACE_COMPACTION=on)
+    plan_replace_margin_steps: int = 12         # runway steps the replacing prune must leave past the trigger (TAMERU_PLAN_REPLACE_MARGIN_STEPS=12)
     autotune: bool = True                     # adaptive mode retunes itself from live session signals
     lazy_tool: bool = False                   # off by default: send the recovery tool only once a result has been shortened (needs Hermes' llm_request middleware; TAMERU_LAZY_TOOL=on)
     net_estimate: bool = False                # off by default: /tameru stats adds a signed estimate of what the cleanups saved or cost (TAMERU_NET_ESTIMATE=on)
@@ -244,6 +246,8 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "policy_mode": _choice(POLICY_MODES),
     "price_profile": _parse_price_profile,
     "plan_forecast": _parse_bool,
+    "plan_replace_compaction": _parse_bool,
+    "plan_replace_margin_steps": _min_int(0),
     "autotune": _parse_bool,
     "manifest": _parse_bool,
     "edits": _parse_bool,

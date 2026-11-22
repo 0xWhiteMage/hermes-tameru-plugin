@@ -385,6 +385,91 @@ def warm_prune(engine, parent, messages, current_tokens, *args, **kwargs):
         engine._telemetry.time(time.perf_counter() - started)
 
 
+# ---- HP3: replace the compaction with one deep prune ---------------------------------------------
+#
+# Stock spends one cache break per trigger on a compaction. With ``plan_replace_compaction`` the
+# adapter spends the same break on a deep prune — at the moment ``compress`` runs, a trigger
+# ``plan()`` with ``replace_compaction`` derives the prune depth from the runway target
+# (``trigger − growth × margin_steps``) over the rows the native proactive prune would demote. When
+# the plan reports ``reaches_target`` the prune commits through the incumbent's native pass and the
+# compaction is skipped; otherwise Hermes compacts as HP1 does.
+
+
+def replace_compaction(engine, prune_parent, messages, current_tokens, *args, **kwargs):
+    """The compaction-point half of ``plan_replace_compaction``: the pruned transcript, or ``None``."""
+    from .engine import _SCOPE                      # late: engine delegates here
+    settings = engine._settings
+    scope = engine._new_scope(messages)
+    token = _SCOPE.set(scope)
+    started = time.perf_counter()
+    try:
+        with engine._activity.lifecycle_lock:
+            if not engine._pass_is_current(scope):
+                return None
+        # The shadow mirrors the native proactive pass: same boundary, spared round, dedupe and
+        # skill protection; ``plan_rows`` builds the trigger-event input over the demote set.
+        result = [m.copy() for m in messages]
+        call_id_to_tool = tool_calls_by_id(result)
+        boundary = engine._prune_boundary(result, getattr(engine, "protect_last_n", 0), None)
+        try:
+            spared = engine._spared_pending_tool_round(result)
+        except Exception:
+            spared = range(0)
+        if spared:
+            boundary = min(boundary, spared.start)
+            scope.boundary = boundary
+        engine._dedupe_tool_results(result)
+        protected = collect_protected_skill_names(result, boundary)
+        min_prune = engine._raw_native("proactive_prune_min_result_chars", 8000)
+        plan_rows(engine, result, call_id_to_tool, min_prune, (protected,), {}, scope)
+        if scope.plan_input is None:
+            engine._telemetry.count("plan_replace", acted=False, gate="error")
+            return None
+        try:
+            scope.plan_input = dataclass_replace(
+                scope.plan_input, event="trigger",
+                growth_tokens_per_step=mean_step_tokens(engine),
+                margin_steps=getattr(settings, "plan_replace_margin_steps", 12),
+                replace_compaction=True)
+            scope.plan_obj = engine_plan(scope.plan_input)
+            scope.plan_actions = {int(a.id): a for a in scope.plan_obj.actions}
+        except Exception:
+            engine._telemetry.count("error", where="plan")
+            scope.plan_entries = {}
+            return None
+        engine._telemetry.count(
+            "plan_replace", acted=scope.plan_obj.acted, gate=scope.plan_obj.gate,
+            reaches_target=scope.plan_obj.reaches_target, items=len(scope.plan_input.items))
+        if not (scope.plan_obj.acted and scope.plan_obj.reaches_target):
+            return None
+        # The plan says this prune alone leaves the runway: open Hermes' pre-gate and commit through
+        # the native pass (its reclaim/rearm gates still apply), rungs rendered by the same ladder.
+        scope.native_options["proactive_prune_tokens"] = 1
+        with engine._telemetry.hold() as held:
+            res = prune_parent(messages, current_tokens, *args, **kwargs)
+        final_scope = _SCOPE.get()
+        if res[0] is messages or res[1] <= 0:
+            engine._telemetry.count("plan_replace_no_commit")
+            return None
+        count = 0
+        if final_scope is not None:
+            with engine._activity.lifecycle_lock:
+                if engine._publish_pass_state(final_scope):
+                    held.apply()
+                    count = engine._activity.confirm(final_scope.changes.values(), res[0])
+                    engine._activity.refresh(res[0])
+            engine._activity_registry.notify(engine, count)
+        engine._telemetry.count("plan_replace_commit")
+        # The caller asked compress() for a compaction; this commit is a prune through the prune
+        # machinery. Tag it so the replay ledger counts a prune, not a compaction.
+        engine._plan_replace_rows = int(res[1])
+        return res[0]
+    finally:
+        engine._close_pass(scope)
+        _SCOPE.reset(token)
+        engine._telemetry.time(time.perf_counter() - started)
+
+
 def note_compaction(engine) -> None:
     """A committed compaction marks warm acts within ``H + margin_steps`` as failed prevention."""
     pending = getattr(engine, "_plan_warm_pending", None) or []

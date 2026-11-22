@@ -523,7 +523,18 @@ class _Session:
             before = sum(len(_wire(m)) for m in messages)
             out = self._invoke("compress", messages, lambda: eng.compress(messages, current_tokens=est))
             self.compress_calls += 1
-            if out is not messages:
+            replaced_rows = int(getattr(eng, "_plan_replace_rows", 0) or 0)
+            eng._plan_replace_rows = 0
+            if out is not messages and replaced_rows:
+                # plan_replace_compaction: compress() returned one deep prune, not a compaction.
+                self.prune_commits += 1
+                self.prune_rows += replaced_rows
+                self.events.append(
+                    {"request": len(self.request_chars), "kind": "prune", "rows": replaced_rows,
+                     "chars_before": before, "chars_after": sum(len(_wire(m)) for m in out)}
+                )
+                messages = out
+            elif out is not messages:
                 self.compactions += 1
                 self.compactions_shrinking += len(out) < len(messages)
                 self.events.append(
@@ -688,7 +699,16 @@ class _Session:
             out = self._invoke("compress", messages,
                                lambda: eng.compress(messages, **self._compress_kwargs(est)))
             self.compress_calls += 1
-            if out is not messages:
+            replaced_rows = int(getattr(eng, "_plan_replace_rows", 0) or 0)
+            eng._plan_replace_rows = 0
+            if out is not messages and replaced_rows:
+                self.prune_commits += 1
+                self.prune_rows += replaced_rows
+                self.events.append(
+                    {"request": len(self.request_chars), "kind": "prune", "rows": replaced_rows,
+                     "chars_before": before, "chars_after": sum(len(_wire(m)) for m in out)}
+                )
+            elif out is not messages:
                 self.compactions += 1
                 self.overflow_compactions += 1
                 self.compactions_shrinking += len(out) < len(messages)

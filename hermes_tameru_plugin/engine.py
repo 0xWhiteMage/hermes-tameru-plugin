@@ -1193,6 +1193,16 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                 messages, current_tokens=current_tokens, focus_topic=focus_topic, force=force,
                 memory_context=memory_context, **kwargs,
             )
+        if (
+            self._settings.policy_mode == "plan" and self._settings.plan_replace_compaction
+            and not force
+        ):
+            # HP3: one deep prune may replace this compaction — never when the caller forced one.
+            from . import plan_pass
+            replaced = plan_pass.replace_compaction(
+                self, super().prune_tool_results_only, messages, current_tokens)
+            if replaced is not None:
+                return replaced
         scope = self._new_scope(messages, focus=focus_topic, full=True)
         token = _SCOPE.set(scope)
         started = time.perf_counter()

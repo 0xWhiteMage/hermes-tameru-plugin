@@ -20,7 +20,11 @@ All notable changes to this project are documented here. The format follows
   may act early when its own projected prompt leaves enough runway — replay arm HP2 halves compactions
   at 252K/500K but pays +0.2-0.5 prefix breaks per session, so the strict breaks-≤-stock gate does not
   pass at any window and cost runs +3 to +11% over stock; the failed-prevention share is 0.5% / 0% at
-  252K / 500K but 64% at 128K.
+  252K / 500K but 64% at 128K. **`plan_replace_compaction`** (default off) adds the compaction-point
+  variant: a trigger `plan()` may replace a compaction with one deep prune when the plan alone leaves
+  `plan_replace_margin_steps` of runway — replay arms HP3-m12/HP3-m24 nearly eliminated compactions and
+  set the fact-retention ceiling (6.98 kept vs stock 1.26 at 500K) but cost +11-36% and more prefix
+  breaks than stock, so it is not adopted.
 - Vendored engine at `fd93aa7` (Tameru 1.10.x + `tameru.plan`, EV `decide`, loss/price profiles).
 
 ## [1.10.0] - Unreleased
