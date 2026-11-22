@@ -58,10 +58,10 @@ def written_files(messages: Any) -> list[str]:
     if not isinstance(messages, list):
         return []
     order: dict[tuple[str, ...], None] = {}
-    try:
-        for message in messages:
-            if not isinstance(message, dict) or message.get("role") != "assistant":
-                continue
+    for message in messages:
+        if not isinstance(message, dict) or message.get("role") != "assistant":
+            continue
+        try:
             for tool, raw_args in tool_calls_by_id([message]).values():
                 if tool not in _WRITE_TOOLS:
                     continue
@@ -70,8 +70,8 @@ def written_files(messages: Any) -> list[str]:
                     if parts:
                         order.pop(parts, None)
                         order[parts] = None
-    except Exception:
-        return []
+        except Exception:
+            continue
     bases: dict[str, int] = {}
     for parts in order:
         bases[parts[-1]] = bases.get(parts[-1], 0) + 1
