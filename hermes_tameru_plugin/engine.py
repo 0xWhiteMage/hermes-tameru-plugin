@@ -260,6 +260,7 @@ class _Pass:
     room: int = 0                                 # retained-extract chars left for new rows
     err_room: int = 0                             # retained "errors"-row chars left for new rows
     boundary: int | None = None                   # Hermes' prune boundary of this pass (pass 2 runs below it)
+    deep_tail_end: int | None = None              # plan_deep_tail: demotable tail runs to here (past boundary)
     pending: list[int] | None = None              # pass-2 rows the ladder may still render, oldest first
     reserve_tail: list[int] | None = None         # reserve_tail[k]: estimated brief chars of pending[k:]
     gone: list[str] = field(default_factory=list)  # refs of rows this pass cut down to a body-less header
@@ -1298,8 +1299,16 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                 protect_tail_tokens = budget
         scope = _SCOPE.get()
         if (scope is None or scope.owner is not self or scope.full):
-            return super()._prune_old_tool_results(
+            res, n_pruned = super()._prune_old_tool_results(
                 messages, protect_tail_count, protect_tail_tokens, *args, **kwargs)
+            if (
+                scope is not None and scope.owner is self and scope.full
+                and (scope.settings or self._settings).policy_mode == "plan"
+                and (scope.settings or self._settings).plan_deep_tail
+            ):
+                from . import plan_pass
+                res, n_pruned = plan_pass.apply_deep_tail(self, res, n_pruned, scope)
+            return res, n_pruned
         if scope.policy_plans:
             return self._adaptive_candidates(
                 super()._prune_old_tool_results, messages, protect_tail_count,

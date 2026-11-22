@@ -309,3 +309,74 @@ shapes.)
 - **Verdict: not adopted** — the deep prune alone cannot beat a compaction's reset on either cost or
   break count at these margins; a viable hybrid would need the prune to leave compaction-scale
   runway, which is exactly what `reaches_target` already refuses.
+
+## P3-14 — HP4: `plan_deep_tail` (a deeper reset at the same compaction moments)
+
+HP4 keeps HP1's compaction moments and asks `plan()` to also demote the **protected tail's** older
+tool results — every tail row except the most recent step's pending round (`_spared_pending_tool_round`,
+the same rows Hermes itself spares). Pass 2 of Hermes' compaction prune never visits tail rows
+(`agent/context_compressor.py:3298` iterates `range(prune_boundary)`), so the tail items' rungs are
+committed on the pruned copy after the native pass returns (`plan_pass.apply_deep_tail`), through the
+same ladder rungs, refs and recovery records; the compaction then proceeds unchanged and splices a
+pre-shortened tail. No warm acts (`plan_forecast` off), no `replace_compaction`.
+
+Rows: `build/p3-plan/rows-dev-hp4.jsonl` (132 dev scenarios x 3 windows x 2 arms; stock re-run is
+identical to the committed P2c stock rows apart from timing and the post-P2c per-fact rung fields —
+0 content diffs). 64K matrix: `build/p3-plan/matrix64-hp4.json`. Post-compaction sizes:
+`build/p3-plan/postcompact-telemetry.jsonl`. Report: `build/p3-plan/report-hp4.{json,txt}`.
+
+### Weighted `effective_real` change % vs stock (cluster 95% CI, one-sided upper u1)
+
+| arm | 128K | 252K | 500K |
+|---|---|---|---|
+| HP4 vs stock | −1.21 [−1.68, −0.72] u1 −0.80 | −1.77 [−2.24, −1.30] u1 −1.38 | −0.97 [−1.21, −0.73] u1 −0.77 |
+| HP4 vs HP1 | −1.28 | −1.55 | −1.17 |
+| HP4 vs HP2 | −3.93 | −10.80 | −4.63 |
+| HP4 vs e110 | +11.59 | +69.11 | +41.07 |
+| HP4 vs stock `effective` | −0.86 | −1.11 | −0.25 |
+| HP4 vs stock `effective_finder` | +0.20 | +9.54 | +8.96 |
+
+### Breaks / compactions / prunes per session and facts kept
+
+| arm@window | prefix_breaks | compactions | prune_commits | kept |
+|---|---|---|---|---|
+| stock 128K / 252K / 500K | 2.106 / 1.932 / 1.985 | 2.106 / 1.932 / 1.985 | 0 | 0.74 / 1.34 / 1.26 |
+| HP4 128K / 252K / 500K | 2.098 / 1.917 / 1.985 | 2.098 / 1.917 / 1.985 | 0 | 1.24 / 2.68 / 2.93 |
+
+### 64K matrix (seeds 0-5)
+
+| shape | arm | prefix_breaks | compactions | prune_commits | kept | effective vs stock |
+|---|---|---|---|---|---|---|
+| refactor | stock | 2.0 | 2.0 | 0 | 13.0 | — |
+| refactor | HP4 | 2.83 | 1.0 | 1.83 | 13.0 | +0.2% [−1.1, +2.8] pooled |
+| smallrows | stock | 2.0 | 2.0 | 0 | 10.0 | — |
+| smallrows | HP4 | 2.0 | 2.0 | 0 | 10.33 | +0.2% pooled above |
+
+### Candidate-bar verdict
+
+| gate | HP4 |
+|---|---|
+| cost u1 < 0 @128K | **pass** (−0.80) |
+| cost u1 < 0 @252K | **pass** (−1.38) |
+| breaks ≤ stock, main windows | **pass** (2.098 / 1.917 / 1.985 vs 2.106 / 1.932 / 1.985) |
+| breaks ≤ stock @64K | **fail** (refactor 2.83 vs 2.0; smallrows 2.0 vs 2.0) |
+| facts ≥ stock | **pass** (1.24 / 2.68 / 2.93 vs 0.74 / 1.34 / 1.26) |
+
+### What the HP4 numbers say
+
+- **The mechanism does what it was designed to do**: the post-compaction reset is deeper (tail tool
+  results arrive pre-shortened — at 252K HP4 shortens 19.4 rows vs stock 9.9 and keeps 30.5 tool rows
+  live vs 21.2), and it is the first arm cost-negative vs stock at every window while matching stock's
+  breaks exactly on the main windows.
+- **Facts nearly double** (2.93 vs 1.26 at 500K) because the tail's results demote through the fact-
+  first allocation rather than surviving whole or being stubbed; errors rungs hold ~3x the error
+  exemplars of stock at 64K.
+- **The 64K failure is native Hermes pruning, not policy pruning**: at `refactor` the deeper reset
+  halves compactions (1.0 vs 2.0) but the changed transcript then trips Hermes' *own* proactive-prune
+  gate ~1.8 times per session (the same mechanism behind HP1's +0.83). Breaks read 2.83 vs 2.0.
+  `smallrows` is identical to stock. The strict ≤-stock comparison fails; the compaction count itself
+  improved.
+- **Verdict: not adopted under the stated bar** — it clears cost, facts and every main-window break
+  gate but not the 64K refactor break comparison. It is also the closest any arm has come: the
+  remaining gap is native-prune activity on the post-compaction transcript, which suggests the next
+  lever is suppressing or absorbing those native commits rather than changing the demotion.

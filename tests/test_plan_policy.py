@@ -15,6 +15,7 @@ import pytest
 from conftest import read_file_payload, terminal_payload
 from engine_support import (
     MIN_PRUNE_CHARS,
+    PROTECT_LAST_N,
     Chat,
     make_engine,
     prune_pass,
@@ -345,6 +346,7 @@ def test_plan_code_has_no_adaptive_constants():
     sources = [
         inspect.getsource(plan_pass.plan_rows),
         inspect.getsource(plan_pass.apply_plan_row),
+        inspect.getsource(plan_pass.apply_deep_tail),
         inspect.getsource(plan_pass.ev_strength),
         inspect.getsource(plan_pass.observe_body),
         inspect.getsource(plan_pass.step_tokens),
@@ -358,3 +360,69 @@ def test_plan_code_has_no_adaptive_constants():
         assert not re.search(rf"(?<![\d.]){re.escape(constant)}(?![\d])", src), constant
     assert plan_pass.PLAN_K == 3 and plan_pass.PLAN_H == 0
     assert plan_pass.PLAN_WARM_H == 3 and plan_pass.PLAN_MARGIN_STEPS == 6
+
+
+# ---- plan_deep_tail (HP4) ----------------------------------------------------------------------
+
+
+def _deep_tail_fixture(engine):
+    """Middle row + PROTECT_LAST_N tail rows; the trailing round is the pending (most recent) step.
+
+    Layout (PROTECT_LAST_N = 4): [sys, user, A, T0, A, T1, A, T2, A, T3, A, T4] — boundary = 8,
+    the tail is A/T3 and A/T4, and T4's round is the unread pending round Hermes itself spares.
+    """
+    chat = Chat()
+    chat.tool("read_file", {"path": "svc.py"}, source_file())
+    for i in range(PROTECT_LAST_N + 2):
+        chat.tool("terminal", {"command": f"tail app{i}.log"}, server_log(seed=10 + i))
+    messages = chat.messages
+    boundary = len(messages) - PROTECT_LAST_N
+    pending_tool_idx = len(messages) - 1
+    return messages, boundary, pending_tool_idx
+
+
+def test_plan_deep_tail_parsing():
+    assert TameruSettings().plan_deep_tail is False
+    parse = _SETTING_PARSERS["plan_deep_tail"]
+    assert parse("on") is True and parse("off") is False
+
+
+def test_deep_tail_items_cover_tail_except_pending():
+    """Under ``plan_deep_tail`` the plan's demotable set extends past the prune boundary into the
+    protected tail, stopping before the most recent step's pending round."""
+    engine = make_engine(TameruSettings(
+        small_window_threshold_tokens=0, policy_mode="plan", plan_deep_tail=True))
+    messages, boundary, pending_tool_idx = _deep_tail_fixture(engine)
+    scope = _planned_scope(engine, messages, full=True)
+    assert scope is not None and scope.plan_input is not None
+    demoted = {int(i.id) for i in scope.plan_input.items if i.stock_action == "demote"}
+    tail_tool = [i for i in range(boundary, pending_tool_idx)
+                 if messages[i].get("role") == "tool"]
+    assert tail_tool, "fixture has a tail tool row before the pending round"
+    for i in tail_tool:
+        assert i in demoted, f"tail row {i} should be a demote item"
+    assert pending_tool_idx not in demoted, "the pending round stays protected"
+    assert scope.deep_tail_end == pending_tool_idx - 1   # spared.start = owning assistant row
+
+
+def test_deep_tail_commits_tail_rungs():
+    """The tail rows' plan rungs are committed after pass 2 (the seam never visits them)."""
+    engine = make_engine(TameruSettings(
+        small_window_threshold_tokens=0, policy_mode="plan", plan_deep_tail=True))
+    messages, boundary, pending_tool_idx = _deep_tail_fixture(engine)
+    original_pending = messages[pending_tool_idx]["content"]
+    out, count = prune_pass(engine, messages, full=True)
+    found = rungs(out)
+    tail_rungs = {i: r for i, r in found.items() if i >= boundary}
+    assert tail_rungs, "tail rows carry plan rungs inside the compaction pass"
+    assert pending_tool_idx not in found
+    assert out[pending_tool_idx]["content"] == original_pending
+
+
+def test_deep_tail_off_keeps_tail_verbatim():
+    """Without ``plan_deep_tail`` a full pass still leaves the protected tail untouched."""
+    engine = plan_engine()
+    messages, boundary, pending_tool_idx = _deep_tail_fixture(engine)
+    tail_contents = [messages[i].get("content") for i in range(boundary, len(messages))]
+    out, count = prune_pass(engine, messages, full=True)
+    assert [m.get("content") for m in out[boundary:]] == tail_contents

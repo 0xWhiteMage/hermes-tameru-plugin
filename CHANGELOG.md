@@ -24,7 +24,13 @@ All notable changes to this project are documented here. The format follows
   variant: a trigger `plan()` may replace a compaction with one deep prune when the plan alone leaves
   `plan_replace_margin_steps` of runway — replay arms HP3-m12/HP3-m24 nearly eliminated compactions and
   set the fact-retention ceiling (6.98 kept vs stock 1.26 at 500K) but cost +11-36% and more prefix
-  breaks than stock, so it is not adopted.
+  breaks than stock, so it is not adopted. **`plan_deep_tail`** (default off) instead keeps the
+  compaction and deepens it: the plan's demotable set then also covers the protected tail's older
+  tool results — everything but the most recent step's pending round — so the spliced tail arrives
+  pre-shortened. Replay arm HP4 is the first arm cost-negative vs stock at every window (−0.8 to
+  −1.8 one-sided upper) with breaks ≤ stock on the main windows and ~2x fact retention; it is not
+  adopted because the strict 64K break comparison reads +0.83 on `refactor` (native Hermes prune
+  commits downstream of the changed transcript; the deep reset itself halves compactions there).
 - Vendored engine at `fd93aa7` (Tameru 1.10.x + `tameru.plan`, EV `decide`, loss/price profiles).
 
 ## [1.10.0] - Unreleased

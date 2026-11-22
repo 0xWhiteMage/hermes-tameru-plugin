@@ -105,6 +105,17 @@ def plan_rows(engine, result, call_id_to_tool, min_prune_chars, rest, kw, scope)
     scope.err_room = engine._retained_error_budget()   # the errors rung still gets its own budget
     view = _view(scope, result)
     boundary = scope.boundary if scope.boundary is not None else len(result)
+    demote_end = boundary
+    scope.deep_tail_end = None
+    if settings.plan_deep_tail and scope.full:
+        # ``plan_deep_tail``: the protected tail's older tool results join the demotable set at a
+        # compaction; the pending round — the most recent step's results — stays out (Hermes spares
+        # it from its own passes for the same reason). Pass 2 never visits these rows, so their
+        # rungs are committed by ``apply_deep_tail`` after the native pass returns.
+        spared = engine._spared_pending_tool_round(result)
+        tail_end = spared.start if spared else len(result)
+        demote_end = max(boundary, tail_end)
+        scope.deep_tail_end = demote_end
     parent = super(type(engine), engine)._demote_tool_result_at
     supersede = build_index(view, call_id_to_tool) if settings.supersession else None
     fact_cache: dict[int, frozenset] = {}
@@ -127,7 +138,7 @@ def plan_rows(engine, result, call_id_to_tool, min_prune_chars, rest, kw, scope)
         base = dict(id=str(idx), position=idx, tokens=tokens, chars=chars,
                     age_steps=max(0, len(result) - 1 - idx), stratum="hermes")
         keep = PlanItem(stock_action="keep", stock_kept_chars=chars, protected=True, **base)
-        if msg.get("role") != "tool" or not isinstance(content, str) or idx >= boundary:
+        if msg.get("role") != "tool" or not isinstance(content, str) or idx >= demote_end:
             items.append(keep)
             continue
         tool, raw_args = call_id_to_tool.get(msg.get("tool_call_id") or "", ("unknown", ""))
@@ -286,6 +297,31 @@ def apply_plan_row(engine, result, idx, entry, scope, settings) -> bool:
                                f"superseded by msg {entry['succ_idx']} ({entry['succ_kind']})"),
         )
     return engine._commit_header_or_errors(result, idx, content, tool, ref, pl, scope, line)
+
+
+def apply_deep_tail(engine, result, pruned, scope):
+    """Commit the plan's rungs to demotable tail rows (``plan_deep_tail``).
+
+    Hermes' pass 2 only calls the demote seam below the prune boundary, so tail rows the plan
+    marked ``demote`` never met the ladder. Their actions are applied here, on the pruned copy the
+    compaction splices verbatim as its tail — same rungs, same refs, same ``scope.changes``.
+    Returns ``(result, pruned + changed)``; a pass that never planned (``plan_entries`` None) is
+    returned untouched.
+    """
+    boundary = scope.boundary
+    end = scope.deep_tail_end
+    if scope.plan_entries is None or boundary is None or end is None or end <= boundary:
+        return result, pruned
+    settings = scope.settings or engine._settings
+    changed = 0
+    for idx in range(boundary, min(end, len(result))):
+        action = scope.plan_actions.get(idx)
+        entry = scope.plan_entries.get(idx)
+        if action is None or action.action == "keep" or entry is None:
+            continue
+        if apply_plan_row(engine, result, idx, entry, scope, settings):
+            changed += 1
+    return result, pruned + changed
 
 
 # ---- the forecast exception: a warm-step act at Hermes' proactive-prune checkpoint ---------------

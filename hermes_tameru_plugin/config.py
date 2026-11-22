@@ -51,6 +51,9 @@ class TameruSettings:
     plan_forecast: bool = True                  # off: under ``policy_mode: plan`` the forecast exception does not run — proactive checkpoints delegate to the native pass (TAMERU_PLAN_FORECAST=off)
     plan_replace_compaction: bool = False       # on: under ``policy_mode: plan`` a trigger plan may replace a compaction with one deep prune when it alone leaves the runway (TAMERU_PLAN_REPLACE_COMPACTION=on)
     plan_replace_margin_steps: int = 12         # runway steps the replacing prune must leave past the trigger (TAMERU_PLAN_REPLACE_MARGIN_STEPS=12)
+    # policy_mode="plan": at a compaction also demote the protected tail's older tool results
+    # (everything except the most recent step's pending round) through the same plan allocation.
+    plan_deep_tail: bool = False
     autotune: bool = True                     # adaptive mode retunes itself from live session signals
     lazy_tool: bool = False                   # off by default: send the recovery tool only once a result has been shortened (needs Hermes' llm_request middleware; TAMERU_LAZY_TOOL=on)
     net_estimate: bool = False                # off by default: /tameru stats adds a signed estimate of what the cleanups saved or cost (TAMERU_NET_ESTIMATE=on)
@@ -248,6 +251,7 @@ _SETTING_PARSERS: dict[str, Callable[[Any], Any]] = {
     "plan_forecast": _parse_bool,
     "plan_replace_compaction": _parse_bool,
     "plan_replace_margin_steps": _min_int(0),
+    "plan_deep_tail": _parse_bool,
     "autotune": _parse_bool,
     "manifest": _parse_bool,
     "edits": _parse_bool,

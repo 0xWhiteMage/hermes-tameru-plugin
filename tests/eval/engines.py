@@ -218,3 +218,24 @@ def hp3_m12() -> Any:
 @register("HP3-m24")
 def hp3_m24() -> Any:
     return _hp3(24)
+
+
+@register("HP4")
+def hp4() -> Any:
+    """HP4: HP1 plus ``plan_deep_tail`` — at the compaction moment the plan's demotable set also
+    covers the protected tail's older tool results (all but the most recent step's pending round),
+    so the spliced tail arrives pre-shortened and the post-compaction reset is deeper. No warm
+    acts, no replace; the compaction itself is unchanged."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(
+        settings=TameruSettings(
+            policy_mode="plan",
+            preference="balanced",
+            price_profile="anthropic-sonnet-5.5-5m",
+            plan_forecast=False,
+            plan_deep_tail=True,
+        ),
+        quiet_mode=True,
+    )
