@@ -471,7 +471,8 @@ def superseded_by(index: SupersessionIndex, idx: int) -> tuple[int, str] | None:
             return later, RE_READ
     if call.canon is not None:
         repeats = index.same_call.get((call.tool, call.canon))
-        later = _nearest_later(index, repeats, idx, _holds_content)
+        accept = _covering(call.span) if ok and call.tool == "read_file" and call.span is not None else _holds_content
+        later = _nearest_later(index, repeats, idx, accept)
         if later is not None:
             return later, REPEATED_CALL
     if ok and call.family is not None:

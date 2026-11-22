@@ -216,6 +216,26 @@ def test_an_unchanged_stub_does_not_replace_the_read_it_points_at(transcript):
     assert t.why(0) is None
 
 
+@pytest.mark.parametrize("args", [{"path": "a.py"}, {"path": "a.py", "limit": 100}])
+def test_an_identical_read_cannot_bypass_truncated_range_coverage(transcript, args):
+    cut = json.dumps({"content": "1|x", "truncated": True, "next_offset": 10})
+    t = transcript(
+        ("read_file", args, read("the complete earlier read")),
+        ("read_file", args, cut),
+    )
+    assert t.why(0) is None
+
+
+def test_an_identical_successful_read_still_replaces_an_earlier_error(transcript):
+    args = {"path": "a.py", "limit": 100}
+    cut = json.dumps({"content": "1|x", "truncated": True, "next_offset": 10})
+    t = transcript(
+        ("read_file", args, json.dumps({"error": "permission denied"})),
+        ("read_file", args, cut),
+    )
+    assert t.why(0) == (1, "repeated-call")
+
+
 def test_a_later_read_that_failed_does_not_supersede(transcript):
     t = transcript(
         ("read_file", {"path": "a.py"}, read()),
