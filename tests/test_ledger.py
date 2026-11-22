@@ -366,6 +366,19 @@ def test_a_previous_summary_without_a_section_or_with_junk_adds_nothing(trail, p
     assert build_ledger([], None, previous=junk) == ""
 
 
+@pytest.mark.parametrize("bad_line", [
+    "- `bad.py`: 123; last read ok",
+    "- `bad.py`: read x" + "9" * 5000 + "; last read ok",
+    "- `broken` -> exit 0 (x" + "9" * 5000 + ")",
+], ids=["unreadable-ops", "huge-file-count", "huge-command-count"])
+def test_corrupt_previous_trail_entries_do_not_discard_valid_entries(bad_line):
+    valid = "- `good.py`: read; last read ok"
+    previous = f"{HEADING}\nFiles:\n{valid}\n{bad_line}\nCommands:\n- `pytest` -> exit 0"
+    rebuilt = build_ledger([], previous=previous)
+    assert valid in rebuilt and "- `pytest` -> exit 0" in rebuilt
+    assert "bad.py" not in rebuilt and "broken" not in rebuilt
+
+
 def test_the_trail_keeps_newest_entries_when_old_ones_crowd_it(trail, payloads):
     summary = ""
     for round_ in range(4):

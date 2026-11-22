@@ -398,12 +398,22 @@ def _seed(
         return
     text = section.group(0)
     for m in _FILE_LINE_RE.finditer(text):
-        for op, count in _OP_RE.findall(m["ops"]):
-            _note_file(files, clock, m["path"], op, m["result"], int(count or 1))
+        try:
+            ops = [(op, int(count or 1)) for op, count in _OP_RE.findall(m["ops"])]
+        except ValueError:
+            continue
+        if not ops:
+            continue
+        for op, count in ops:
+            _note_file(files, clock, m["path"], op, m["result"], count)
         files[m["path"]].last_op = m["op"]
         files[m["path"]].changed = bool(m["changed"])
     for m in _COMMAND_LINE_RE.finditer(text):
-        _note_command(commands, clock, m["command"], m["result"], int(m["runs"] or 1))
+        try:
+            runs = int(m["runs"] or 1)
+        except ValueError:
+            continue
+        _note_command(commands, clock, m["command"], m["result"], runs)
     marker = max(text.find(f"\n{title}\n") for title in (ERRORS_TITLE, _LEGACY_ERRORS_TITLE))
     for m in _ERROR_LINE_RE.finditer(text[marker + 1:] if marker >= 0 else ""):
         _note_errors(errors, clock, m["line"], kube=kube, kube_pods=kube_pods)
