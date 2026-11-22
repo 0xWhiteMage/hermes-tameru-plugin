@@ -91,6 +91,26 @@ def test_a_state_that_raises_never_raises_through_the_store():
     assert store.write("s1", "pins", {}) is False and store.read("s1", "pins") is None
 
 
+def test_a_retention_refresh_failure_does_not_hide_saved_records():
+    class ReadOnly(FakeState):
+        blocked = False
+
+        def set(self, key, value):
+            if self.blocked:
+                raise OSError("quota exceeded")
+            super().set(key, value)
+
+    state = ReadOnly()
+    store, clock = _store(state)
+    record = {"version": 1, "pins": ["keep this instruction"]}
+    assert store.write("s1", "pins", record)
+    clock.day += 1
+    state.blocked = True
+    assert store.read("s1", "pins") == record
+    assert store.read("unknown", "pins") is None
+    assert store.write("s1", "pins", {"version": 1, "pins": []}) is False
+
+
 def test_an_unchanged_write_is_not_written_again():
     state = FakeState()
     store, _ = _store(state)

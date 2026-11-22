@@ -79,7 +79,10 @@ class ChatStore:
                 if not value:
                     return None
                 if value.get("day") != self._today():
-                    self._set(key, {**value, "day": self._today()})
+                    try:
+                        self._set(key, {**value, "day": self._today()})
+                    except Exception:
+                        pass
                 return value.get(part)
         except Exception:
             return None
