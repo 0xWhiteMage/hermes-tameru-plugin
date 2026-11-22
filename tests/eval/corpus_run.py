@@ -14,7 +14,9 @@ Scenarios are mapped by ``corpus_adapter``; a fact is scored by ADAPTERS.md's li
 from __future__ import annotations
 
 import argparse
+import dataclasses
 import json
+import math
 import os
 import shutil
 import sys
@@ -60,7 +62,16 @@ def row_level(row_text: str) -> str:
     return h["rung"] if h else "hermes"
 
 
-def measure(arm: str, mapped, *, label: str | None = None, split: str = "", seed: int = 0) -> dict:
+def _pct(values, pct: float):
+    """Nearest-rank percentile of a small list (deterministic for tiny samples)."""
+    if not values:
+        return None
+    ordered = sorted(values)
+    return round(ordered[max(0, math.ceil(len(ordered) * pct / 100) - 1)], 1)
+
+
+def measure(arm: str, mapped, *, label: str | None = None, split: str = "", seed: int = 0,
+            timing: bool = False, warm: bool = True) -> dict:
     """One replay of ``arm`` on a mapped corpus scenario; the row (protocol3-shaped fields plus the corpus columns)."""
     import corpus_adapter as ca
     import engines
@@ -75,8 +86,16 @@ def measure(arm: str, mapped, *, label: str | None = None, split: str = "", seed
     made: list = []
 
     def factory():
-        made.append(engines.make_engine(arm))
-        return made[-1]
+        eng = engines.make_engine(arm)
+        if not timing:
+            # evaluation rows must not depend on machine load: pin the pass wall off unless --timing asked for it
+            settings = getattr(eng, "_settings", None)
+            if settings is not None and hasattr(settings, "pass_wall_ms"):
+                eng._settings = dataclasses.replace(settings, pass_wall_ms=0)
+        if not warm:
+            eng._warm_recent_results = lambda *a, **k: None   # harness-only switch, not a product setting
+        made.append(eng)
+        return eng
 
     saved = (replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS)
     replay.TOOLS_OVERHEAD_CHARS, replay.TOOLS_OVERHEAD_TOKENS = TOOL_BLOCK_CHARS, TOOL_BLOCK_CHARS // 4
@@ -93,6 +112,7 @@ def measure(arm: str, mapped, *, label: str | None = None, split: str = "", seed
     text = replay.visible_text(final)
     lines = ca.prompt_lines(text)
     refs = list(dict.fromkeys(protocol3._REF_RE.findall(text)))
+    pass_ms = list(getattr(made[-1], "_pass_times_ms", ()) or ())
     engine = _Memo(made[-1])
     _scoring_grep(True)
     tool_rows = {m.get("tool_call_id"): m for m in final if isinstance(m, dict) and m.get("role") == "tool"}
@@ -179,6 +199,13 @@ def measure(arm: str, mapped, *, label: str | None = None, split: str = "", seed
                     "readback_terms": terms, "compress_events": len(compress_at), "threshold_tokens": metrics["threshold_tokens"]},
         "wall_s": round(wall, 2), "engine_seconds": round(result["timing"]["engine_seconds"], 2),
         "wall_budget_fired": getattr(made[-1], "_wall_fired", 0),
+        "eval_mode": "timing" if timing else "deterministic",
+        "pass_wall_ms": getattr(getattr(made[-1], "_settings", None), "pass_wall_ms", None),
+        "warm": warm,
+        "passes": len(pass_ms),
+        "pass_ms_p50": _pct(pass_ms, 50), "pass_ms_p95": _pct(pass_ms, 95),
+        "pass_ms_max": round(max(pass_ms), 1) if pass_ms else None,
+        "first_pass_ms": round(pass_ms[0], 1) if pass_ms else None,
         "score_s": round(time.perf_counter() - started - wall, 2),
     }
 
@@ -233,12 +260,12 @@ def _scoring_grep(on: bool) -> None:
 def _work(job):
     setup()
     import corpus_adapter as ca
-    root, split, sid, window, arm, label = job
+    root, split, sid, window, arm, label, timing, warm = job
     try:
         raw = ca.load_scenario(Path(root), split, sid)
         mapped = ca.map_scenario(raw, window)
         del raw
-        return measure(arm, mapped, label=label, split=split)
+        return measure(arm, mapped, label=label, split=split, timing=timing, warm=warm)
     except ca.HoldoutRefused:
         raise
     except Exception as e:      # recorded, never silently dropped: the report counts error rows
@@ -253,7 +280,8 @@ def _key(row) -> tuple:
     return (row["arm"], row["scenario"], row["window"])
 
 
-def run(root: Path, splits, windows, arms, labels: dict, out: Path, ids: set | None, workers: int) -> int:
+def run(root: Path, splits, windows, arms, labels: dict, out: Path, ids: set | None, workers: int,
+        timing: bool = False, warm: bool = True) -> int:
     import corpus_adapter as ca
 
     done = set()
@@ -270,7 +298,7 @@ def run(root: Path, splits, windows, arms, labels: dict, out: Path, ids: set | N
                 for arm in arms:
                     label = labels.get(arm, arm)
                     if (label, row["id"], window) not in done:
-                        jobs.append((str(root), split, row["id"], window, arm, label))
+                        jobs.append((str(root), split, row["id"], window, arm, label, timing, warm))
     # longest first (more steps), so the pool finishes evenly
     jobs.sort(key=lambda j: -j[3])
     print(f"{len(jobs)} runs to do ({len(done)} already in {out})", flush=True)
@@ -309,6 +337,9 @@ def main(argv=None) -> int:
     r.add_argument("--ids-file", type=Path, help="one scenario id per line (a logged subsample)")
     r.add_argument("--out", type=Path, required=True)
     r.add_argument("--workers", type=int, default=max(1, (os.cpu_count() or 2) - 2))
+    r.add_argument("--timing", action="store_true",
+                   help="timing run: keep the configured pass wall (default pins pass_wall_ms=0 so rows never depend on load)")
+    r.add_argument("--no-warm", action="store_true", help="harness-only: no-op on_turn_complete warming")
     args = ap.parse_args(argv)
     setup()
     import corpus_adapter as ca
@@ -320,7 +351,7 @@ def main(argv=None) -> int:
     if args.ids_file:
         ids = {line.strip() for line in args.ids_file.read_text(encoding="utf-8").splitlines() if line.strip()}
     return run(args.root, splits, [int(w) for w in args.windows.split(",") if w], [a for a in args.arms.split(",") if a],
-               labels, args.out, ids, args.workers)
+               labels, args.out, ids, args.workers, timing=args.timing, warm=not args.no_warm)
 
 
 if __name__ == "__main__":

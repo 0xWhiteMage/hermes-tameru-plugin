@@ -453,6 +453,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         self._pool = _EnginePool()
         self._warm: list = []                     # submitted warm jobs; a new pass cancels the ones still queued
         self._wall_fired = 0                      # passes cut short by the pass_wall_ms bound (telemetry)
+        self._pass_times_ms: deque = deque(maxlen=4096)  # wall-clock ms of recent passes, scope open to return (telemetry)
         self._transactions = _Transactions()
         self._init_policy(self._settings)
         self._activity = ActivityState()
@@ -1184,7 +1185,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         finally:
             self._close_pass(scope)
             _SCOPE.reset(token)
-            self._telemetry.time(time.perf_counter() - started)
+            elapsed = time.perf_counter() - started
+            self._telemetry.time(elapsed)
+            self._pass_times_ms.append(elapsed * 1000)
 
     def _regrowth_active(self) -> bool:
         """The regrowth re-arm applies to the plugin's own, window-scaled trigger; a user's or caller's value is Hermes'."""
@@ -1288,7 +1291,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             final_scope = _SCOPE.get()
             self._close_pass(scope)
             _SCOPE.reset(token)
-            self._telemetry.time(time.perf_counter() - started)
+            elapsed = time.perf_counter() - started
+            self._telemetry.time(elapsed)
+            self._pass_times_ms.append(elapsed * 1000)
         if final_scope is None or final_scope.owner is not self:
             final_scope = scope
         # prepare only when the parent produced a committed-looking new candidate;

@@ -410,7 +410,9 @@ class AdaptiveMixin:
         finally:
             self._close_pass(scope)
             _SCOPE.reset(token)
-            self._telemetry.time(time.perf_counter() - started)
+            elapsed = time.perf_counter() - started
+            self._telemetry.time(elapsed)
+            self._pass_times_ms.append(elapsed * 1000)
 
     def _observe_policy_body(self, body: int) -> None:
         """Called once under the lifecycle lock, before choosing this attempt's plans."""
