@@ -65,7 +65,8 @@ def test_reset_confirm_puts_the_chat_back_to_neutral_and_keeps_pins():
     engine._policy.paused = True
     out = _cmd(engine, "reset confirm")
     assert "Tameru reset for this chat" in out and "Pins and Keeps are unchanged" in out
-    assert engine._policy.tuner.bias == 0.0 and engine._policy.paused is False and engine._policy.tuner.pristine()
+    assert engine._policy.tuner.bias == 0.0 and engine._policy.paused is False
+    assert not engine._policy.tuner.history and all(o == 1.0 for o in engine._policy.tuner.offsets())
     assert "always run the tests" in _cmd(engine, "pins")
 
 

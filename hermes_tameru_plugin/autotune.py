@@ -95,10 +95,6 @@ class Tuner:
     def offsets(self) -> tuple[float, ...]:
         return tuple(self._offsets)
 
-    def pristine(self) -> bool:
-        """Nothing has moved this tuner yet: no signal, no restored state."""
-        return not self.history and all(o == 1.0 for o in self._offsets)
-
     def reset(self) -> None:
         """Back to a neutral tuner: no offsets, no history, bias 0 (the user's ``/tameru reset``)."""
         self._bias = 0.0
