@@ -236,6 +236,27 @@ def test_an_identical_successful_read_still_replaces_an_earlier_error(transcript
     assert t.why(0) == (1, "repeated-call")
 
 
+@pytest.mark.parametrize("next_offset", [5, 10, 20])
+@pytest.mark.parametrize("reason", ["re-read", "repeated-call"])
+def test_identical_truncated_reads_supersede_the_lines_actually_returned(transcript, next_offset, reason):
+    args = {"path": "a.py", "limit": 100}
+    first = json.dumps({"content": "1|x", "truncated": True, "next_offset": 10})
+    later = json.dumps({"content": "1|x", "truncated": True, "next_offset": next_offset})
+    t = transcript(("read_file", args, first), ("read_file", args, later))
+    if reason == "repeated-call":
+        t.index.reads.clear()
+    assert t.why(0) == ((1, reason) if next_offset >= 10 else None)
+
+
+def test_a_different_reread_covers_an_earlier_truncated_results_returned_lines(transcript):
+    cut = json.dumps({"content": "1|x", "truncated": True, "next_offset": 10})
+    t = transcript(
+        ("read_file", {"path": "a.py", "limit": 100}, cut),
+        ("read_file", {"path": "a.py", "limit": 9}, read()),
+    )
+    assert t.why(0) == (1, "re-read")
+
+
 def test_a_later_read_that_failed_does_not_supersede(transcript):
     t = transcript(
         ("read_file", {"path": "a.py"}, read()),

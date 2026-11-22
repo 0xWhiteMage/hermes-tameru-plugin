@@ -460,18 +460,20 @@ def superseded_by(index: SupersessionIndex, idx: int) -> tuple[int, str] | None:
     call = index.calls.get(idx)
     if call is None or idx in index.pending:
         return None
-    ok = call.assess().ok
+    outcome = call.assess()
+    ok = outcome.ok
+    span = outcome.span if outcome.span is not None else call.span
     if ok and call.tool in _READERS and call.path is not None:
         later = _nearest_later(index, index.writes.get(call.path), idx, _succeeded)
         if later is not None:
             return later, STALE_AFTER_WRITE
-    if ok and call.span is not None and call.path is not None:
-        later = _nearest_later(index, index.reads.get(call.path), idx, _covering(call.span))
+    if ok and span is not None and call.path is not None:
+        later = _nearest_later(index, index.reads.get(call.path), idx, _covering(span))
         if later is not None:
             return later, RE_READ
     if call.canon is not None:
         repeats = index.same_call.get((call.tool, call.canon))
-        accept = _covering(call.span) if ok and call.tool == "read_file" and call.span is not None else _holds_content
+        accept = _covering(span) if ok and call.tool == "read_file" and span is not None else _holds_content
         later = _nearest_later(index, repeats, idx, accept)
         if later is not None:
             return later, REPEATED_CALL
