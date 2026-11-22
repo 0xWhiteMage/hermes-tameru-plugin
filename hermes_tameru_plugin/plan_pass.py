@@ -175,6 +175,18 @@ def plan_rows(engine, result, call_id_to_tool, min_prune_chars, rest, kw, scope)
         pl = parse_payload(content)
         line = engine._terminal_line(line, pl)
         ref = make_ref(msg, content)
+        if scope.wall_fired or scope.wall_left_ms() <= 0:
+            # The pass's wall budget is spent: the remaining rows take the header rung — no
+            # selector/query build, no fingerprints, no fact coverage, no engine call.
+            engine._note_wall_fired()
+            scope.plan_entries[idx] = {
+                "shadow_row": shadow_row, "line": line, "pl": pl, "ref": ref,
+                "query": [], "tool": tool, "spill": "",
+                "succ_idx": None, "succ_kind": None,
+            }
+            demote_chars += chars
+            items.append(PlanItem(stock_action="demote", stock_kept_chars=len(line) + 1, **base))
+            continue
         sel_query = build_selector_query(view, idx, focus=scope.focus, skip_user=_is_scaffolding)
         focus = " ".join(scope.focus.split()) if isinstance(scope.focus, str) else ""
         query = [
@@ -273,6 +285,13 @@ def apply_plan_row(engine, result, idx, entry, scope, settings) -> bool:
     if rung == "keep":
         return engine._keep_parent(result, idx, entry["shadow_row"], tool)
     line, pl, ref, query = entry["line"], entry["pl"], entry["ref"], entry["query"]
+    if scope.wall_fired or scope.wall_left_ms() <= 0:
+        # Spent wall: whatever the plan chose, the row is a header — no brief, no errors rung.
+        engine._note_wall_fired()
+        return engine._commit(
+            result, idx, content, tool, ref, pl, scope, "header",
+            engine._header_row(line, pl, ref, "header"),
+        )
     if entry["spill"]:
         return engine._commit(
             result, idx, content, tool, ref, pl, scope, "header",

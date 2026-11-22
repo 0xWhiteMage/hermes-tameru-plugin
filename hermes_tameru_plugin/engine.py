@@ -1711,6 +1711,10 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         selector_query: str | None = None,
     ) -> _Extract | None:
         """Memoized ``compress_context`` of ``inner`` (None when the engine raised, timed out, or the text is `too_large`)."""
+        scope = _SCOPE.get()
+        if scope is not None and scope.owner is self and (scope.wall_fired or scope.wall_left_ms() <= 0):
+            self._note_wall_fired()  # spent wall: no pool submit, no wait — the pass must end
+            return None
         if len(inner) > _TOO_LARGE_CHARS:
             return None  # the ladder's header rung carries the recovery ref; no analysis is sent
         key = (

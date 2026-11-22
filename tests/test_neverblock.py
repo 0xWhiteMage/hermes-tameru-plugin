@@ -105,6 +105,26 @@ def test_pass_returns_within_wall_when_engine_blocks(monkeypatch):
     assert engine._wall_fired == 1, f"one pass was cut short: {engine._wall_fired}"
 
 
+def test_compress_returns_at_once_after_wall_spent(monkeypatch):
+    """Once the pass wall is spent, ``_compress`` declines without a pool submit or a wait."""
+    calls = []
+    monkeypatch.setattr(eng, "compress_context", lambda *a, **k: calls.append(1))
+    e = _engine()
+    scope = e._new_scope(None)
+    scope.wall_ms = 1500
+    scope.started = time.perf_counter() - 60.0  # the wall ran out long ago
+    tok = eng._SCOPE.set(scope)
+    try:
+        t0 = time.perf_counter()
+        assert e._compress("y" * 20_000, ["q"], None, None) is None
+        elapsed = time.perf_counter() - t0
+    finally:
+        eng._SCOPE.reset(tok)
+    assert elapsed < 0.25, f"no wait once the wall is spent: {elapsed:.3f}s"
+    assert not calls, "nothing was submitted to the pool"
+    assert scope.wall_fired == 1 and e._wall_fired == 1
+
+
 def test_warm_then_inline_call_hits_content_cache(monkeypatch):
     """Warming a big result at turn end, then the pass's inline ``_compress``, reads the engine's content cache."""
     from hermes_tameru_plugin.tameru.compress_context import cache_stats
