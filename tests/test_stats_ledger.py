@@ -51,6 +51,17 @@ def test_a_corrupt_file_reads_as_empty_and_is_replaced(folder):
     assert ledger.record_cleanup(50) and ledger.summary()["tokens"] == 50
 
 
+def test_a_failed_atomic_replace_removes_the_temporary_file(folder, monkeypatch):
+    assert ledger.record_cleanup(50)
+    def fail_replace(*args):
+        raise OSError("disk full")
+    monkeypatch.setattr(ledger.os, "replace", fail_replace)
+    assert ledger.record_cleanup(10) is False
+    assert ledger.summary()["tokens"] == 50
+    assert list(folder.glob("stats-*.tmp")) == []
+    assert list(folder.glob("*.lock")) == []
+
+
 def test_a_stale_lock_does_not_block_forever(folder):
     lock = folder / "stats-ledger.lock"
     lock.write_text("")

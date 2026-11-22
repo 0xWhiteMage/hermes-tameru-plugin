@@ -90,9 +90,15 @@ def record_cleanup(removed_tokens: int, now: float | None = None) -> bool:
             today["cleanups"] = int(today.get("cleanups", 0)) + 1
             today["tokens"] = int(today.get("tokens", 0)) + removed_tokens
             fd, tmp = tempfile.mkstemp(dir=str(_dir()), prefix="stats-", suffix=".tmp")
-            with os.fdopen(fd, "w", encoding="utf-8") as handle:
-                json.dump({"version": VERSION, "days": days}, handle, sort_keys=True)
-            os.replace(tmp, _path())
+            try:
+                with os.fdopen(fd, "w", encoding="utf-8") as handle:
+                    json.dump({"version": VERSION, "days": days}, handle, sort_keys=True)
+                os.replace(tmp, _path())
+            finally:
+                try:
+                    os.unlink(tmp)
+                except OSError:
+                    pass
         return True
     except Exception:
         return False
