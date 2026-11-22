@@ -1,4 +1,6 @@
 # SPDX-License-Identifier: MIT
+# SPDX-FileCopyrightText: 2025 Nous Research
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 # Derived from Hermes Agent (https://github.com/NousResearch/hermes-agent),
 # pinned at SHA 1298c8e74baa73e1a2b90124228d017261ac6bc4.
 #
