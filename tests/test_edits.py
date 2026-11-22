@@ -178,6 +178,15 @@ def test_the_held_budget_is_a_share_of_hermes_compaction_point_with_a_ceiling():
     assert held_budget_chars(0) == held_budget_chars(None) == 10_000 * 4
 
 
+@pytest.mark.parametrize("threshold", [float("inf"), -float("inf"), float("nan")])
+def test_nonfinite_thresholds_use_the_unknown_size_budget(threshold):
+    assert held_budget_chars(threshold) == held_budget_chars(None)
+
+
+def test_an_arbitrarily_large_integer_threshold_still_caps_the_held_budget():
+    assert held_budget_chars(10**1000) == 40_000 * 4
+
+
 def test_a_restore_that_does_not_fit_is_refused_and_a_late_overflow_fails_honestly():
     engine, out, idx, ref, original = _shortened()
     engine.threshold_tokens = 10                       # a window so small that the original cannot be held

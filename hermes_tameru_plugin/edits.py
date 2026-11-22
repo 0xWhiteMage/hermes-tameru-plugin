@@ -23,8 +23,8 @@ KINDS = ("keep", "restore")
 def held_budget_chars(threshold_tokens: Any) -> int:
     """Characters the restored text may add to a request: 15% of Hermes' compaction point, at most 40k tokens."""
     try:
-        threshold = int(threshold_tokens)
-    except (TypeError, ValueError):
+        threshold = min(int(threshold_tokens), int(HELD_MAX_TOKENS / HELD_SHARE) + 1)
+    except (TypeError, ValueError, OverflowError):
         threshold = 0
     tokens = min(int(threshold * HELD_SHARE), HELD_MAX_TOKENS) if threshold > 0 else HELD_MAX_TOKENS // 4
     return max(0, tokens) * 4
