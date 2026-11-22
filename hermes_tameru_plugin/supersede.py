@@ -323,8 +323,12 @@ def _assess(call: ToolCall) -> _Outcome:
         next_offset = _as_int(payload.get("next_offset"))
         if next_offset is not None:
             span = (span[0], min(span[1], next_offset - 1))
-        elif span[1] == _OPEN or span[1] - span[0] >= _MAX_READ_LINES:
-            span = None  # cut at an unknown line (no limit, or a limit Hermes clamped)
+        else:
+            content = payload.get("content")
+            last = content.rstrip("\r\n").rsplit("\n", 1)[-1] if isinstance(content, str) else ""
+            numbered = re.match(r"^\s*(\d+)\|", last)
+            end = _as_int(numbered[1]) if numbered else None
+            span = (span[0], min(span[1], end)) if end is not None and end >= span[0] else None
     return _Outcome(ok=not failed and changed, live=live, span=span)
 
 
