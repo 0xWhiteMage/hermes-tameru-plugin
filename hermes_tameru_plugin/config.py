@@ -276,7 +276,10 @@ def _split_protect_patterns(raw: str) -> list[str]:
     stack: list[str] = []
     escaped = False
     class_start = -1
+    skip_until = 0
     for index, char in enumerate(raw):
+        if index < skip_until:
+            continue
         if escaped:
             escaped = False
         elif char == "\\":
@@ -284,12 +287,19 @@ def _split_protect_patterns(raw: str) -> list[str]:
         elif stack and stack[-1] == "[":
             if char == "]" and index != class_start + 1 and raw[class_start:index] != "[^":
                 stack.pop()
-        elif char in "{[(":
+        elif raw.startswith("(?#", index):
+            end = raw.find(")", index + 3)
+            skip_until = len(raw) if end < 0 else end + 1
+        elif char == "{":
+            quantifier = re.match(r"\{(?:[0-9]+(?:,[0-9]*)?|,[0-9]*)\}", raw[index:])
+            if quantifier:
+                skip_until = index + quantifier.end()
+        elif char in "[(":
             stack.append(char)
             if char == "[":
                 class_start = index
-        elif char in "}])":
-            if stack and stack[-1] == {"}": "{", "]": "[", ")": "("}[char]:
+        elif char in "])":
+            if stack and stack[-1] == {"]": "[", ")": "("}[char]:
                 stack.pop()
         elif char == "," and not stack:
             items.append(raw[start:index])

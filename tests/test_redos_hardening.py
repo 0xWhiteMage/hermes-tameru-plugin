@@ -126,12 +126,26 @@ def test_reviewer_max_cost_set_is_rejected():
     (r'[(){} ,],foo,bar', ('[(){} ,]', 'foo', 'bar')),
     (r'[]a,b],TODO', ('[]a,b]', 'TODO')),
     ('TODO,,TODO,', ('TODO',)),
+    ('ERROR{,TODO', ('ERROR{', 'TODO')),
+    ('a(?# [),TODO', ('a(?# [)', 'TODO')),
+    ('a{1,2,b', ('a{1', '2', 'b')),
+    (r'\d{1,8},[A-Z]{2,8}-\d{1,6},(?:a|b)',
+     (r'\d{1,8}', r'[A-Z]{2,8}-\d{1,6}', '(?:a|b)')),
+    (r'a{2},a{,3},TODO', (r'a{2}', r'a{,3}', 'TODO')),
 ])
 def test_env_patterns_split_only_top_level_commas(monkeypatch, raw, expected):
     monkeypatch.setattr(cfg, 'read_hermes_config', lambda: ({}, {}))
     settings, warnings = cfg.load_settings(env={cfg.ENV_PREFIX + 'PROTECT_PATTERNS': raw})
     assert settings.protect_patterns == expected
     assert not warnings
+
+
+def test_unbounded_quantifier_commas_remain_inside_rejected_entries():
+    warnings = []
+    assert cfg._parse_patterns('a{1,},a{,},TODO', warnings.append) == ('TODO',)
+    assert len(warnings) == 2
+    assert 'a{1,}' in warnings[0]
+    assert 'a{,}' in warnings[1]
 
 
 def test_all_invalid_env_patterns_fall_back_to_yaml(monkeypatch):
