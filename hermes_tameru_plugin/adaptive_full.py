@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Adaptive full cleanup through native finalization and the host's adoption fence.
 
 The local branch changes tool evidence only. Manual/focused requests and host

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Content-free counters for one engine, and an optional JSONL log.
 
 Callers pass only counts, tool names, rungs and hashes, never message text. ``count`` keeps a total

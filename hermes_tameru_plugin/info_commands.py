@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """``/tameru help``, ``/tameru stats`` and ``/tameru reset``: orientation, a numbers-only summary, and a way back to neutral.
 
 * ``help`` lists every verb in one line each.

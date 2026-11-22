@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Session-owned activity metadata and the in-chat inspection command."""
 from __future__ import annotations
 

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """A signed estimate of what Tameru's cleanups saved or cost in this chat (``net_estimate: on``, off by default).
 
 The unit is uncached-input-token equivalents, priced with the usual provider cache rates (a cache read costs 10% of an

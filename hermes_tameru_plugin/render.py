@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """The rendered-row format: the header grammar, ref minting and rung rewrites.
 
 A row Tameru wrote into a tool result looks like::

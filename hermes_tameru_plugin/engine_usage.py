@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """What the provider reported for the last replies: tokens, cache use and call timing.
 
 Methods of ``TameruContextEngine`` kept in their own module so the engine class stays readable; they use the

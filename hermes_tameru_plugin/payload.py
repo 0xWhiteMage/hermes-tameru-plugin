@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Hermes tool-result envelopes: payload text, the metadata line and content hints.
 
 Hermes tools answer with a JSON object (``{"output": ..., "exit_code": 1, "error": null}``,

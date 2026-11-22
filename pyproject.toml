@@ -8,7 +8,8 @@ version = "1.10.0"
 description = "Adaptive context compaction for Hermes Agent: pinned lines that survive every summary, shortened tool output, Keep and Restore."
 readme = "README.md"
 license = "Apache-2.0"
-license-files = ["LICENSE", "NOTICE"]
+license-files = ["LICENSE", "NOTICE", "THIRD_PARTY_NOTICES.md"]
+authors = [{name = "Benjamin Ang", email = "hello@benjaminang.tv"}]
 requires-python = ">=3.11"
 dependencies = []
 

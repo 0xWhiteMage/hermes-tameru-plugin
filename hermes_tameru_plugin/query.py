@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Task query for the extract and brief rungs: what the agent is doing around a tool result.
 
 A thin wrapper over the engine's ``task_query``. It tells the engine which user rows carry no real

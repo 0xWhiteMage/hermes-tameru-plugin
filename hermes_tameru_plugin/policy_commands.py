@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """/tameru policy command parsing and the compact policy presentation."""
 
 from __future__ import annotations

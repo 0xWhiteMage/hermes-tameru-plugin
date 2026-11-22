@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Vendored Tameru modules (harness-owned package marker).
 
 The sibling ``*.py`` files are synced byte-for-byte from

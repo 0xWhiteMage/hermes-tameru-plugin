@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """``/tameru keep|unkeep|restore|cancel``: put a shortened output back in front of the model, or let it go.
 
 Same shape as the posture verbs: a ``--lifecycle`` guard (Desktop always sends it), one short refusal reason, and the

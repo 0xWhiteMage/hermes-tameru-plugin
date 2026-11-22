@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Keep and Restore: the user's two ways to put a shortened output back in front of the model.
 
 Both only ever act on an output Tameru already shortened, and both work on the request that goes to the model

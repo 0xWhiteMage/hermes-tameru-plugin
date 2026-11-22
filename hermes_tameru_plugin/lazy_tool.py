@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Send the recovery tool only once Tameru has shortened something in this chat (the ``lazy_tool`` setting, off by default).
 
 Why: ``tameru_read_original`` is listed on every request, and a chat that never gets a result shortened never needs it. Its

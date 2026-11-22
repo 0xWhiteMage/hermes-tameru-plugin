@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """The active Hermes home folder, the way Hermes itself finds it.
 
 ``hermes_constants.get_hermes_home()`` follows the active profile and Hermes' per-platform default (``%LOCALAPPDATA%\hermes`` on Windows), so the

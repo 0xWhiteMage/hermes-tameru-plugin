@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """The Tameru context engine: Hermes' ``ContextCompressor`` with a query-aware tool-result ladder.
 
 Hermes already decides *when* to prune, *which* rows are old enough and *whether* the result is worth

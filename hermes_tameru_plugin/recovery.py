@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Recovery of pruned tool output: the original store, the ``tameru_expand`` tool, the archive lookup.
 
 Every row Tameru renders names its original by ``ref=<16 hex>`` (``render.make_ref``; rows from

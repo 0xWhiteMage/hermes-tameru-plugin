@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """One place to record an error that is deliberately not raised.
 
 Bookkeeping around a chat turn (edit state, tuning, usage numbers) must never fail the turn, so those callers swallow

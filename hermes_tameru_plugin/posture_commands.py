@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """``/tameru bias|pause|resume``: the user's two choices over the self-tuning engine."""
 from __future__ import annotations
 

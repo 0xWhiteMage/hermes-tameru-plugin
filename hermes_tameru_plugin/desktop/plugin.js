@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: Apache-2.0
+// SPDX-FileCopyrightText: 2026 Benjamin Ang
 import * as sdk from '@hermes/plugin-sdk'
 import { cloneElement, createElement as h, Fragment, isValidElement, useEffect, useId, useRef, useState } from 'react'
 

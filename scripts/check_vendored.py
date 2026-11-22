@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Check that the vendored engine is the engine repository's source at the commit ``VENDORED_FROM`` records.
 
     python scripts/check_vendored.py PATH_TO_ENGINE_CLONE        # or set TAMERU_ENGINE_REPO

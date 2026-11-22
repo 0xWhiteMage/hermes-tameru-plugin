@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Plugin configuration: ``TameruSettings``, its loader, and the ``compression.*`` mirror.
 
 ``load_settings`` resolves each field from, highest first: the ``TAMERU_HERMES_<FIELD>`` environment

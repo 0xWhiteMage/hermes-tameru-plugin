@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Pinned instructions: a few lines the user wrote, kept word for word through every Hermes summary.
 
 A Hermes summary is written by a model, so a rule such as "never touch production config" can be softened or dropped.

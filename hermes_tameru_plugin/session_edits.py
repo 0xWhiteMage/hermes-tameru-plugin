@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Per-chat persistence of the user's Keeps (a Restore is short-lived and is not saved).
 
 Mirrors ``session_tuner``: the plugin's own chat store (``chat_store``) holds a small versioned record of refs, a rebind or a

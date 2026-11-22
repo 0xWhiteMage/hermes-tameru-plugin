@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """A small, numbers-only record of what Tameru's cleanups freed, day by day (``stats_ledger: on``, off by default).
 
 What is stored: per UTC day, how many cleanups ran and how many tokens they removed. Nothing else: no chat ids, no text, no

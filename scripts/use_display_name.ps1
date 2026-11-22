@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 <#
 .SYNOPSIS
   Make Hermes Desktop's Settings > Context Engine list this plugin as "Tameru (<kana>)" instead of "Tameru".

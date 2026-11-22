@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Guarded access to the Hermes internals the plugin depends on.
 
 Each helper resolves its Hermes counterpart lazily, at call time, and falls back to a local copy

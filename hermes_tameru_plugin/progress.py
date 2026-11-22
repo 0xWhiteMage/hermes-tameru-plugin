@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Compression progress: one structured snapshot, one text view of it.
 
 ``build_snapshot`` is the single source of truth every front end reads: Desktop (through ``/tameru --json``),

@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """A short note telling the model what Tameru has shortened, so a gap in its context is never silent.
 
 Hermes lets a ``pre_llm_call`` hook add context to the user message of each turn. That message is stored, so the note

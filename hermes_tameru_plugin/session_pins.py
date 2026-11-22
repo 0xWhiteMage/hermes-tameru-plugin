@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Per-chat persistence of the user's pinned instructions, mirroring ``session_edits``.
 
 The plugin's own chat store (``chat_store``) holds a small versioned record of the pinned lines (at most ``MAX_PINS`` of ``PIN_CHARS``

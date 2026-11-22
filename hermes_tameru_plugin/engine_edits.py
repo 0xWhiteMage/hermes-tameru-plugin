@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Keep and Restore: the per-turn request overlay, the edit commands and pinned instructions.
 
 Methods of ``TameruContextEngine`` kept in their own module so the engine class stays readable; they use the

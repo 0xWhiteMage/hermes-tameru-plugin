@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """``/tameru pin TEXT``, ``/tameru unpin N``, ``/tameru pins``: instructions kept word for word through summaries.
 
 Same shape as the other verbs: a ``--lifecycle`` guard (Desktop always sends it), one short refusal reason, and the

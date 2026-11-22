@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 # Roll the installed Tameru plugin back to a release tag or to any commit of this repository.
 #
 #   scripts/rollback.sh                                  # plan only

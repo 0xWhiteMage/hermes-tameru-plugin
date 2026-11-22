@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Scalar-only planning for Tameru's adaptive cleanup.
 
 Limits, activation and retention use separate inputs. A host compaction trigger

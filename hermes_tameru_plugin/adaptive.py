@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Adaptive proactive cleanup runtime: policy plans, staged candidates and commit gates.
 
 The mixin owns the adaptive/fixed proactive driver: one immutable plan tuple per public

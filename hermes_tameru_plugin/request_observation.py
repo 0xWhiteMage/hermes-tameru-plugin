@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Scalar-only observations of the host's prepared main-model requests.
 
 The hook runs after preflight. Its cap is a future estimate, never a guarantee

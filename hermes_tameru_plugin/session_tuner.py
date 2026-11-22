@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Per-chat persistence of the self-tuner and the user's two choices: bias and pause.
 
 Mirrors ``session_policy``: the plugin's own chat store (``chat_store``) holds a small versioned record, a rebind or a

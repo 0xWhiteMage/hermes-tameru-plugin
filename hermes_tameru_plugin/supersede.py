@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Structural supersession (G14): tool results a later call has made stale or redundant.
 
 Hermes only de-duplicates byte-identical output. This module recognises the structural cases:

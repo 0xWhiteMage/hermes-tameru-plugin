@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """Per-chat records (policy, self-tuning, Keeps, pins) kept in the plugin's own durable state.
 
 Hermes gives every plugin a profile-scoped JSON store, ``ctx.state`` (``get(key, default)`` and ``set(key, value)``, atomic per key, 10 MB quota).

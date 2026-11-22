@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 from __future__ import annotations
 from dataclasses import asdict, replace
 from .autotune import PREFERENCE_BIAS

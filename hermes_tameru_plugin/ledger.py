@@ -1,3 +1,5 @@
+# SPDX-License-Identifier: Apache-2.0
+# SPDX-FileCopyrightText: 2026 Benjamin Ang
 """The artifact trail: which files and commands a compacted stretch touched, and how each ended.
 
 A lossy summarizer may drop the exact paths and exit codes the next turn needs. ``build_ledger``
