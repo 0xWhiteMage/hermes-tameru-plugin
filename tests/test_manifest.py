@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import json
 import re
+from unittest.mock import Mock
 
 import pytest
 from engine_support import Chat, demote, make_engine, pytest_failure_with_passes
 from test_autotune_engine import bind_meta
 
+from hermes_tameru_plugin import engine as engine_module
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.manifest import (
     ITEM_MAX_CHARS, MAX_FILES, NOTE_MAX_CHARS, SESSION_MAX_CHARS, ManifestState, build_note, clean_name, written_files,
@@ -126,6 +128,18 @@ def test_the_engine_sends_the_note_once_then_stays_quiet_and_never_leaks_tool_ou
     assert note and "Shortened tool results in this chat: 1" in note and "service.py" in note
     assert "/work" not in note and "pytest" not in note and "FAILED" not in note
     assert engine.manifest_for_turn(history) is None
+
+
+def test_the_hook_does_not_scan_files_until_it_has_shortened_results(monkeypatch):
+    engine = make_engine()
+    bind_meta(engine, None, "s1")
+    find_files = Mock(return_value=["service.py"])
+    monkeypatch.setattr(engine_module, "written_files", find_files)
+
+    assert engine._activity_registry.pre_llm_call(
+        session_id="s1", conversation_history=[_write_call("/work/service.py")],
+    ) is None
+    find_files.assert_not_called()
 
 
 def test_the_note_can_be_switched_off():

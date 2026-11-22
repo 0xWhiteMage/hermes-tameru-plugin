@@ -782,6 +782,8 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                     # rows an archived original vouches for), because nothing has asked for the panel yet.
                     self._restore_activity(messages, consume=False)
                 shortened = sum(1 for row in self._activity.rows() if row.live)
+                if not shortened:
+                    return None
                 return build_note(self._manifest, shortened, written_files(messages))
         except Exception:
             return None
