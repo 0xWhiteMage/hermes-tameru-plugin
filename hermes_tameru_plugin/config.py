@@ -217,20 +217,46 @@ MAX_PROTECT_PATTERNS = 32
 MAX_PROTECT_PATTERN_CHARS = 200
 
 
+def _validate_protect_structure(pattern: str) -> None:
+    from re import _constants as const
+    from re import _parser as parser
+
+    repeats = (const.MAX_REPEAT, const.MIN_REPEAT, const.POSSESSIVE_REPEAT)
+
+    def walk(sub: Any) -> None:
+        for op, value in sub:
+            if op in (const.GROUPREF, const.GROUPREF_EXISTS):
+                raise ValueError("protect patterns must not contain backreferences or conditional groups")
+            if op in repeats:
+                if value[1] == const.MAXREPEAT:
+                    raise ValueError("protect patterns must not contain unbounded quantifiers; use bounded repeats")
+                walk(value[2])
+            elif op == const.SUBPATTERN:
+                walk(value[3])
+            elif op == const.BRANCH:
+                for branch in value[1]:
+                    walk(branch)
+            elif op in (const.ASSERT, const.ASSERT_NOT):
+                walk(value[1])
+            elif op == const.ATOMIC_GROUP:
+                walk(value)
+
+    walk(parser.parse(pattern))
+
+
 def _parse_patterns(raw: Any) -> tuple[str, ...]:
     """Like ``_parse_str_tuple``, and every entry must compile (an env value splits on commas)."""
     from .recovery import _backtracking_risk
 
-    items = raw.split(",", MAX_PROTECT_PATTERNS) if isinstance(raw, str) else raw
-    if isinstance(items, (list, tuple)):
-        if len(items) > MAX_PROTECT_PATTERNS:
-            raise ValueError(f"at most {MAX_PROTECT_PATTERNS} protect patterns are allowed")
-        if any(isinstance(item, str) and len(item) > MAX_PROTECT_PATTERN_CHARS for item in items):
-            raise ValueError(f"protect patterns must be at most {MAX_PROTECT_PATTERN_CHARS} characters")
     patterns = _parse_str_tuple(raw)
+    if len(patterns) > MAX_PROTECT_PATTERNS:
+        raise ValueError(f"at most {MAX_PROTECT_PATTERNS} protect patterns are allowed")
     for pattern in patterns:
+        if len(pattern) > MAX_PROTECT_PATTERN_CHARS:
+            raise ValueError(f"protect patterns must be at most {MAX_PROTECT_PATTERN_CHARS} characters")
         try:
             re.compile(pattern)
+            _validate_protect_structure(pattern)
         except (re.error, OverflowError, RecursionError) as exc:
             raise ValueError(f"invalid regex {pattern!r}: {exc}") from None
         if _backtracking_risk(pattern):

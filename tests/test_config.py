@@ -84,7 +84,7 @@ ENV_SAMPLES = {
     "min_savings": ("0.5", 0.5),
     "brief_share": ("0.4", 0.4),
     "exempt_tools": ("a, b", ("a", "b")),
-    "protect_patterns": (r"\bID-\d+\b", (r"\bID-\d+\b",)),
+    "protect_patterns": (r"\bID-\d{12}\b", (r"\bID-\d{12}\b",)),
     "anchor_errors": ("off", False),
     "prose_brief": ("no", False),
     "expand_tool": ("no", False),

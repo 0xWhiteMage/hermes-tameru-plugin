@@ -40,9 +40,13 @@ def test_persisted_wrapper_notice_variants(notice_lines, newline):
 
 
 @pytest.mark.parametrize('raw', [
-    ['(a+)+$'], ['(?:a|aa)+$'], ['a' * (cfg.MAX_PROTECT_PATTERN_CHARS + 1)],
-    [f'pattern{i}' for i in range(cfg.MAX_PROTECT_PATTERNS + 1)],
-    ','.join(f'pattern{i}' for i in range(cfg.MAX_PROTECT_PATTERNS + 1)),
+    ['(a+)+$'], ['(?:a|aa)+$'], ['a' * 201],
+    [f'pattern{i}' for i in range(33)],
+    ','.join(f'pattern{i}' for i in range(33)),
+    [r'(a)?(?(1)a*|b)*c'], ['.*.*.*.*x'],
+    [r'(a)\1'], [r'(?P<name>a)(?P=name)'],
+    [r'(?=(a)\1)'], [r'(?>a*x)'], [r'a{1,}x'], [r'a+?x'],
+    [r'a*+x'], [r'a*x'], [r'a+x'], [r'(?:(a)?(?(1)b|c))'],
 ])
 def test_unsafe_protect_patterns_warn_and_fall_back(monkeypatch, raw):
     config = {'plugins': {'entries': {'tameru': {'settings': {'protect_patterns': raw}}}}}
@@ -55,20 +59,26 @@ def test_unsafe_protect_patterns_warn_and_fall_back(monkeypatch, raw):
 
 
 def test_unsafe_protect_patterns_env_falls_back_to_valid_config(monkeypatch):
-    config = {'plugins': {'entries': {'tameru': {'settings': {'protect_patterns': [r'\bID-\d+\b']}}}}}
+    config = {'plugins': {'entries': {'tameru': {'settings': {'protect_patterns': [r'\bERROR\b']}}}}}
     monkeypatch.setattr(cfg, 'read_hermes_config', lambda: (config, config))
     settings, warnings = cfg.load_settings(env={cfg.ENV_PREFIX + 'PROTECT_PATTERNS': '(a+)+$'})
-    assert settings.protect_patterns == (r'\bID-\d+\b',)
+    assert settings.protect_patterns == (r'\bERROR\b',)
     assert len(warnings) == 1
 
 
 @pytest.mark.parametrize('raw, expected', [
     ([], ()), ('', ()), (' foo,bar,foo ', ('foo', 'bar')),
-    ([r'\bID-\d+\b', r'(foo|bar)', r'error\s+\w+'],
-     (r'\bID-\d+\b', r'(foo|bar)', r'error\s+\w+')),
-    (['a' * cfg.MAX_PROTECT_PATTERN_CHARS], ('a' * cfg.MAX_PROTECT_PATTERN_CHARS,)),
-    ([f'pattern{i}' for i in range(cfg.MAX_PROTECT_PATTERNS)],
-     tuple(f'pattern{i}' for i in range(cfg.MAX_PROTECT_PATTERNS))),
+    ([r'\bID-\d{12}\b', r'(foo|bar)', r'error\s{1,8}\w{1,32}'],
+     (r'\bID-\d{12}\b', r'(foo|bar)', r'error\s{1,8}\w{1,32}')),
+    (['a' * 200], ('a' * 200,)),
+    ([f'pattern{i}' for i in range(32)], tuple(f'pattern{i}' for i in range(32))),
+    (','.join(f'pattern{i}' for i in range(32)) + ',',
+     tuple(f'pattern{i}' for i in range(32))),
+    ([' ', 'TODO', 'TODO', ' ' * 201], ('TODO',)),
+    (['  ' + 'a' * 200 + '  '], ('a' * 200,)),
+    (['TODO', r'\bERROR\b', '^Traceback'], ('TODO', r'\bERROR\b', '^Traceback')),
+    ([r'\*\+\{1,\}', r'[*+]', r'\\1', r'\(\?\('],
+     (r'\*\+\{1,\}', r'[*+]', r'\\1', r'\(\?\(')),
 ])
 def test_valid_protect_patterns_remain_accepted(raw, expected):
     assert cfg._parse_patterns(raw) == expected
