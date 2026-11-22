@@ -60,7 +60,10 @@ def test_slow_engine_call_bounded_by_wall(monkeypatch):
 
 
 def test_pass_returns_within_wall_when_engine_blocks(monkeypatch):
-    """A pass over many rows: the wall cuts the pass short once, later rows still get their recovery ref."""
+    """A pass over many rows: the wall cuts the pass short once, later rows still get their recovery ref.
+
+    Every row carries many distinct error lines: without the early header short-circuit, the rows the
+    wall already cut would still pay the fingerprint scans and the errors rung before rendering."""
     release = threading.Event()
 
     def blocking(*a, **k):
@@ -71,8 +74,9 @@ def test_pass_returns_within_wall_when_engine_blocks(monkeypatch):
     engine = make_engine(TameruSettings(small_window_threshold_tokens=0, pass_wall_ms=1500))
     chat = Chat()
     for n in range(30):
-        lines = "\n".join(f"row {i} of output {n}" for i in range(1200))
-        chat.tool("terminal", {"command": f"cat app{n}.log"}, terminal_payload(lines))
+        errors = "\n".join(f"ERROR worker-{n} task-{i} exploded: code 0x{i:04x} retry exhausted" for i in range(300))
+        filler = "\n".join(f"row {i} of output {n}" for i in range(1200))
+        chat.tool("terminal", {"command": f"cat app{n}.log"}, terminal_payload(errors + "\n" + filler))
     messages = chat.finish()
     t0 = time.perf_counter()
     try:
@@ -89,9 +93,15 @@ def test_pass_returns_within_wall_when_engine_blocks(monkeypatch):
                 rungs[i] = header["rung"]
                 assert "tameru:" in msg["content"], f"row {i} lost its recovery ref"
     assert rungs, "the pass rewrote rows"
-    # at most the one row in flight when the wall fired may keep a richer rung; every row after it is a header
-    non_header = [rung for rung in rungs.values() if rung != "header"]
-    assert len(non_header) <= 1 and set(non_header) <= {"brief"}, f"post-wall rows render header rungs: {sorted(set(rungs.values()))}"
+    # rows handled before the wall fired may still earn their pre-fire rungs (errors/brief); once the
+    # wall cut the pass every later row is a header — no rich rung may follow the first header row
+    header_idx = [i for i, rung in rungs.items() if rung == "header"]
+    rich_idx = [i for i, rung in rungs.items() if rung != "header"]
+    assert header_idx, "the wall cut at least one row to a header"
+    assert set(rungs[i] for i in rich_idx) <= {"brief", "errors"}, sorted(set(rungs.values()))
+    assert max(rich_idx, default=-1) < min(header_idx), (
+        f"a rich rung appeared after the wall fired: {rungs}"
+    )
     assert engine._wall_fired == 1, f"one pass was cut short: {engine._wall_fired}"
 
 

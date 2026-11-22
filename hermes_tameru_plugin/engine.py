@@ -1558,6 +1558,16 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                     result, idx, content, tool, ref, pl, scope, "superseded",
                     self._header_row(line, pl, ref, "superseded", note),
                 )
+        if scope.wall_fired or scope.wall_left_ms() <= 0:
+            # The pass's wall budget is spent: every remaining row takes the header rung directly —
+            # no fingerprinting, brief or errors rung may extend the pass.
+            scope.wall_fired += 1
+            if scope.wall_fired == 1:
+                self._wall_fired += 1  # one count per pass the wall cut short
+            return self._commit(
+                result, idx, content, tool, ref, pl, scope, "header",
+                self._header_row(line, pl, ref, "header"),
+            )
         if scope.degrade or scope.pressure:
             return self._commit_header_or_errors(result, idx, content, tool, ref, pl, scope, line)
 
@@ -1577,13 +1587,6 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         # extract or brief may not take the room the rows still to come in this pass need for their briefs.
         free = scope.room - self._reserved_after(scope, result, idx, call_id_to_tool, min_prune_chars)
         own_limit = min(limit, free)
-        # wall-clock: past the pass budget the extract/brief rungs are skipped (the header rung still applies)
-        left_ms = scope.wall_left_ms()
-        if left_ms <= 0:
-            own_limit = 0
-            scope.wall_fired += 1
-            if scope.wall_fired == 1:
-                self._wall_fired += 1  # one count per pass the wall cut short
         hint = content_hint(tool, args, pl.inner)
         for rung, build in (
             ("extract", lambda: self._extract_row(line, pl, ref, query, hint, own_limit)),
