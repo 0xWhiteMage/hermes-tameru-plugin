@@ -68,7 +68,7 @@ def _meta_fields(content: str) -> dict:
         return {}
     try:
         parsed = json.loads(text)
-    except (json.JSONDecodeError, RecursionError):
+    except (ValueError, RecursionError):
         return {}
     if not isinstance(parsed, dict):
         return {}

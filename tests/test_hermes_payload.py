@@ -10,6 +10,7 @@ from __future__ import annotations
 import dataclasses
 import importlib
 import json
+import sys
 
 import pytest
 from fixtures import hermes_payloads as hp
@@ -73,6 +74,14 @@ def test_anything_else_is_one_unwrapped_payload(content):
 
 def test_non_string_content_does_not_raise():
     assert parse_payload(None).wrapped is False
+
+
+def test_json_integer_over_the_digit_limit_stays_unwrapped():
+    limit = sys.get_int_max_str_digits()
+    if not limit:
+        pytest.skip("Python's integer conversion limit is disabled")
+    content = '{"total_count":' + "9" * (limit + 1) + "}"
+    assert parse_payload(content) == HermesPayload(content, None, {}, False)
 
 
 def test_payload_is_frozen():
