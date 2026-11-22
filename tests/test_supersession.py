@@ -204,6 +204,26 @@ def test_a_read_with_a_limit_hermes_clamped_covers_nothing_past_the_clamp(transc
     assert t.why(0) is None, "only lines 1-2000 came back"
 
 
+@pytest.mark.parametrize("continuation", [{}, {"next_offset": None}, {"next_offset": "unknown"}])
+def test_a_truncated_read_without_a_usable_next_offset_cannot_replace_a_complete_read(transcript, continuation):
+    args = {"path": "a.py", "limit": 100}
+    complete = "\n".join(f"{line}|content" for line in range(1, 101))
+    cut = json.dumps({"content": "\n".join(complete.splitlines()[:40]),
+                      "truncated": True, **continuation})
+    t = transcript(("read_file", args, read(complete)), ("read_file", args, cut))
+    assert t.why(0) is None
+
+
+def test_an_earlier_read_with_unknown_returned_span_falls_back_to_its_requested_range(transcript):
+    cut = json.dumps({"content": "1|x", "truncated": True})
+    t = transcript(
+        ("read_file", {"path": "a.py", "limit": 100}, cut),
+        ("read_file", {"path": "a.py", "limit": 40}, read()),
+        ("read_file", {"path": "a.py", "limit": 100}, read()),
+    )
+    assert t.why(0) == (2, "re-read")
+
+
 def test_an_unchanged_stub_does_not_replace_the_read_it_points_at(transcript):
     stub = json.dumps({
         "status": "unchanged", "message": "File unchanged since last read.", "path": "a.py",
