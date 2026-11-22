@@ -156,6 +156,13 @@ def test_an_unknown_reference_is_refused(bad):
         engine.edit_change("restore", bad)
 
 
+def test_a_missing_activity_lookup_is_reported_as_an_unknown_reference(monkeypatch):
+    engine, out, idx, ref, original = _shortened()
+    monkeypatch.setattr(engine._activity, "get", lambda _: None)
+    with pytest.raises(PolicyError, match="no shortened output with that reference"):
+        engine.edit_change("restore", ref)
+
+
 def test_edits_can_be_switched_off():
     engine, out, idx, ref, original = _shortened(edits=False)
     assert engine.activity_snapshot()["capabilities"]["restore"] is False

@@ -164,6 +164,8 @@ class EditsMixin:
                 save(self)
                 return {"message": "Unpinned." if dropped else "That output was not kept."}
             change = self._activity.get(full_ref)
+            if change is None:
+                raise PolicyError("Tameru has no shortened output with that reference in this chat.")
             if not change.live:
                 raise PolicyError("That output is no longer shortened in this chat.")
             if verb not in ("keep", "restore"):
