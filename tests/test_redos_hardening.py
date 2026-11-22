@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import time
 
 import pytest
 
@@ -142,7 +143,8 @@ def test_env_patterns_split_by_compilation(monkeypatch, raw, expected, merge_war
     assert settings.protect_patterns == expected
     assert len(warnings) == merge_warnings
     for warning in warnings:
-        assert 'merged comma-containing regex' in warning
+        assert 'kept merged comma-containing regex' in warning
+        assert not warning.endswith('; ignored')
         assert any(repr(pattern) in warning for pattern in expected)
 
 
@@ -161,3 +163,38 @@ def test_all_invalid_env_patterns_fall_back_to_yaml(monkeypatch):
     assert settings.protect_patterns == ('TODO',)
     assert len(warnings) == 1
     assert '(unclosed' in warnings[0]
+
+
+@pytest.mark.parametrize('raw, limit', [
+    ('(,' * 300, 'fragment'),
+    ('(,' * 1000, 'fragment'),
+    ('(' + ',a' * 2000, 'fragment'),
+    ('x' * 6433, 'raw protect patterns length'),
+    (','.join(f'p{i}' for i in range(33)), 'at most 32'),
+    ('x' * 201, 'at most 200'),
+])
+def test_oversized_env_patterns_fall_back_quickly(monkeypatch, raw, limit):
+    config = {'plugins': {'entries': {'tameru': {'settings': {'protect_patterns': ['TODO']}}}}}
+    monkeypatch.setattr(cfg, 'read_hermes_config', lambda: (config, config))
+    start = time.perf_counter()
+    settings, warnings = cfg.load_settings(env={cfg.ENV_PREFIX + 'PROTECT_PATTERNS': raw})
+    elapsed = time.perf_counter() - start
+    assert elapsed < 0.5
+    assert settings.protect_patterns == ('TODO',)
+    assert len(warnings) == 1
+    assert limit in warnings[0]
+    assert 'whole override discarded; trying next layer' in warnings[0]
+
+
+def test_merges_stop_at_pattern_length_limit(monkeypatch):
+    compiled = []
+    compile_regex = cfg.re.compile
+
+    def record_compile(pattern, *args, **kwargs):
+        compiled.append(pattern)
+        return compile_regex(pattern, *args, **kwargs)
+
+    monkeypatch.setattr(cfg.re, 'compile', record_compile)
+    assert cfg._split_protect_patterns('(' + ',a' * 120) == ['('] + ['a'] * 120
+    assert compiled
+    assert max(map(len, compiled)) <= 200

@@ -271,32 +271,41 @@ def _validate_protect_structure(pattern: str) -> int:
 
 
 def _split_protect_patterns(raw: str, warn: Callable[[str], None] | None = None) -> list[str]:
+    if len(raw) > MAX_PROTECT_PATTERNS * (MAX_PROTECT_PATTERN_CHARS + 1):
+        raise ValueError("raw protect patterns length limit exceeded; whole override discarded; trying next layer")
     fragments = []
     start = 0
     for token in re.finditer(r"\\[\s\S]|\{(?:[0-9]+(?:,[0-9]*)?|,[0-9]*)\}|,", raw):
         if token.group() == ",":
             fragments.append(raw[start:token.start()])
             start = token.end()
+            if len(fragments) >= MAX_PROTECT_PATTERNS * 4:
+                raise ValueError("protect patterns fragment limit exceeded; whole override discarded; trying next layer")
     fragments.append(raw[start:])
     items = []
     index = 0
     while index < len(fragments):
         pattern = fragments[index]
+        merged = None
         for end in range(index, len(fragments)):
             if end > index:
                 pattern += "," + fragments[end]
+            if len(pattern) > MAX_PROTECT_PATTERN_CHARS:
+                break
             try:
                 re.compile(pattern)
             except (re.error, OverflowError, RecursionError):
                 continue
             if end > index and warn is not None:
-                warn(f"merged comma-containing regex {pattern!r}; use a YAML list to avoid ambiguity")
-            items.append(pattern)
-            index = end + 1
+                warn(f"kept merged comma-containing regex {pattern!r}; use a YAML list to avoid ambiguity")
+            merged = pattern
             break
-        else:
+        if merged is None:
             items.append(fragments[index])
             index += 1
+        else:
+            items.append(merged)
+            index = end + 1
     return items
 
 
@@ -306,9 +315,9 @@ def _parse_patterns(raw: Any, warn: Callable[[str], None] | None = None) -> tupl
 
     patterns = _parse_str_tuple(_split_protect_patterns(raw, warn) if isinstance(raw, str) else raw)
     if len(patterns) > MAX_PROTECT_PATTERNS:
-        raise ValueError(f"at most {MAX_PROTECT_PATTERNS} protect patterns are allowed")
+        raise ValueError(f"at most {MAX_PROTECT_PATTERNS} protect patterns are allowed; whole override discarded; trying next layer")
     if any(len(pattern) > MAX_PROTECT_PATTERN_CHARS for pattern in patterns):
-        raise ValueError(f"protect patterns must be at most {MAX_PROTECT_PATTERN_CHARS} characters")
+        raise ValueError(f"protect patterns must be at most {MAX_PROTECT_PATTERN_CHARS} characters; whole override discarded; trying next layer")
     accepted = []
     total_cost = 0
     for pattern in patterns:
@@ -323,7 +332,7 @@ def _parse_patterns(raw: Any, warn: Callable[[str], None] | None = None) -> tupl
             reason = f"invalid regex {pattern!r}: {exc}"
             if warn is None:
                 raise ValueError(reason) from None
-            warn(reason)
+            warn(f"{reason}; ignored")
         else:
             accepted.append(pattern)
             total_cost += cost
@@ -499,11 +508,11 @@ def _load_settings(ctx: Any, env: Mapping[str, str], warnings: list[str]) -> Tam
             warning_count = len(warnings)
             try:
                 if name == "protect_patterns":
-                    chosen[name] = _parse_patterns(raw, lambda reason: warnings.append(f"{label}: {reason}; ignored"))
+                    chosen[name] = _parse_patterns(raw, lambda reason: warnings.append(f"{label}: {reason}"))
                 else:
                     chosen[name] = parse(raw)
             except ValueError as exc:
-                if len(warnings) == warning_count:
+                if len(warnings) == warning_count or "whole override discarded" in str(exc):
                     warnings.append(f"{label}={_short(raw)}: {exc}; ignored")
             else:
                 break
