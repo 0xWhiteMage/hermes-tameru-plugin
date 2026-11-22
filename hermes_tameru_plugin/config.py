@@ -270,41 +270,33 @@ def _validate_protect_structure(pattern: str) -> int:
     return cost
 
 
-def _split_protect_patterns(raw: str) -> list[str]:
-    items = []
+def _split_protect_patterns(raw: str, warn: Callable[[str], None] | None = None) -> list[str]:
+    fragments = []
     start = 0
-    stack: list[str] = []
-    escaped = False
-    class_start = -1
-    skip_until = 0
-    for index, char in enumerate(raw):
-        if index < skip_until:
-            continue
-        if escaped:
-            escaped = False
-        elif char == "\\":
-            escaped = True
-        elif stack and stack[-1] == "[":
-            if char == "]" and index != class_start + 1 and raw[class_start:index] != "[^":
-                stack.pop()
-        elif raw.startswith("(?#", index):
-            end = raw.find(")", index + 3)
-            skip_until = len(raw) if end < 0 else end + 1
-        elif char == "{":
-            quantifier = re.match(r"\{(?:[0-9]+(?:,[0-9]*)?|,[0-9]*)\}", raw[index:])
-            if quantifier:
-                skip_until = index + quantifier.end()
-        elif char in "[(":
-            stack.append(char)
-            if char == "[":
-                class_start = index
-        elif char in "])":
-            if stack and stack[-1] == {"]": "[", ")": "("}[char]:
-                stack.pop()
-        elif char == "," and not stack:
-            items.append(raw[start:index])
-            start = index + 1
-    items.append(raw[start:])
+    for token in re.finditer(r"\\[\s\S]|\{(?:[0-9]+(?:,[0-9]*)?|,[0-9]*)\}|,", raw):
+        if token.group() == ",":
+            fragments.append(raw[start:token.start()])
+            start = token.end()
+    fragments.append(raw[start:])
+    items = []
+    index = 0
+    while index < len(fragments):
+        pattern = fragments[index]
+        for end in range(index, len(fragments)):
+            if end > index:
+                pattern += "," + fragments[end]
+            try:
+                re.compile(pattern)
+            except (re.error, OverflowError, RecursionError):
+                continue
+            if end > index and warn is not None:
+                warn(f"merged comma-containing regex {pattern!r}; use a YAML list to avoid ambiguity")
+            items.append(pattern)
+            index = end + 1
+            break
+        else:
+            items.append(fragments[index])
+            index += 1
     return items
 
 
@@ -312,7 +304,7 @@ def _parse_patterns(raw: Any, warn: Callable[[str], None] | None = None) -> tupl
     """Like ``_parse_str_tuple``, and every entry must compile (an env value splits on commas)."""
     from .recovery import _backtracking_risk
 
-    patterns = _parse_str_tuple(_split_protect_patterns(raw) if isinstance(raw, str) else raw)
+    patterns = _parse_str_tuple(_split_protect_patterns(raw, warn) if isinstance(raw, str) else raw)
     if len(patterns) > MAX_PROTECT_PATTERNS:
         raise ValueError(f"at most {MAX_PROTECT_PATTERNS} protect patterns are allowed")
     if any(len(pattern) > MAX_PROTECT_PATTERN_CHARS for pattern in patterns):

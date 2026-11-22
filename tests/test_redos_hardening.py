@@ -120,24 +120,30 @@ def test_reviewer_max_cost_set_is_rejected():
     assert len(warnings) == 32
 
 
-@pytest.mark.parametrize('raw, expected', [
+@pytest.mark.parametrize('raw, expected, merge_warnings', [
     (r'TODO,\d{1,12},[a,b],(?:foo,bar),a\,b,',
-     ('TODO', r'\d{1,12}', '[a,b]', '(?:foo,bar)', r'a\,b')),
-    (r'[(){} ,],foo,bar', ('[(){} ,]', 'foo', 'bar')),
-    (r'[]a,b],TODO', ('[]a,b]', 'TODO')),
-    ('TODO,,TODO,', ('TODO',)),
-    ('ERROR{,TODO', ('ERROR{', 'TODO')),
-    ('a(?# [),TODO', ('a(?# [)', 'TODO')),
-    ('a{1,2,b', ('a{1', '2', 'b')),
+     ('TODO', r'\d{1,12}', '[a,b]', '(?:foo,bar)', r'a\,b'), 2),
+    (r'[(){} ,],foo,bar', ('[(){} ,]', 'foo', 'bar'), 1),
+    (r'[]a,b],TODO', ('[]a,b]', 'TODO'), 1),
+    ('TODO,,TODO,', ('TODO',), 0),
+    ('ERROR{,TODO', ('ERROR{', 'TODO'), 0),
+    ('a(?# [),TODO', ('a(?# [)', 'TODO'), 0),
+    ('a{1,2,b', ('a{1', '2', 'b'), 0),
     (r'\d{1,8},[A-Z]{2,8}-\d{1,6},(?:a|b)',
-     (r'\d{1,8}', r'[A-Z]{2,8}-\d{1,6}', '(?:a|b)')),
-    (r'a{2},a{,3},TODO', (r'a{2}', r'a{,3}', 'TODO')),
+     (r'\d{1,8}', r'[A-Z]{2,8}-\d{1,6}', '(?:a|b)'), 0),
+    (r'a{2},a{,3},TODO', (r'a{2}', r'a{,3}', 'TODO'), 0),
+    (r'a(?#\) [),TODO', (r'a(?#\) [)', 'TODO'), 0),
+    ('(?x)^a$ # [,TODO', ('(?x)^a$ # [', 'TODO'), 0),
+    (r'\{1,2}', (r'\{1', '2}'), 0),
 ])
-def test_env_patterns_split_only_top_level_commas(monkeypatch, raw, expected):
+def test_env_patterns_split_by_compilation(monkeypatch, raw, expected, merge_warnings):
     monkeypatch.setattr(cfg, 'read_hermes_config', lambda: ({}, {}))
     settings, warnings = cfg.load_settings(env={cfg.ENV_PREFIX + 'PROTECT_PATTERNS': raw})
     assert settings.protect_patterns == expected
-    assert not warnings
+    assert len(warnings) == merge_warnings
+    for warning in warnings:
+        assert 'merged comma-containing regex' in warning
+        assert any(repr(pattern) in warning for pattern in expected)
 
 
 def test_unbounded_quantifier_commas_remain_inside_rejected_entries():
