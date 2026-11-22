@@ -103,7 +103,10 @@ class EditsMixin:
 
     def _edit_original(self, change: Change) -> str:
         """The screened original of a shortened output, or a PolicyError saying why there is none."""
+        lifecycle_id = self._activity.lifecycle_id
         entry, source = lookup_original(self._store, change.ref, self._session_original_lookup(), cache=False)
+        if self._activity.lifecycle_id != lifecycle_id:
+            raise PolicyError("The active session changed. Open context details again.")
         if source == SECRET_SOURCE:
             raise PolicyError("Held a secret, so Tameru does not keep or show it.")
         text = screen_original(entry.text) if entry is not None else None
@@ -205,6 +208,7 @@ class EditsMixin:
             if not isinstance(messages, list) or not self.edits_enabled():
                 return None
             with self._activity.lifecycle_lock:
+                lifecycle_id = self._activity.lifecycle_id
                 active = self._edits.active()
                 if not active:
                     return None
@@ -233,6 +237,8 @@ class EditsMixin:
                 for ref in active:
                     if ref not in seen:
                         self._edits.fail(ref, "Not in this chat's history")
+                if self._activity.lifecycle_id != lifecycle_id:
+                    return None
                 budget = held_budget_chars(getattr(self, "threshold_tokens", 0))
                 out, used, applied = list(messages), 0, []
                 base_tokens = message_budget_tokens(messages)

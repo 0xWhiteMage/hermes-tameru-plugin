@@ -328,6 +328,33 @@ def test_a_missing_row_is_reported_as_gone_not_applied():
     assert entry["state"] == "failed" and "history" in entry["reason"]
 
 
+def test_an_overlay_is_discarded_when_an_archive_read_resets_the_session():
+    db = _MetaDB()
+    engine, out, idx, ref, original = _shortened(db)
+    engine.edit_change("restore", ref)
+    _turn(engine)
+    engine._store.clear()
+    def resetting_read(*args, **kwargs):
+        engine.on_session_reset()
+        return [engine._archive_row]
+    db.get_messages = resetting_read
+    assert engine._edits_overlay(out) is None
+    assert engine._edits.entries == {} and engine._edits_inflight == []
+
+
+def test_an_edit_is_not_queued_when_its_archive_read_resets_the_session():
+    db = _MetaDB()
+    engine, out, idx, ref, original = _shortened(db)
+    engine._store.clear()
+    def resetting_read(*args, **kwargs):
+        engine.on_session_reset()
+        return [engine._archive_row]
+    db.get_messages = resetting_read
+    with pytest.raises(PolicyError, match="active session changed"):
+        engine.edit_change("keep", ref)
+    assert engine._edits.entries == {}
+
+
 def test_randomised_conversations_keep_the_overlay_safe():
     rng = random.Random(7)
     for _ in range(25):
