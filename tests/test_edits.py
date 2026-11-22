@@ -192,6 +192,27 @@ def test_a_keep_is_refused_with_its_own_wording_when_the_limit_is_reached():
         engine.edit_change("keep", ref)
 
 
+@pytest.mark.parametrize("state", ["expired", "failed"])
+def test_requeueing_an_inactive_edit_does_not_discount_the_held_budget(monkeypatch, state):
+    engine, out, idx, ref, original = _shortened()
+    engine.edit_change("restore", ref)
+    if state == "expired":
+        for _ in range(RESTORE_TURNS + 1):
+            _turn(engine)
+    else:
+        engine._edits.fail(ref, "Not sent")
+    assert engine._edits.held_chars() == 0
+    delta = max(0, len(original) - len(out[idx]["content"]))
+    monkeypatch.setattr(edits_module, "held_budget_chars", lambda _: delta - 1)
+    with pytest.raises(PolicyError, match="Too big"):
+        engine.edit_change("restore", ref)
+    assert engine._edits.entries[ref]["state"] == state
+    monkeypatch.setattr(edits_module, "held_budget_chars", lambda _: delta)
+    engine.edit_change("restore", ref)
+    engine.edit_change("restore", ref)
+    assert engine._edits.held_chars() == delta
+
+
 # ---- restores let go, keeps stay ---------------------------------------------------------------------------
 def test_a_restore_lasts_a_few_replies_and_then_lets_go():
     engine, out, idx, ref, original = _shortened()

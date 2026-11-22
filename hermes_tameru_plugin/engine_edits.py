@@ -168,11 +168,12 @@ class EditsMixin:
                 raise PolicyError("Web output: use Re-Read instead.")
             delta = max(0, len(self._edit_original(change)) - change.after_chars)
             entry = self._edits.entries.get(change.ref)
-            held = self._edits.held_chars() - (entry["delta"] if entry else 0)
+            reserved = entry["delta"] if entry and entry["state"] in ("pending", "applied") else 0
+            held = self._edits.held_chars() - reserved
             if held + delta > held_budget_chars(getattr(self, "threshold_tokens", 0)):
                 raise PolicyError("Keep limit reached. Unkeep something first." if verb == "keep"
                                   else "Too big to restore right now.")
-            if self._edit_would_crowd(delta // 4 - (entry["delta"] // 4 if entry else 0)):
+            if self._edit_would_crowd(delta // 4 - reserved // 4):
                 raise PolicyError("Memory nearly full. Restoring would make Hermes summarise this chat.")
             if change.ref not in self._edits.entries and len(self._edits.entries) >= _EDIT_MAX:
                 raise PolicyError("Too many edits. Cancel or unkeep some first.")
