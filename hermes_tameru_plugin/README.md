@@ -33,7 +33,7 @@ separately; everything Hermes-specific below lives in this plugin.
 
 Viewing an original in the panel or with `/tameru view REF` does not change what
 the model sees. To put an output back in front of the model, **Restore** (the
-next few replies) and **Keep** (until you unpin it) are on each row in Desktop,
+next few replies) and **Keep** (until you release it) are on each row in Desktop,
 or `/tameru restore|keep REF`; both change only what is sent in the request, never
 saved history, and wait for your next message. If the agent calls the recovery
 tool, the returned text is a new result; it does not undo an earlier Hermes
@@ -49,8 +49,9 @@ recovery. Web, browser and MCP output can never be restored or kept.
 `/tameru stats` prints numbers for the chat; `/tameru reset` puts the chat's
 self-tuning back to neutral (it lists what it clears and asks first);
 `/tameru pin TEXT` keeps a line of your own word for word through every summary;
-`/tameru pause|resume` and `/tameru bias save|balanced|detail` are the two
-choices that persist with a chat.
+`/tameru pause|resume` and `/tameru bias save|balanced|detail` set the chat's
+strength (Off, Less, Normal or More; pause is Off, and `detail`, `balanced` and
+`save` are Less, Normal and More), which persists with the chat.
 
 ## The tool: `tameru_read_original`
 
@@ -83,7 +84,9 @@ context:
 ```
 
 Catalog installations use the version pinned by Hermes; a source checkout can
-be ahead of that pin. Desktop also uses its normal plugin-enable control.
+be ahead of that pin. The catalog entry lists Linux only, so Hermes refuses this
+command on Windows and macOS; there, install from a source checkout as the
+repository README describes. Desktop also uses its normal plugin-enable control.
 
 To have Desktop's Settings list the engine as "Tameru (ためる)", run `scripts/use_display_name.ps1` from the
 repository (it renames the plugin folder and `context.engine` together; `-Revert` undoes it).
@@ -110,9 +113,10 @@ many sessions can lower `store_max_chars`. See the
 - Use the default `plugins.isolation: in_process`. Under `host` isolation,
   archive-backed recovery after restart is limited.
 
-## What was measured (version 1.9.1)
+## What was measured
 
-The numbers were recorded on 1.9.0; 1.9.1 changes where per-chat records are stored and the panel's tooltip, not what is pruned, and the replay baselines are unchanged.
+The numbers were recorded on 1.9.0. 1.9.1 changed where per-chat records are stored and the panel's tooltip; 1.10.0 removed three settings that
+were off by default and redesigned the Desktop bar. Neither changes what is pruned by default, and the replay baselines are unchanged.
 
 A replay of scripted agent sessions against real Hermes v0.23.1 (11 session shapes, six varied sessions per cell, Hermes' measured tool block, a deliberately
 lossy fake summarizer, prefix-cache pricing; a fact an arm dropped is priced as a re-run of the tool) gives these costs against Hermes as shipped:

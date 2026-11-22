@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="docs/assets/hero.png" alt="Tameru (ためる): big tool outputs, kept small." width="100%"><br><br>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-v1.9.1-blue.svg" alt="Version 1.9.1"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-v1.10.0-blue.svg" alt="Version 1.10.0"></a>
   <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Hermes-v0.23.1-8A2BE2.svg" alt="Tested on Hermes v0.23.1"></a>
   <a href="https://github.com/0xWhiteMage/tameru-compaction-system"><img src="https://img.shields.io/badge/engine-tameru-orange.svg" alt="Tameru engine"></a>
   <a href="https://x.com/0xWhiteMage"><img src="https://img.shields.io/badge/X-@0xWhiteMage-000000?logo=x&logoColor=white" alt="Follow 0xWhiteMage on X"></a>
@@ -22,7 +22,19 @@ changes) uses the [Tameru engine](https://github.com/0xWhiteMage/tameru-compacti
 
 *A real run in Hermes Desktop (Claude Haiku 4.5): sixteen commands of about 25,000 characters each; ten outputs shortened, about 65K tokens freed, answers correct. Sped up and cropped to the chat and panel.*
 
-## What's new in 1.9.1
+## What's new in 1.10.0
+
+- **One bar for every Tameru plugin.** The Desktop panel header follows the [shared Tameru interface](https://github.com/0xWhiteMage/tameru-compaction-system/blob/main/docs/PLUGIN-UI.md):
+  a single **Strength** menu (Off, Less, Normal, More) replaces the lean-mode dropdown and the pause button, the gauge is a ring with "N% full",
+  Keep is a lock (**Release** lets Tameru shorten the output again) and Restore is the undo arrow. Commands and saved state are unchanged.
+- **The `preference` setting now works.** It sets a chat's starting strength; before 1.10.0 it had no effect while self-tuning was on.
+- **Removed, as announced in 1.9.0:** `adaptive_host`, `learned_priors` and `policy_mode: fixed`, which showed no measured benefit. A configured
+  `adaptive_host` or `learned_priors` is ignored and named in `get_status()["tameru"]["warnings"]`; a leftover `$HERMES_HOME/tameru/learned.json` can be deleted.
+- **Benchmarks you can reproduce:** committed result rows, intervals and a fixed promotion gate under `tests/eval/` (see [tests/eval/README.md](tests/eval/README.md)).
+
+The plugin is 1.10.0; the vendored engine is still 1.9.0. 1.10.0 is not yet in the Hermes plugin catalogue (see [Install](#install)).
+
+From 1.9.1:
 
 - **Per-chat records live in Hermes' public plugin state**, not in its private session storage: pins, Keeps, policy choices and self-tuning survive a restart through `ctx.state`. A chat unused for 90 days is cleared and only the newest 400 are kept. Records from 1.9.0 are not migrated: re-add pins and Keeps.
 - **The panel's hints use Hermes' own tooltip** when the app provides one (Hermes 0.23.0 and later); older apps keep the panel's own card.
@@ -61,7 +73,7 @@ Hermes still decides when to prune, which rows, and whether a pass commits; the 
 back in the model's context: **Restore** and **Keep** (Desktop, or `/tameru restore|keep REF`) do that on the next requests and never edit saved history.
 
 Measurements: [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md) (the current replay results, what was tried and rejected, and the live checks).
-Release state: [docs/RELEASE-1.9.1.md](docs/RELEASE-1.9.1.md); steps: [docs/RELEASING.md](docs/RELEASING.md). When something looks wrong:
+State of the last published release (1.9.1): [docs/RELEASE-1.9.1.md](docs/RELEASE-1.9.1.md); steps: [docs/RELEASING.md](docs/RELEASING.md). When something looks wrong:
 [docs/RUNBOOKS.md](docs/RUNBOOKS.md).
 
 ## Two repositories
@@ -218,7 +230,7 @@ with `autotune: off`.
 outputs shortened, the last reply's cache use, and with the optional settings below a net-cost estimate, a seven-day total and what the
 recovery-tool filter did), and `/tameru reset [confirm]` puts the chat's self-tuning back to neutral after listing what it clears (pins and Keeps stay).
 `/tameru changes` lists shortened outputs, `/tameru show REF` (or `view`) opens an
-original, `/tameru ask REF [START-END | term]` gives the exact instruction that makes the agent re-read one, `/tameru bias save|balanced|detail` and `/tameru pause|resume` set the two choices. The older
+original, `/tameru ask REF [START-END | term]` gives the exact instruction that makes the agent re-read one, `/tameru bias save|balanced|detail` and `/tameru pause|resume` set the strength (pause is Off). The older
 `/tameru policy key=value` form still works.
 
 - **Desktop:** one condensed panel above the composer, 36px when closed and a fixed 196px of details when open (so it never
@@ -258,7 +270,7 @@ original, `/tameru ask REF [START-END | term]` gives the exact instruction that 
 - After a restart the table is rebuilt from rows Tameru already shortened, only where an archived original proves
   the row for that exact message.
 
-Validated live on Windows in Hermes Desktop with Claude Haiku 4.5 (card, analysis panel, the bias control, a self-adjustment, a real commit, View
+Validated live (on 1.9.x, before the 1.10.0 bar) on Windows in Hermes Desktop with Claude Haiku 4.5 (card, analysis panel, the bias control, a self-adjustment, a real commit, View
 original, the table rebuilt after a gateway restart, `/tameru stats`, and the recovery-tool filter) and in the classic CLI and the Ink TUI
 (`/tameru` and `/tameru changes`, including after a restart). The compaction status line and the post-commit chat line in the CLI and
 TUI were checked on Hermes' real compressor and in unit tests only, because no model turn ran there.
@@ -286,7 +298,15 @@ From the Hermes plugin catalogue:
 hermes plugins install tameru     # later: hermes plugins update tameru
 ```
 
-Or directly from this repository, as a user plugin directory:
+Two limits of the catalogue route, as of Hermes `main` on 2026-11-22:
+
+- **It installs 1.9.1, not 1.10.0.** Hermes' [`plugin-catalog/tameru.yaml`](https://github.com/NousResearch/hermes-agent/blob/main/plugin-catalog/tameru.yaml)
+  pins `version: "1.9.1"` at commit `b4429d7`, and Hermes installs the version the catalogue pins. For 1.10.0, use one of the two routes below.
+- **It is Linux only.** The same entry lists `platforms: [linux]`, so on Windows and macOS Hermes refuses the command
+  ("Plugin 'tameru' is unavailable on win32" or "... on darwin"). There, use one of the two routes below.
+
+Or directly from this repository, as a user plugin directory (`plugins/` under the Hermes home: `~/.hermes` on Linux and macOS,
+`%LOCALAPPDATA%\hermes` on Windows, or the active profile's folder):
 
 ```bash
 git clone https://github.com/0xWhiteMage/hermes-tameru-plugin
@@ -300,7 +320,7 @@ pip install git+https://github.com/0xWhiteMage/hermes-tameru-plugin
 hermes plugins enable tameru
 ```
 
-Then select the engine in `~/.hermes/config.yaml` and restart Hermes:
+Then select the engine in the active profile's `config.yaml` (`~/.hermes/config.yaml` by default; `%LOCALAPPDATA%\hermes\config.yaml` on Windows) and restart Hermes:
 
 ```yaml
 context:
@@ -501,9 +521,10 @@ With `telemetry_log` set, each rendered row also appends one JSON line (`event`,
 
 ## Compatibility
 
-Version 1.9.1 is tested on Hermes v0.23.1 (`3b421578`, the commit in `HERMES_PIN`): the stub suite, the real-Hermes suite, the replay harness
-with its saved baselines and the Desktop panel tests all pass, and the per-commit gate report
-([docs/gate-reports/](docs/gate-reports/)) records the commit, the Hermes commit and each result. It was also run live in Hermes Desktop on
+Version 1.10.0 is tested on Hermes v0.23.1 (`3b421578`, the commit in `HERMES_PIN`): the stub suite (2,138 passed), the real-Hermes suite (3,317 passed,
+55 expected failures), the replay harness with its saved baselines and the Desktop panel tests all pass
+([gate-2e52ba96ad34.json](docs/gate-reports/gate-2e52ba96ad34.json)); the per-commit gate reports in [docs/gate-reports/](docs/gate-reports/) record
+the commit, the Hermes commit and each result. 1.9.0 was also run live in Hermes Desktop on
 Windows (local backend) with Claude Haiku 4.5: the `/tameru` commands, the recovery-tool filter (hidden, then listed after the first
 shortening), and a 16-output task answered correctly with 9 results shortened. [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md)
 lists what ran live and what did not.
@@ -552,7 +573,7 @@ Then update `VENDORED_FROM`, run both test modes and review the replay baselines
 
 ## More
 
-- [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md): the current measurements, rejected ideas and live checks. [docs/RELEASE-1.9.1.md](docs/RELEASE-1.9.1.md): release state. [docs/UPSTREAM-REQUESTS-DRAFT.md](docs/UPSTREAM-REQUESTS-DRAFT.md): requests to Hermes, none filed.
+- [docs/COST-TUNING-2026-11-10.md](docs/COST-TUNING-2026-11-10.md): the current measurements, rejected ideas and live checks. [docs/RELEASE-1.9.1.md](docs/RELEASE-1.9.1.md): state of the last published release. [docs/UPSTREAM-REQUESTS-DRAFT.md](docs/UPSTREAM-REQUESTS-DRAFT.md): requests to Hermes, none filed.
 - [docs/REPOSITORIES.md](docs/REPOSITORIES.md): what the engine repository and this plugin repository each own.
 - [docs/RELEASING.md](docs/RELEASING.md): engine, plugin and catalogue release steps. [docs/RUNBOOKS.md](docs/RUNBOOKS.md): incidents and rollback.
 - [docs/DEVELOPMENT.md](docs/DEVELOPMENT.md): tests, real-Hermes setup, replay harness, CI.

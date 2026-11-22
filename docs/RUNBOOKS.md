@@ -48,7 +48,7 @@ Tameru refuses to store, show, restore or hand on any original that looks like a
 A Restore or Keep costs one cache rebuild, then reuses the cache again.
 
 1. Hover the gauge in Desktop: it shows "Reused N% from the last reply" when your provider reports cache use.
-2. Run `/tameru cancel`; unpin anything with `/tameru unkeep REF`. A Restore lets go by itself after five replies.
+2. Run `/tameru cancel`; release a Keep with `/tameru unkeep REF`. A Restore lets go by itself after five replies.
 3. If the note is the cause (it changes only when something was shortened, plus once after a Hermes summary), set
    `manifest: off`.
 4. Still high? `/tameru pause`, then compare.
