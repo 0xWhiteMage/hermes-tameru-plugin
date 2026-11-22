@@ -355,6 +355,21 @@ def test_an_edit_is_not_queued_when_its_archive_read_resets_the_session():
     assert engine._edits.entries == {}
 
 
+def test_a_stale_overlay_does_not_fail_a_new_sessions_pins():
+    db = _MetaDB()
+    engine, out, idx, ref, original = _shortened(db)
+    engine.edit_change("keep", ref)
+    _turn(engine)
+    engine._store.clear()
+    def rebinding_read(*args, **kwargs):
+        engine.bind_session_state(session_db=db, session_id="s2")
+        engine._edits.load_pins([ref])
+        return [engine._archive_row]
+    db.get_messages = rebinding_read
+    assert engine._edits_overlay(out) is None
+    assert engine._edits.entries[ref]["state"] == "pending"
+
+
 def test_randomised_conversations_keep_the_overlay_safe():
     rng = random.Random(7)
     for _ in range(25):

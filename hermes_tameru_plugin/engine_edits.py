@@ -231,6 +231,8 @@ class EditsMixin:
                     try:
                         original = self._edit_original(change)
                     except PolicyError as refusal:
+                        if self._activity.lifecycle_id != lifecycle_id:
+                            return None
                         self._edits.fail(ref, str(refusal))
                         continue
                     found.append((0 if active[ref] == "keep" else 1, -index, ref, index, original))
