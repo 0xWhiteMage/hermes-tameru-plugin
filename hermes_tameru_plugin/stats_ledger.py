@@ -94,11 +94,12 @@ def record_cleanup(removed_tokens: int, now: float | None = None) -> bool:
                 with os.fdopen(fd, "w", encoding="utf-8") as handle:
                     json.dump({"version": VERSION, "days": days}, handle, sort_keys=True)
                 os.replace(tmp, _path())
-            finally:
+            except Exception:
                 try:
                     os.unlink(tmp)
                 except OSError:
                     pass
+                raise
         return True
     except Exception:
         return False

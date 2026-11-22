@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import time
+from pathlib import Path
 
 import pytest
 from engine_support import make_engine
@@ -60,6 +61,17 @@ def test_a_failed_atomic_replace_removes_the_temporary_file(folder, monkeypatch)
     assert ledger.summary()["tokens"] == 50
     assert list(folder.glob("stats-*.tmp")) == []
     assert list(folder.glob("*.lock")) == []
+
+
+def test_a_successful_replace_does_not_unlink_a_reused_temporary_name(folder, monkeypatch):
+    replace = ledger.os.replace
+    def reuse_name(source, target):
+        replace(source, target)
+        Path(source).write_text("another writer")
+    monkeypatch.setattr(ledger.os, "replace", reuse_name)
+    assert ledger.record_cleanup(10)
+    temporary, = folder.glob("stats-*.tmp")
+    assert temporary.read_text() == "another writer"
 
 
 def test_a_stale_lock_does_not_block_forever(folder):
