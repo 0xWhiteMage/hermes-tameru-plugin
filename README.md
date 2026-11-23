@@ -18,7 +18,7 @@ changes) uses the [Tameru engine](https://github.com/0xWhiteMage/tameru-compacti
 - **Shorten the bulk, keep the evidence.** Adaptive compaction trims old tool output as the context fills, keeps every distinct error, and leaves every original one call away.
 - **Stay in control.** **Keep** or **Restore** any output in full, read what was removed in the **Left Out** viewer, and set `enabled: false` to get stock Hermes back.
 
-![Hermes Desktop with the Tameru panel: sixteen large command outputs run one after another, the panel fills, shortens ten outputs and frees about 65K tokens](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/main/assets/features/11-shorten.gif)
+![Hermes Desktop with the Tameru panel: sixteen large command outputs run one after another, the panel fills, shortens ten outputs and frees about 65K tokens](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/11-shorten.gif)
 
 *A real run in Hermes Desktop (Claude Haiku 4.5): sixteen commands of about 25,000 characters each; ten outputs shortened, about 65K tokens freed, answers correct. Sped up and cropped to the chat and panel.*
 
@@ -45,15 +45,15 @@ Details: [CHANGELOG.md](CHANGELOG.md).
 
 **Pin.** Type a rule or use the panel's pin list; it is kept verbatim through every summary.
 
-![A recording of the Tameru pins list in Hermes Desktop: a rule is typed, pinned, and a second rule added](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/main/assets/features/07-pinned-instructions.gif)
+![A recording of the Tameru pins list in Hermes Desktop: a rule is typed, pinned, and a second rule added](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/07-pinned-instructions.gif)
 
 **Restore.** Click the undo arrow on a shortened output and the model sees the full original on your next message, for its next few replies.
 
-![A recording of Tameru in Hermes Desktop: Restore shows the model a shortened output in full](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/main/assets/features/05-restore.gif)
+![A recording of Tameru in Hermes Desktop: Restore shows the model a shortened output in full](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/05-restore.gif)
 
 **Keep.** Click the lock on a row and the output stays in front of the model on every reply until you release it.
 
-![A recording of Tameru in Hermes Desktop: Keep holds a shortened output until it is released](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/main/assets/features/06-keep-and-unkeep.gif)
+![A recording of Tameru in Hermes Desktop: Keep holds a shortened output until it is released](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/06-keep-and-unkeep.gif)
 
 ## How it works with Hermes
 
@@ -222,7 +222,7 @@ original, `/tameru ask REF [START-END | term]` gives the exact instruction that 
 `/tameru policy key=value` form still works.
 
 - **Desktop:** one condensed panel above the composer, 36px when closed and a fixed 196px of details when open (so it never
-  jumps). The bar is the same one every Tameru plugin shows ([the shared interface](https://github.com/0xWhiteMage/tameru-compaction-system/blob/main/docs/PLUGIN-UI.md)):
+  jumps). The bar is the same one every Tameru plugin shows ([the shared interface](https://github.com/0xWhiteMage/tameru-compaction-system/blob/v1.10.0/docs/PLUGIN-UI.md)):
   the Tameru star (it turns blue while Hermes compacts, dims when Off and turns red on a problem), `Tameru (ためる)`, one short status phrase
   (for example `3 outputs shortened`, `Idle until 59% full`, `Off`; click it to open the results), a ring gauge with "N% full" (a notch marks where
   Tameru starts; the hover card says where Hermes compacts), then the controls: **Strength** (Off, Less, Normal or More, in a small menu that opens

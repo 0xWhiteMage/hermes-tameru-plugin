@@ -79,7 +79,7 @@ Removes three things that showed no measured benefit, as announced under *Deprec
 
 ### Changed
 - **One interface for every Tameru plugin (Desktop bar):** the panel header now follows the shared design in the engine repo's
-  [docs/PLUGIN-UI.md](https://github.com/0xWhiteMage/tameru-compaction-system/blob/main/docs/PLUGIN-UI.md). The status dot is the Tameru star; the lean-mode dropdown and the pause button are
+  [docs/PLUGIN-UI.md](https://github.com/0xWhiteMage/tameru-compaction-system/blob/v1.10.0/docs/PLUGIN-UI.md). The status dot is the Tameru star; the lean-mode dropdown and the pause button are
   one **Strength** menu (**Off**, **Less**, **Normal**, **More**; Off is the old pause, Less, Normal and More are the old Preserve detail, Balanced and Save space, and the
   commands and saved state are unchanged); the working-memory bar is a ring gauge with "N% full"; the sentence under the name is one
   status phrase that opens the results; the collapse chevron is replaced by a results launcher (outputs currently shortened) and the

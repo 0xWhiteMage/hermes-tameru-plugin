@@ -156,7 +156,7 @@ adaptive controller or establish an optimal default.
 Core artifacts:
 
 - [Reviewed campaign and transformation checks](https://github.com/0xWhiteMage/tameru-compaction-system/tree/main/benchmarks/redteam/reports/1.7.0)
-- [Battery and fixed-mode sweep capture](https://github.com/0xWhiteMage/tameru-compaction-system/blob/main/benchmarks/release-1.7.0-gates.json)
+- [Battery and fixed-mode sweep capture](https://github.com/0xWhiteMage/tameru-compaction-system/blob/v1.10.0/benchmarks/release-1.7.0-gates.json)
 
 ## Integration and packaging checks
 
