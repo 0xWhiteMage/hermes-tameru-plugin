@@ -1,0 +1,106 @@
+{
+ "cap": {
+  "applies_to": "style vague or basis structural",
+  "lifted_when": "the stratum's Beta 5th percentile >= 0.99",
+  "value": 0.989
+ },
+ "label": "accepted extract kept every gold line and dropped no protected fact line",
+ "method": "family-beta-v1",
+ "prior": {
+  "mean": 0.999,
+  "strength": 2.0
+ },
+ "schema": 1,
+ "source": {
+  "accepted_rows": 933,
+  "engine_commit": [
+   "f15473add894fd511a3dfcf5b0c59314dbc7bec4"
+  ],
+  "families": 6,
+  "rows": "benchmarks/engine_bench/results/r4-candidate-e15-dev.jsonl",
+  "rows_sha256": "f99783140d9e3c0d39d2288a27743574095c9f75707120cfd061c7da87cdc5ab",
+  "split": "dev"
+ },
+ "strata": {
+  "anchored|vague": {
+   "alpha": 2.998,
+   "auroc_lb": null,
+   "beta": 0.002,
+   "families": 1,
+   "iso": [],
+   "lifts_cap": true,
+   "losses": 0,
+   "rows": 4
+  },
+  "lexical|specific": {
+   "alpha": 7.998,
+   "auroc_lb": null,
+   "beta": 0.002,
+   "families": 6,
+   "iso": [],
+   "lifts_cap": true,
+   "losses": 0,
+   "rows": 161
+  },
+  "lexical|vague": {
+   "alpha": 6.998,
+   "auroc_lb": null,
+   "beta": 0.002,
+   "families": 5,
+   "iso": [],
+   "lifts_cap": true,
+   "losses": 0,
+   "rows": 93
+  },
+  "none|vague": {
+   "alpha": 7.998,
+   "auroc_lb": null,
+   "beta": 0.002,
+   "families": 6,
+   "iso": [],
+   "lifts_cap": true,
+   "losses": 0,
+   "rows": 218
+  },
+  "structural|specific": {
+   "alpha": 7.998,
+   "auroc_lb": null,
+   "beta": 0.002,
+   "families": 6,
+   "iso": [],
+   "lifts_cap": true,
+   "losses": 0,
+   "rows": 136
+  },
+  "structural|vague": {
+   "alpha": 3.998,
+   "auroc_lb": null,
+   "beta": 0.002,
+   "families": 2,
+   "iso": [],
+   "lifts_cap": true,
+   "losses": 0,
+   "rows": 27
+  },
+  "tool_call|specific": {
+   "alpha": 7.998,
+   "auroc_lb": null,
+   "beta": 0.002,
+   "families": 6,
+   "iso": [],
+   "lifts_cap": true,
+   "losses": 0,
+   "rows": 162
+  },
+  "tool_call|vague": {
+   "alpha": 5.998,
+   "auroc_lb": null,
+   "beta": 0.002,
+   "families": 4,
+   "iso": [],
+   "lifts_cap": true,
+   "losses": 0,
+   "rows": 114
+  }
+ }
+}

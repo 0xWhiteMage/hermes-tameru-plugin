@@ -25,8 +25,9 @@ import csv
 import re
 import statistics
 from dataclasses import asdict, dataclass
-from typing import Callable
+from typing import Callable, Iterator
 
+from ._fingerprint_patterns import _DIGITS_RE
 from .contract_gates import query_has_distinctive_selectors
 from .gap_kind import call_gap_marker
 from .regex_cache import cached_compile
@@ -224,8 +225,11 @@ def looks_like_code(text: str) -> bool:
 
 # Compiler/test/runtime diagnostics of many languages (file:line errors, error codes, frames, signals).
 DIAGNOSTIC_CODE_LINE_RE = re.compile(
-    r"[\w./\\-]+\.\w{1,8}:\d+(?::\d+)?:\s*(?:fatal\s+)?(?:error|warning)\b"
-    r"|[\w./\\-]+\.\w{1,8}\(\d+(?:,\d+)?\):\s*(?:error|warning)\b"
+    # The ``[\w./\\-]+`` alternatives open with a lookbehind so a match can
+    # only start at the head of a run — without it every offset inside a long
+    # dotted run rescans the run (quadratic on crafted input).
+    r"(?<![\w./\\-])[\w./\\-]+\.\w{1,8}:\d+(?::\d+)?:\s*(?:fatal\s+)?(?:error|warning)\b"
+    r"|(?<![\w./\\-])[\w./\\-]+\.\w{1,8}\(\d+(?:,\d+)?\):\s*(?:error|warning)\b"
     r"|\berror\[E\d{4}\]"
     r"|\b(?:error|warning)\s+(?:TS|CS|MSB|NU)\d{3,5}\b"
     r"|^\s*[ew]:\s+(?:file://)?\S+:\d+:\d+\s"
@@ -242,7 +246,7 @@ DIAGNOSTIC_CODE_LINE_RE = re.compile(
     r"|^\s+at\s+[\w$.<>/\[\] ]+\([^()\n]*:\d+(?::\d+)?\)"
     r"|^#\d+\s+(?:0x[0-9a-f]+\s+in\s+)?\S+.*\bat\s+\S+:\d+"
     r"|^#\d+\s+\S+\.php\(\d+\):"
-    r"|[\w./\\-]+\.\w{1,8}:\d+:in\s+[`'(]"
+    r"|(?<![\w./\\-])[\w./\\-]+\.\w{1,8}:\d+:in\s+[`'(]"
     r"|\bmake(?:\[\d+\])?: \*\*\* .*\bError \d+"
     r"|: command not found$"
     r"|\bPermission denied\b"
@@ -302,9 +306,25 @@ def is_kubectl_status_line(line: str) -> bool:
     return KUBECTL_STATUS_LINE_RE.search(line[:4096]) is not None
 
 
+def _head_lines(text: str, limit: int) -> Iterator[str]:
+    start = 0
+    for _ in range(limit):
+        end = text.find("\n", start)
+        if end == -1:
+            yield text[start:]
+            return
+        yield text[start:end]
+        start = end + 1
+
+
 def looks_like_diagnostics(text: str) -> bool:
-    lines = text.split("\n")[:2000]
-    return sum(1 for line in lines if is_diagnostic_line(line)) >= 2
+    hits = 0
+    for line in _head_lines(text, 2000):
+        if is_diagnostic_line(line):
+            hits += 1
+            if hits >= 2:
+                return True
+    return False
 
 _STACK_TRACE_LINE_RE = re.compile(
     r"^(?:goroutine \d+ \[[^\]]*\]:\s*$"
@@ -318,7 +338,7 @@ def looks_like_stack_trace(text: str) -> bool:
     """A Go goroutine header or Python traceback head, or two
     Java/Go frame lines: stack-trace text, never YAML."""
     hits = 0
-    for line in text.split("\n")[:5000]:
+    for line in _head_lines(text, 5000):
         m = _STACK_TRACE_LINE_RE.match(line)
         if m is None:
             continue
@@ -389,13 +409,16 @@ def detect_unified_diff(text: str) -> bool:
     return _DIFF_FILE_RE.search(text) is not None
 
 
-_GREP_MATCH_RE = re.compile(r"^([^\s:][^:]*):(\d+):(.*)$")
-_GREP_CTX_RE = re.compile(r"^([^\s:][^:]*?)-(\d+)-(.*)$")
+_GREP_MATCH_RE = re.compile(r"^((?:[A-Za-z]:[\\/])?[^\s:][^:]*):(\d+):(.*)$")
+_GREP_CTX_RE = re.compile(r"^((?:[A-Za-z]:[\\/])?[^\s:][^:]*?)-(\d+)-(.*)$")
+_GREP_CTX_SPLIT_RE = re.compile(r"-(\d{1,10})(?=-)")
+_GREP_PATH_MAX = 512  # longer "paths" are text, and are not looked up
+_GREP_CTX_SPLITS = 64  # `-digits-` candidates tried per line
 
 
 def _pathish(path: str) -> bool:
     """A file path, not a clock ("12:00:00") or a date ("2026-03-14 12")."""
-    if not ("." in path or "/" in path):
+    if not ("." in path or "/" in path or "\\" in path):
         return False
     if re.fullmatch(r"[\d.\-/]+", path):
         return False
@@ -406,12 +429,44 @@ def _pathish(path: str) -> bool:
 
 def _grep_parse_line(line: str) -> tuple[str, str, int, str] | None:
     m = _GREP_MATCH_RE.match(line)
-    if m and _pathish(m.group(1)):
+    if m and len(m.group(2)) <= 18 and _pathish(m.group(1)):
         return "m", m.group(1), int(m.group(2)), m.group(3)
     m = _GREP_CTX_RE.match(line)
-    if m and _pathish(m.group(1)):
+    if m and len(m.group(2)) <= 18 and _pathish(m.group(1)):
         return "c", m.group(1), int(m.group(2)), m.group(3)
     return None
+
+
+def _grep_parse_lines(lines: list[str]) -> list[tuple[str, str, int, str] | None]:
+    """Parse grep output line by line, then give each context line back to
+    the file it belongs to.
+
+    ``path-N-text`` is ambiguous on its own. When the text holds a clock
+    (``logs/api.log-6-2026-11-22 10:00:06 INFO``) the match pattern reads
+    ``logs/api.log-6-2026-11-22 10`` as a path and ``00`` as its line, and a
+    file name that holds ``-digits-`` defeats the shortest-path context
+    pattern. A context line always belongs to a file that has a match, so the
+    paths of the matches settle both: the shortest of them that the line
+    starts with, followed by ``-N-``, is its file.
+    """
+    parsed = [_grep_parse_line(line) for line in lines]
+    known = {p[1] for p in parsed if p is not None and p[0] == "m"}
+    if not known:
+        return parsed
+    lengths = {len(path) for path in known if len(path) <= _GREP_PATH_MAX}
+    if not lengths:
+        return parsed
+    longest = max(lengths)
+    for index, line in enumerate(lines):
+        if "-" not in line[: longest + 1]:
+            continue
+        for tried, m in enumerate(_GREP_CTX_SPLIT_RE.finditer(line, 0, longest + 12)):
+            if tried == _GREP_CTX_SPLITS:
+                break
+            if m.start() in lengths and line[: m.start()] in known:
+                parsed[index] = ("c", line[: m.start()], int(m.group(1)), line[m.end() + 1 :])
+                break
+    return parsed
 
 
 def detect_grep_lines(text: str) -> bool:
@@ -419,16 +474,13 @@ def detect_grep_lines(text: str) -> bool:
     ``path-N-text`` context lines (``--`` separators are neutral)."""
     if not text:
         return False
-    total = ok = real = 0
-    for raw in text.split("\n"):
-        if not raw.strip():
-            continue
-        total += 1
+    rows = [raw for raw in text.split("\n") if raw.strip()]
+    total = len(rows)
+    ok = real = 0
+    for raw, parsed in zip(rows, _grep_parse_lines(rows)):
         if raw == "--":
             ok += 1
-            continue
-        parsed = _grep_parse_line(raw)
-        if parsed is not None:
+        elif parsed is not None:
             ok += 1
             if parsed[0] == "m":
                 real += 1
@@ -456,6 +508,8 @@ def _read_hunk(lines: list[str], i: int) -> int:
     """
     m = _HUNK_HEADER_RE.match(lines[i])
     assert m is not None
+    if any(len(value) > 18 for value in m.groups() if value is not None):
+        raise ValueError("oversized hunk count")
     old = int(m.group(2)) if m.group(2) is not None else 1
     new = int(m.group(4)) if m.group(4) is not None else 1
     j = i + 1
@@ -578,7 +632,9 @@ class _StemMatcher:
         for token in _STEM_TOKEN_RE.findall(text):
             stem = memo.get(token)
             if stem is None:
-                stem = memo[token] = light_stem(token)
+                stem = light_stem(token)
+                if len(memo) < 4096:
+                    memo[token] = stem
             if stem in stems:
                 return True
         return False
@@ -605,7 +661,10 @@ def adapt_unified_diff(
     if not detect_unified_diff(text):
         return None
     lines = text.split("\n")
-    preamble, files = _parse_diff(lines)
+    try:
+        preamble, files = _parse_diff(lines)
+    except ValueError:
+        return AdapterResult("diff", text, reason="malformed hunk; unchanged")
     if not files or not any(f.hunks for f in files):
         return None
     from .format_adapters import _query_selectors
@@ -792,16 +851,16 @@ def adapt_grep_lines(
     """
     if not detect_grep_lines(text):
         return None
+    if type(per_file_cap) is not int or per_file_cap < 1:
+        return AdapterResult("grep", text, reason="invalid per-file cap; unchanged")
     per_file: dict[str, list[_GrepRec]] = {}
     other: list[str] = []
     group = 0
-    for raw in text.split("\n"):
-        if not raw.strip():
-            continue
+    rows = [raw for raw in text.split("\n") if raw.strip()]
+    for raw, parsed in zip(rows, _grep_parse_lines(rows)):
         if raw == "--":
             group += 1
             continue
-        parsed = _grep_parse_line(raw)
         if parsed is None:
             other.append(raw)
             continue
@@ -809,6 +868,8 @@ def adapt_grep_lines(
         per_file.setdefault(path, []).append(_GrepRec(kind, lineno, body, raw, group))
     if not per_file:
         return None
+    if other:
+        return AdapterResult("grep", text, reason="unparsed lines; unchanged")
     matcher = _matcher_for(query)
     total_matches = sum(1 for recs in per_file.values() for r in recs if r.kind == "m")
 
@@ -829,6 +890,10 @@ def adapt_grep_lines(
                 if selector_hits * 5 < total_matches * 4:
                     remaining.append(selector)
             other_matcher = _Matcher(tuple(remaining)) if remaining else _Matcher(())
+            has_definition = any(
+                matcher.hit(body) and (_GREP_DEFINITION_RE.match(body) or _GREP_ASSIGNMENT_RE.match(body))
+                for body in match_texts
+            )
             seen_texts: set[str] = set()
             for path, recs in per_file.items():
                 selected: set[int] = set()
@@ -859,6 +924,10 @@ def adapt_grep_lines(
                         distinct_kept += 1
                     else:
                         seen_texts.add(key)
+                if not selected and not has_definition:
+                    first_match = next((i for i, r in enumerate(recs) if r.kind == "m"), None)
+                    if first_match is not None:
+                        selected.add(first_match)
                 saturated_keep[path] = selected
 
     any_hit = [False]
@@ -1090,7 +1159,7 @@ def _lint_key(message: str) -> str:
     return f"{sev.group(1)}{_LINT_NORM_RE.sub('#', message)}"
 
 
-_SLOWLOG_QT_RE = re.compile(r"^# Query_time:\s*([\d.]+)\s+Lock_time:\s*[\d.]+\s+Rows_sent:\s*\d+\s+Rows_examined:\s*(\d+)")
+_SLOWLOG_QT_RE = re.compile(r"^# Query_time:\s*([0-9]+(?:\.[0-9]+)?)\s+Lock_time:\s*[0-9]+(?:\.[0-9]+)?\s+Rows_sent:\s*[0-9]+\s+Rows_examined:\s*([0-9]+)\b")
 
 
 def _slowlog_median(values):
@@ -1117,6 +1186,11 @@ def _detect_slowlog(text: str) -> bool:
 
 def _classify_slowlog(lines):
     total = len(lines)
+    if any(
+        len(line) > _LINE_CAP and line.startswith(("# Query_time:", "# Time:", "# User@Host:"))
+        for line in lines
+    ):
+        return [True] * total, [0] * total, [0] * total
     keep = [False] * total
     tests = [0] * total
     suites = [0] * total
@@ -1164,7 +1238,11 @@ def _classify_slowlog(lines):
         for j in range(start, end):
             m = _SLOWLOG_QT_RE.match(lines[j])
             if m:
+                if len(m.group(2)) > 18:
+                    return [True] * total, tests, suites
                 qt = float(m.group(1))
+                if qt == float("inf"):
+                    return [True] * total, tests, suites
                 rows = int(m.group(2))
                 break
         entries.append((start, end, qt, rows))
@@ -1203,7 +1281,7 @@ def _classify_slowlog(lines):
 
 _ENV_LINE_RE = re.compile(r"^(?:export |declare -x )?([A-Za-z_][A-Za-z0-9_.]*)=(.*)$")
 _ENV_SECRET_KEY_RE = re.compile(r"(?i)password|passwd|secret|token|api_?key|access_?key|private_?key|credential|auth")
-_ENV_DIGITS_RE = re.compile(r"\d+")
+_ENV_DIGITS_RE = _DIGITS_RE
 _ENV_LOGFMT_TAIL_RE = re.compile(r"\s[A-Za-z_][\w.]*=")
 
 
@@ -1575,12 +1653,15 @@ def _classify_ansible(lines: list[str]) -> tuple[list[bool], list[int], list[int
                 in_recap = True
                 seen_recap = False
             else:
+                in_recap = False
                 seen_statuses.clear()
             keep[i] = True
             continue
 
         host_match = _ANSIBLE_HOST_RE.match(line)
         if host_match and not in_recap:
+            if line[host_match.end():].strip():
+                continue
             status = host_match.group(1)
             if status in seen_statuses:
                 keep[i] = False
@@ -1591,10 +1672,8 @@ def _classify_ansible(lines: list[str]) -> tuple[list[bool], list[int], list[int
 
         recap_match = _ANSIBLE_RECAP_ROW_RE.match(line)
         if recap_match and in_recap:
-            unreachable = int(recap_match.group(1))
-            failed = int(recap_match.group(2))
-            rescued = int(recap_match.group(3)) if recap_match.group(3) is not None else 0
-            if not seen_recap or unreachable > 0 or failed > 0 or rescued > 0:
+            unsuccessful = any(value and value.strip("0") for value in recap_match.groups())
+            if not seen_recap or unsuccessful:
                 keep[i] = True
             else:
                 keep[i] = False
@@ -1852,6 +1931,8 @@ def _classify_ps_aux(lines: list[str]) -> tuple[list[bool], list[int], list[int]
         except ValueError:
             keep[index] = True
             continue
+        if not (0 <= cpu < float("inf") and 0 <= mem < float("inf")):
+            return [True] * len(lines), [0] * len(lines), [0] * len(lines)
         parsed.append((index, cpu, mem, parts[7]))
 
     if parsed:
@@ -1962,12 +2043,12 @@ def _classify_npm_audit(lines: list[str]) -> tuple[list[bool], list[int], list[i
         end = i - 1
         block = lines[start : end + 1]
 
-        is_low_block = False
-        for line in block:
-            match = _NPM_AUDIT_SEVERITY_RE.match(line.strip())
-            if match and match.group(1).lower() == "low":
-                is_low_block = True
-                break
+        severities = [
+            match.group(1).lower()
+            for line in block
+            if (match := _NPM_AUDIT_SEVERITY_RE.match(line.strip()))
+        ]
+        is_low_block = severities == ["low"]
 
         if is_low_block:
             for idx in range(start, end + 1):
@@ -1983,6 +2064,7 @@ def _classify_npm_audit(lines: list[str]) -> tuple[list[bool], list[int], list[i
                         keep[idx + 1] = False
                 else:
                     first_header_seen = True
+                    keep[idx] = True
 
     return keep, [0] * len(lines), [0] * len(lines)
 
@@ -2064,6 +2146,8 @@ def _classify_top(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
                     mem = float(parts[9])
                 except ValueError:
                     continue
+                if not (0 <= cpu < float("inf") and 0 <= mem < float("inf")):
+                    return [True] * len(lines), [0] * len(lines), [0] * len(lines)
                 current_rows.append((i, cpu, mem, parts[7]))
 
     _finalize(current_rows)
@@ -2135,9 +2219,16 @@ def _classify_npm_tree(lines: list[str]) -> tuple[list[bool], list[int], list[in
     keep = [not _NPM_TREE_LINE_RE.match(line) for line in lines]
     first_tree = None
     problem_indices = []
+    ancestors: list[tuple[int, int]] = []
+    parents: dict[int, int | None] = {}
 
     for i, line in enumerate(lines):
         if _NPM_TREE_LINE_RE.match(line):
+            depth = len(_prefix(line))
+            while ancestors and ancestors[-1][0] >= depth:
+                ancestors.pop()
+            parents[i] = ancestors[-1][1] if ancestors else None
+            ancestors.append((depth, i))
             if first_tree is None:
                 first_tree = i
             if _NPM_TREE_PROBLEM_RE.search(line):
@@ -2148,24 +2239,10 @@ def _classify_npm_tree(lines: list[str]) -> tuple[list[bool], list[int], list[in
 
     for problem in problem_indices:
         keep[problem] = True
-        current = problem
-        current_prefix_len = len(_prefix(lines[current]))
-
-        while current_prefix_len > 0:
-            parent = None
-            for j in range(current - 1, -1, -1):
-                if _NPM_TREE_LINE_RE.match(lines[j]):
-                    parent_prefix_len = len(_prefix(lines[j]))
-                    if parent_prefix_len < current_prefix_len:
-                        parent = j
-                        break
-
-            if parent is None:
-                break
-
+        parent = parents[problem]
+        while parent is not None and not keep[parent]:
             keep[parent] = True
-            current = parent
-            current_prefix_len = len(_prefix(lines[current]))
+            parent = parents[parent]
 
     return keep, [0] * len(lines), [0] * len(lines)
 
@@ -2200,15 +2277,21 @@ def _classify_curl_verbose(lines: list[str]) -> tuple[list[bool], list[int], lis
         if _CURL_TLS_NOISE_RE.match(line):
             keep[index] = False
 
-    response_headers = [
-        index
-        for index, line in enumerate(lines)
-        if line.startswith("< ") and not _CURL_STATUS_RE.match(line)
-    ]
-    if len(response_headers) > 6:
-        for index in response_headers:
-            if not _CURL_KEY_HEADER_RE.match(lines[index]):
-                keep[index] = False
+    response_headers: list[int] = []
+
+    def flush_headers() -> None:
+        if len(response_headers) > 6:
+            for index in response_headers:
+                if not _CURL_KEY_HEADER_RE.match(lines[index]):
+                    keep[index] = False
+        response_headers.clear()
+
+    for index, line in enumerate(lines):
+        if _CURL_STATUS_RE.match(line):
+            flush_headers()
+        elif re.match(r"^< [!#$%&'*+.^_`|~0-9A-Za-z-]+:", line):
+            response_headers.append(index)
+    flush_headers()
 
     return keep, [0] * len(lines), [0] * len(lines)
 
@@ -2224,12 +2307,17 @@ def _detect_rollout_wait(text: str) -> bool:
 
 def _classify_rollout_wait(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     keep = [True] * len(lines)
-    matching = [index for index, line in enumerate(lines) if _ROLLOUT_WAIT_RE.match(line)]
-    if len(matching) >= 6:
-        keep_indices = {matching[0], *matching[-2:]}
-        for index in matching:
-            if index not in keep_indices:
-                keep[index] = False
+    groups: dict[str, list[int]] = {}
+    for index, line in enumerate(lines):
+        match = _ROLLOUT_WAIT_RE.match(line)
+        if match:
+            groups.setdefault(match.group(), []).append(index)
+    for matching in groups.values():
+        if len(matching) >= 6:
+            keep_indices = {matching[0], *matching[-2:]}
+            for index in matching:
+                if index not in keep_indices:
+                    keep[index] = False
     return keep, [0] * len(lines), [0] * len(lines)
 
 
@@ -2385,10 +2473,16 @@ def _classify_ping(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
 _PROGRESS_LINE_RE = re.compile(r"^\s*(?:\[[=#>\-.*\s]*\d{1,3}(?:\.\d+)?%[=#>\-.*\s]*\]|(?:Verification|Progress:?|Scanning|Processing)?\s*\d{1,3}(?:\.\d+)?%\s*(?:complete|completed|done)?\.?|(?:Downloading|Installing|Preparing|Extracting|Verifying|Uploading)\b[^%\n]{0,80}?:\s*\d{1,3}(?:\.\d+)?%)\s*$", re.IGNORECASE)
 
 
+def _progress_line(line: str) -> re.Match[str] | None:
+    # Trailing padding is stripped once: ``\s*$`` in the pattern would
+    # otherwise backtrack quadratically over a long run of spaces.
+    return _PROGRESS_LINE_RE.match(line.rstrip())
+
+
 def _detect_progress(text: str) -> bool:
     if "%" not in text:
         return False
-    return sum(1 for line in text.splitlines() if _PROGRESS_LINE_RE.match(line)) >= 8
+    return sum(1 for line in text.splitlines() if _progress_line(line)) >= 8
 
 
 def _classify_progress(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
@@ -2396,9 +2490,9 @@ def _classify_progress(lines: list[str]) -> tuple[list[bool], list[int], list[in
     i = 0
     n = len(lines)
     while i < n:
-        if _PROGRESS_LINE_RE.match(lines[i]):
+        if _progress_line(lines[i]):
             start = i
-            while i < n and (_PROGRESS_LINE_RE.match(lines[i]) or lines[i].strip() == ""):
+            while i < n and (_progress_line(lines[i]) or lines[i].strip() == ""):
                 i += 1
 
             last = i - 1
@@ -2406,7 +2500,7 @@ def _classify_progress(lines: list[str]) -> tuple[list[bool], list[int], list[in
                 last -= 1
 
             for j in range(start, i):
-                if _PROGRESS_LINE_RE.match(lines[j]) and j != last:
+                if _progress_line(lines[j]) and j != last:
                     keep[j] = False
         else:
             i += 1
@@ -2507,7 +2601,7 @@ _PS_DASH_RE = re.compile(r"^\s*-{2,}(?:\s+-{2,})+\s*$")
 
 
 def _ps_row_signature(line: str) -> str:
-    return re.sub(r"\d+", "0", " ".join(line.split()))
+    return _DIGITS_RE.sub("0", " ".join(line.split()))
 
 
 def _ps_dash_index(lines: list[str]) -> int | None:
@@ -3535,6 +3629,18 @@ def _classify_jest(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
 _GO_PKG_OK_RE = re.compile(r"^ok\s+(\S+)\s+(?:[\d.]+s|\(cached\))")
 _GO_PKG_NOTEST_RE = re.compile(r"^\?\s+\S+\s+\[no test files\]")
 _GO_PKG_FOLD_MIN = 5
+_GO_EVENT_RE = re.compile(r"^=== (?:RUN|PAUSE|CONT|NAME)\s+(\S+)")
+_GO_RESULT_NAME_RE = re.compile(r"^--- (?:PASS|SKIP|FAIL): (\S+)")
+
+
+def _go_take_pending(pending: dict[str | None, list[int]], name: str | None) -> list[int]:
+    """Remove and return the log lines of ``name`` and its subtests, with the
+    lines no ``=== `` line attributed. An unreadable name takes everything."""
+    taken: list[int] = []
+    for key in list(pending):
+        if name is None or key is None or key == name or key.startswith(name + "/"):
+            taken.extend(pending.pop(key))
+    return taken
 
 
 def _classify_go(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
@@ -3543,49 +3649,73 @@ def _classify_go(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
     keep = [True] * n
     tests = [0] * n
     suites = [0] * n
-    pending: list[int] = []  # indented log lines since the last top-level result
+    # Indented log lines, by the test the last `=== ` line named. With
+    # t.Parallel() the output of several tests interleaves, so a `--- PASS:`
+    # may only drop the lines of the test it names.
+    pending: dict[str | None, list[int]] = {}
+    current: str | None = None
     dropping = False  # inside the indented children of a passing/skipped test
+    failed = False  # inside the indented children of a failed test
     for i, ln in enumerate(lines):
         indented = ln[:1] in {" ", "\t"}
         if ln.startswith(("--- PASS:", "--- SKIP:")):
-            for j in pending:  # `t.Log` output of a test that passed
-                keep[j] = False
-            pending = []
+            named = _GO_RESULT_NAME_RE.match(ln)
+            for j in _go_take_pending(pending, named.group(1) if named else None):
+                keep[j] = False  # `t.Log` output of a test that passed
             keep[i] = False
             tests[i] = 1 if ln.startswith("--- PASS:") else 0
             dropping = True
+            failed = False
         elif ln.startswith("--- FAIL:"):
-            pending = []
+            named = _GO_RESULT_NAME_RE.match(ln)
+            _go_take_pending(pending, named.group(1) if named else None)
             dropping = False
+            failed = True
         elif ln.startswith("=== "):
             keep[i] = False  # RUN / PAUSE / CONT / NAME
+            event = _GO_EVENT_RE.match(ln)
+            current = event.group(1) if event else None
             dropping = False
+            failed = False
         elif ln == "PASS":
             keep[i] = False
-            pending = []
+            pending = {}
             dropping = False
+            failed = False
         elif indented and dropping:
             keep[i] = False
             if ln.lstrip().startswith("--- PASS:"):
                 tests[i] = 1
+        elif indented and failed:
+            # Subtest results under a failed test: the failures stay, a
+            # passing sibling is counted like any other passing test.
+            if ln.lstrip().startswith(("--- PASS:", "--- SKIP:")):
+                keep[i] = False
+                tests[i] = 1 if ln.lstrip().startswith("--- PASS:") else 0
         elif indented:
-            pending.append(i)
+            pending.setdefault(current, []).append(i)
         elif fold_pkgs and _GO_PKG_OK_RE.match(ln):
             m = _GO_PKG_OK_RE.match(ln)
             keep[i] = False
             suites[i] = 1
-            pending = []
+            pending = {}
             dropping = False
+            failed = False
             if i > 0 and keep[i - 1] and lines[i - 1] == f"# {m.group(1)}":
                 keep[i - 1] = False
         elif fold_pkgs and _GO_PKG_NOTEST_RE.match(ln):
             keep[i] = False
-            pending = []
+            pending = {}
             dropping = False
+            failed = False
         else:
-            pending = []
+            pending = {}
             dropping = False
+            failed = False
     return keep, tests, suites
+
+
+_CARGO_PANIC_RE = re.compile(r"^thread '[^']*' (?:\(\d+\) )?panicked at ")
 
 
 def _classify_cargo(lines: list[str]) -> tuple[list[bool], list[int], list[int]]:
@@ -3595,6 +3725,7 @@ def _classify_cargo(lines: list[str]) -> tuple[list[bool], list[int], list[int]]
     suites = [0] * n
     in_failures = False
     in_error = False  # a compiler/cargo `error...` diagnostic, up to its blank line
+    in_panic = False  # a panic report printed between the test rows (`--nocapture`)
     for i, ln in enumerate(lines):
         if in_failures:
             keep[i] = True
@@ -3606,6 +3737,11 @@ def _classify_cargo(lines: list[str]) -> tuple[list[bool], list[int], list[int]]
                 keep[i] = True
                 continue
             in_error = False
+        if in_panic:
+            if ln.strip() and not ln.startswith("test "):
+                keep[i] = True
+                continue
+            in_panic = False
         if ln == "failures:":
             in_failures = True
             keep[i] = True
@@ -3622,6 +3758,14 @@ def _classify_cargo(lines: list[str]) -> tuple[list[bool], list[int], list[int]]
             # `error: test failed, to rerun pass ...`: never reduced away.
             keep[i] = True
             in_error = True
+        elif ln == "Caused by:":
+            # cargo's reason for the `error:` above it, after a blank line:
+            # the exit signal of a test binary that crashed.
+            keep[i] = True
+            in_error = True
+        elif _CARGO_PANIC_RE.match(ln):
+            keep[i] = True
+            in_panic = True
     return keep, tests, suites
 
 
@@ -3758,8 +3902,6 @@ def _is_k8s_header(stripped: str) -> bool:
 
 
 def _classify_kubectl(lines):
-    import re
-
     keep = [False] * len(lines)
     tests = [0] * len(lines)
     suites = [0] * len(lines)
@@ -3812,7 +3954,7 @@ def _classify_kubectl(lines):
             key = (
                 toks[0] if toks else "",
                 toks[1] if len(toks) > 1 else "",
-                re.sub(r"\d+", "#", message),
+                _DIGITS_RE.sub("#", message),
             )
             groups.setdefault(key, []).append(i)
         for indices in groups.values():
@@ -3928,7 +4070,7 @@ def _classify_kubectl_events(lines):
             type_idx = 0
         reason = spans[type_idx + 1].group() if type_idx + 1 < len(spans) else ""
         message = " ".join(m.group() for m in spans[type_idx + 2:])
-        key = (type_token, reason, re.sub(r"\d+", "#", message))
+        key = (type_token, reason, _DIGITS_RE.sub("#", message))
         if key in nonnormal:
             nonnormal[key][1] = i
         else:
@@ -4137,7 +4279,7 @@ _GIT_COMMIT_RE = r"^commit [0-9a-f]{4,64}\b"
 
 
 def _git_subject_template(subject: str) -> str:
-    return re.sub(r"\d+", "#", subject.lower())
+    return _DIGITS_RE.sub("#", subject.lower())
 
 
 def _detect_git_log(text: str) -> bool:

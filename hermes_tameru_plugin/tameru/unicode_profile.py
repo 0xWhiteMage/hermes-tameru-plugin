@@ -10,7 +10,8 @@ from .content_cache import _engine_version, content_memo
 import re
 import unicodedata
 from dataclasses import asdict, dataclass
-from typing import Iterator
+from itertools import islice
+from typing import Callable, Iterator
 
 _BIDI_CONTROLS = frozenset(
     {
@@ -42,6 +43,8 @@ _VERTICAL_RE = re.compile(
 )
 _WORD_JOINERS = frozenset("_-./:@+")
 _NO_SPACE_SCRIPTS = frozenset({"han", "kana", "hangul", "thai", "lao", "khmer", "myanmar"})
+_LINE_CONTENT_RE = re.compile(r"[^\n\r\v\f\x1c-\x1e\x85\u2028\u2029]+")
+_FULL_RUN_MAX_CHARS = 64
 
 
 @dataclass(frozen=True)
@@ -64,50 +67,25 @@ def _in_ranges(codepoint: int, ranges: tuple[tuple[int, int], ...]) -> bool:
     return any(start <= codepoint <= end for start, end in ranges)
 
 
-def _is_variation_selector(char: str) -> bool:
-    return _in_ranges(ord(char), _VARIATION_RANGES)
-
-
-def _is_emoji_modifier(char: str) -> bool:
-    return _EMOJI_MODIFIER_RANGE[0] <= ord(char) <= _EMOJI_MODIFIER_RANGE[1]
-
-
-def _is_regional_indicator(char: str) -> bool:
-    return _REGIONAL_RANGE[0] <= ord(char) <= _REGIONAL_RANGE[1]
-
-
-# Perf (v1.5.0): the per-character predicates below are pure functions of one
-# character, and the grapheme walker asks them about every character of every
-# line (a 24 KB CJK log made `unicodedata.name` alone ~250k calls). Remembered
-# per character, bounded.
 @functools.lru_cache(maxsize=16384)
-def _is_extend(char: str) -> bool:
+def _char_flags(char: str) -> tuple[bool, bool, bool, bool, bool, bool]:
+    """Cluster flags: extender, joiner, virama, letter, flag letter, boundary."""
     category = unicodedata.category(char)
     codepoint = ord(char)
-    return (
+    name = unicodedata.name(char, "")
+    extend = (
         category in {"Mn", "Mc", "Me"}
-        or _is_variation_selector(char)
-        or _is_emoji_modifier(char)
-        or codepoint == 0x20E3
+        or _in_ranges(codepoint, _VARIATION_RANGES)
+        or _EMOJI_MODIFIER_RANGE[0] <= codepoint <= _EMOJI_MODIFIER_RANGE[1]
         or _TAG_RANGE[0] <= codepoint <= _TAG_RANGE[1]
     )
-
-
-@functools.lru_cache(maxsize=16384)
-def _is_virama(char: str) -> bool:
-    name = unicodedata.name(char, "")
-    return "VIRAMA" in name or "HALANT" in name
-
-
-@functools.lru_cache(maxsize=16384)
-def _char_flags(char: str) -> tuple[bool, bool, bool, bool, bool]:
-    """(extends a cluster, ZWJ/ZWNJ, virama, letter, regional indicator)."""
     return (
-        _is_extend(char),
+        extend,
         char in {_ZWJ, _ZWNJ},
-        _is_virama(char),
-        unicodedata.category(char).startswith("L"),
-        _is_regional_indicator(char),
+        "VIRAMA" in name or "HALANT" in name or name == "KHMER SIGN COENG",
+        category.startswith("L"),
+        _REGIONAL_RANGE[0] <= codepoint <= _REGIONAL_RANGE[1],
+        category in {"Cc", "Cs", "Zl", "Zp"} or char in _BIDI_CONTROLS,
     )
 
 
@@ -117,34 +95,30 @@ def iter_graphemes(text: str) -> Iterator[str]:
     This is a documented UAX #29 tailoring suitable for stdlib-only matching;
     it is intentionally conservative around combining and join sequences.
     """
-    current = ""
+    value = str(text or "")
+    start = 0
     regional_count = 0
-    prev_joiner = prev_virama = prev_regional = False
-    for char in str(text or ""):
-        extend, joiner, virama, letter, regional = _char_flags(char)
-        if not current:
-            current = char
-            regional_count = 1 if regional else 0
-            prev_joiner, prev_virama, prev_regional = joiner, virama, regional
-            continue
-        if (
+    prev_joiner = prev_virama = prev_regional = prev_boundary = False
+    for index, char in enumerate(value):
+        extend, joiner, virama, letter, regional, boundary = _char_flags(char)
+        if index and not (boundary or prev_boundary) and (
             extend
             or joiner
             or prev_joiner
             or (prev_virama and letter)
             or (regional and prev_regional and regional_count % 2 == 1)
         ):
-            current += char
             if regional:
                 regional_count += 1
-            prev_joiner, prev_virama, prev_regional = joiner, virama, regional
-            continue
-        yield current
-        current = char
-        regional_count = 1 if regional else 0
-        prev_joiner, prev_virama, prev_regional = joiner, virama, regional
-    if current:
-        yield current
+        else:
+            if index:
+                yield value[start:index]
+            start = index
+            regional_count = 1 if regional else 0
+        prev_joiner, prev_virama, prev_regional = char == _ZWJ, virama, regional
+        prev_boundary = boundary
+    if value:
+        yield value[start:]
 
 
 def graphemes(text: str) -> list[str]:
@@ -156,8 +130,15 @@ _BIDI_DELETE = {ord(char): None for char in _BIDI_CONTROLS}
 
 def matching_shadow(text: str) -> str:
     """Return case-folded NFKC text with presentation-only bidi controls removed."""
-    normalised = unicodedata.normalize("NFKC", str(text or ""))
+    value = str(text or "")
+    if value.isascii():
+        return value.casefold()
+    normalised = unicodedata.normalize("NFKC", value)
     return normalised.translate(_BIDI_DELETE).casefold()
+
+
+def _is_surrogate(char: str) -> bool:
+    return "\ud800" <= char <= "\udfff"
 
 
 def unicode_safety_counts(text: str) -> tuple[int, int, bool]:
@@ -169,7 +150,7 @@ def unicode_safety_counts(text: str) -> tuple[int, int, bool]:
     overrides = 0
     malformed = False
     for char in value:
-        malformed = malformed or unicodedata.category(char) == "Cs"
+        malformed = malformed or _is_surrogate(char)
         if char in _BIDI_CONTROLS:
             controls += 1
             overrides += int(char in _BIDI_OVERRIDES)
@@ -182,6 +163,8 @@ def script_of(char: str) -> str | None:
     if not char:
         return None
     codepoint = ord(char)
+    if codepoint < 0x80:
+        return "latin" if char.isalpha() else None
     ranges = (
         ("hebrew", 0x0590, 0x05FF),
         ("arabic", 0x0600, 0x08FF),
@@ -203,7 +186,8 @@ def script_of(char: str) -> str | None:
         ("ethiopic", 0x1200, 0x137F),
         ("khmer", 0x1780, 0x17FF),
         ("mongolian", 0x1800, 0x18AF),
-        ("han", 0x3400, 0x9FFF),
+        ("han", 0x3400, 0x4DBF),
+        ("han", 0x4E00, 0x9FFF),
         ("han", 0xF900, 0xFAFF),      # compatibility ideographs
         ("han", 0x20000, 0x2FA1F),    # Extension B and later, compatibility supplement
         ("kana", 0x3040, 0x30FF),
@@ -242,23 +226,21 @@ def _representative(cluster: str) -> str:
     return cluster[0] if cluster else ""
 
 
-def _flush_run(run: list[str], units: list[str]) -> None:
+def _flush_run(run: list[str], emit: Callable[[str], None]) -> None:
     if not run:
         return
     representative = _representative(run[0])
     script = script_of(representative)
-    joined = "".join(run)
     if script in _NO_SPACE_SCRIPTS:
-        if len(joined) <= 64:
-            units.append(joined)
-        if len(run) == 1 and run[0].strip():
-            units.append(run[0])
+        if len(run) == 1:
+            emit(run[0])
+        elif len(run) <= _FULL_RUN_MAX_CHARS and sum(map(len, run)) <= _FULL_RUN_MAX_CHARS:
+            emit("".join(run))
         for width in (2, 3, 4):
-            if len(run) < width:
-                continue
-            units.extend("".join(run[index : index + width]) for index in range(len(run) - width + 1))
-    elif joined:
-        units.append(joined)
+            for index in range(len(run) - width + 1):
+                emit("".join(run[index : index + width]))
+    else:
+        emit("".join(run))
     run.clear()
 
 
@@ -281,7 +263,14 @@ def _search_units_cached(text: str) -> tuple[str, ...]:
 
 def _search_units(text: str) -> list[str]:
     shadow = matching_shadow(text)
-    units: list[str] = []
+    seen: set[str] = set()
+    ordered: list[str] = []
+
+    def emit(unit: str) -> None:
+        if unit not in seen and unit.strip("_-./:@+"):
+            seen.add(unit)
+            ordered.append(unit)
+
     run: list[str] = []
     for cluster in iter_graphemes(shadow):
         representative = _representative(cluster)
@@ -289,16 +278,8 @@ def _search_units(text: str) -> list[str]:
         if category[:1] in {"L", "N", "M"} or all(char in _WORD_JOINERS for char in cluster):
             run.append(cluster)
         else:
-            _flush_run(run, units)
-    _flush_run(run, units)
-    seen: set[str] = set()
-    ordered: list[str] = []
-    for unit in units:
-        cleaned = unit.strip("_-./:@+")
-        value = unit if cleaned else ""
-        if value and value not in seen:
-            seen.add(value)
-            ordered.append(value)
+            _flush_run(run, emit)
+    _flush_run(run, emit)
     return ordered
 
 
@@ -319,18 +300,17 @@ _ASCII_TOKEN_CLASS = tuple(
 )
 
 
-def token_units(text: str) -> list[str]:
-    """Return non-overlapping logical units for deterministic token estimates."""
-    units: list[str] = []
+def _token_units_gen(text: str):
+    """Yield the units ``token_units`` returns, without materializing the list (S7)."""
     run: list[str] = []
     run_script: str | None = None
 
-    def flush() -> None:
+    def flush() -> str | None:
         nonlocal run_script
-        if run:
-            units.append("".join(run))
-            run.clear()
+        unit = "".join(run) if run else None
+        run.clear()
         run_script = None
+        return unit
 
     ascii_class = _ASCII_TOKEN_CLASS
     for cluster in iter_graphemes(matching_shadow(text)):
@@ -341,7 +321,9 @@ def token_units(text: str) -> list[str]:
             kind = ascii_class[ord(cluster)]
             if kind == 1:
                 if run and run_script and run_script != "latin":
-                    flush()
+                    unit = flush()
+                    if unit is not None:
+                        yield unit
                 run.append(cluster)
                 run_script = run_script or "latin"
             elif kind == 2:
@@ -349,47 +331,81 @@ def token_units(text: str) -> list[str]:
             elif kind == 3 and run:
                 run.append(cluster)
             else:
-                flush()
+                unit = flush()
+                if unit is not None:
+                    yield unit
             continue
         if not cluster or cluster.isspace():
-            flush()
+            unit = flush()
+            if unit is not None:
+                yield unit
             continue
         representative = _representative(cluster)
         category = unicodedata.category(representative) if representative else ""
         script = script_of(representative)
         if category[:1] in {"L", "N", "M"}:
             if script in _NO_SPACE_SCRIPTS:
-                flush()
-                units.append(cluster)
+                unit = flush()
+                if unit is not None:
+                    yield unit
+                yield cluster
                 continue
             if run and script and run_script and script != run_script:
-                flush()
+                unit = flush()
+                if unit is not None:
+                    yield unit
             run.append(cluster)
             run_script = run_script or script
             continue
         if all(char in _WORD_JOINERS for char in cluster) and run:
             run.append(cluster)
             continue
-        flush()
+        unit = flush()
+        if unit is not None:
+            yield unit
         if any(unicodedata.category(char) == "So" for char in cluster):
-            units.append(cluster)
-    flush()
-    return units
+            yield cluster
+    unit = flush()
+    if unit is not None:
+        yield unit
+
+
+def token_units(text: str) -> list[str]:
+    """Return non-overlapping logical units for deterministic token estimates."""
+    return list(_token_units_gen(text))
+
+
+def count_token_units(text: str) -> int:
+    """``len(token_units(text))`` without materializing the list (S7)."""
+    return sum(1 for _ in _token_units_gen(text))
+
+
+def _sample_nonblank_lines(text: str, limit: int) -> list[str]:
+    lines: list[str] = []
+    if limit <= 0:
+        return lines
+    for match in _LINE_CONTENT_RE.finditer(text):
+        line = match.group()
+        if line.strip():
+            lines.append(line)
+            if len(lines) == limit:
+                break
+    return lines
 
 
 def _looks_vertical_ocr(text: str) -> bool:
-    lines = [line.strip() for line in str(text or "").splitlines() if line.strip()]
+    lines = [line.strip() for line in _sample_nonblank_lines(str(text or ""), 128)]
     if len(lines) < 6:
         return False
-    short = sum(1 for line in lines[:128] if len(graphemes(line)) <= 2)
-    return short / min(len(lines), 128) >= 0.8
+    short = sum(1 for line in lines if sum(1 for _ in islice(iter_graphemes(line), 3)) <= 2)
+    return short / len(lines) >= 0.8
 
 
 def profile_text(text: str) -> UnicodeProfile:
     value = str(text or "")
     if value.isascii():
         has_latin = any(char.isalpha() for char in value)
-        lines = [line.strip() for line in value.splitlines() if line.strip()][:128]
+        lines = [line.strip() for line in _sample_nonblank_lines(value, 128)]
         vertical = bool(_VERTICAL_RE.search(value)) or (
             len(lines) >= 6
             and sum(len(line) <= 2 for line in lines) / len(lines) >= 0.8
@@ -404,22 +420,19 @@ def profile_text(text: str) -> UnicodeProfile:
             malformed_surrogates=False,
         )
     scripts: set[str] = set()
-    ltr = 0
-    rtl = 0
+    ltr = rtl = False
     controls = 0
     overrides = 0
     malformed = False
     for char in value:
-        category = unicodedata.category(char)
-        malformed = malformed or category == "Cs"
+        malformed = malformed or _is_surrogate(char)
         if char in _BIDI_CONTROLS:
             controls += 1
             overrides += int(char in _BIDI_OVERRIDES)
-        bidi = unicodedata.bidirectional(char)
-        if bidi == "L":
-            ltr += 1
-        elif bidi in {"R", "AL"}:
-            rtl += 1
+        if not (ltr and rtl):
+            bidi = unicodedata.bidirectional(char)
+            ltr = ltr or bidi == "L"
+            rtl = rtl or bidi in {"R", "AL"}
         script = script_of(char)
         if script:
             scripts.add(script)
