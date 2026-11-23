@@ -3,7 +3,7 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
-## [1.11.0] - Unreleased
+## [1.11.0] - 2026-11-23
 
 ### Added
 - **`policy_mode: plan`, an opt-in policy that lets the engine plan each Hermes rewrite.** At a
@@ -49,7 +49,7 @@ All notable changes to this project are documented here. The format follows
   rewritten before its first push).
 - Vendored engine at `fd93aa7` (Tameru 1.10.x + `tameru.plan`, EV `decide`, loss/price profiles).
 
-## [1.10.0] - Unreleased
+## [1.10.0] - 2026-11-23 (never published separately; first released in 1.11.0)
 
 Removes three things that showed no measured benefit, as announced under *Deprecated* in 1.9.0, and vendors Tameru engine 1.10.0.
 
