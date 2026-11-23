@@ -75,6 +75,9 @@ restricted toolset, or one including `context_engine`.
 hermes plugins install tameru
 ```
 
+The catalog entry lists Linux only, so Hermes refuses this command on Windows
+and macOS; there, install from a source checkout as the repository README describes.
+
 Select the engine in the active profile's `config.yaml` and restart Hermes:
 
 ```yaml

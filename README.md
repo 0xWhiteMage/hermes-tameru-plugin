@@ -34,6 +34,9 @@ From the Hermes plugin catalogue:
 hermes plugins install tameru     # later: hermes plugins update tameru
 ```
 
+The catalogue entry lists Linux only (`platforms: [linux]` in Hermes' `plugin-catalog/tameru.yaml`), so on Windows and macOS
+Hermes refuses this command ("unavailable on win32"/"darwin"). There, use one of the two routes below.
+
 Or directly from this repository, as a user plugin directory:
 
 ```bash
