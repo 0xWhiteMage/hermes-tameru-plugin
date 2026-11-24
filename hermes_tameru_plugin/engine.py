@@ -657,10 +657,15 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             self._activity_registry.notify(self, count)
         return out
 
-    def bind_session_state(self, session_db=None, session_id=""):
+    def bind_session_state(self, session_db=None, session_id="", *, persistence=None):
+        # Hermes from db4d50b9e7 (v0.23.3) passes the store's writer handle as ``persistence`` and
+        # calls this from ``on_session_start`` unguarded; without it the prune's store gate and the
+        # compaction cooldown read both fail. Forward it only when given, so an older Hermes sees
+        # the same two-argument call as before.
+        extra = {} if persistence is None else {"persistence": persistence}
         if getattr(self, "_activity", None) is None:
             # parent construction may bind before _activity exists
-            return super().bind_session_state(session_db, session_id)
+            return super().bind_session_state(session_db, session_id, **extra)
         with self._activity.lifecycle_lock:
             previous = getattr(self, "_session_id", "") or ""
             previous_db = getattr(self, "_session_db", None)
@@ -671,7 +676,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                 # an unrelated rebind or a different DB object: the old session's
                 # originals, table and saved preferences must not follow
                 self._discard_session_views(preserve_policy=False)
-            super().bind_session_state(session_db, session_id)
+            super().bind_session_state(session_db, session_id, **extra)
             from .session_policy import bind_controls
             from .session_tuner import bind_tuner
             bind_controls(self, rotation=rotation)

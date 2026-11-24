@@ -3,6 +3,16 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **Sessions are shortened again on Hermes v0.23.3 and later.** Hermes db4d50b9e7 passes the store's
+  writer handle to `bind_session_state` as `persistence=` (unguarded from `on_session_start`). The
+  engine did not accept the keyword, so Hermes bound it to the deprecated `hermes_state.SessionDB`
+  with no writer handle: every proactive prune stopped at `prune:store_cannot_persist` and every
+  compaction aborted with `cooldown_state_unreadable`. `bind_session_state` now accepts `persistence`
+  and forwards it only when given, so an older Hermes sees the same call as before.
+
 ## [1.11.0] - 2026-11-23
 
 ### Added
