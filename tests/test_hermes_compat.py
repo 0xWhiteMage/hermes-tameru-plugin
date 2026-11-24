@@ -437,7 +437,12 @@ def test_compression_threshold_is_none_on_bad_config(compat, cfg):
 
 
 @pytest.mark.stub_only
-def test_compression_threshold_is_none_without_agent_init(compat):
+def test_compression_threshold_is_none_without_agent_init(compat, monkeypatch):
+    # The contract is "agent_init cannot be resolved -> None". Force that:
+    # when hermes-agent is pip-installed (e.g. editable), its meta-path
+    # finder resolves ``agent.agent_init`` even in stub runs, so the stub's
+    # missing module is not enough to reach the unresolvable path.
+    monkeypatch.setattr(compat, "_hermes", lambda module, attr: None)
     assert compat.compression_threshold("gpt-5.5", "openai-codex", {"threshold": 0.5}) is None
 
 
