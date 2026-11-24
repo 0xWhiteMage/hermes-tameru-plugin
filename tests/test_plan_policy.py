@@ -12,9 +12,8 @@ import re
 
 import pytest
 
-from conftest import read_file_payload, terminal_payload
+from conftest import terminal_payload
 from engine_support import (
-    MIN_PRUNE_CHARS,
     PROTECT_LAST_N,
     Chat,
     make_engine,

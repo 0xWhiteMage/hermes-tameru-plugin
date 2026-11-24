@@ -1,7 +1,6 @@
 """S7 never-block: an engine call is bounded by the pass wall budget, and >8M inners never reach the engine."""
 import threading
 import time
-from types import SimpleNamespace
 
 from conftest import terminal_payload
 from engine_support import Chat, make_engine, prune_pass
