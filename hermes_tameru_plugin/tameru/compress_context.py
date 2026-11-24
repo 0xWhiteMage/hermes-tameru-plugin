@@ -606,6 +606,9 @@ _CL_LIST_RE = re.compile(r"^[-*+]\s+|\d+\.\s+")
 _CL_TABLE_RE = re.compile(r"^\|.*\|$")
 _CL_CHAT_RE = re.compile(r"^(User|Assistant|System|Tool|Developer):")
 _CL_CHAT_TAG_RE = re.compile(r"^\[(user|assistant|system|tool|developer)\]", re.IGNORECASE)
+# Perf: the two chat probes merge into one scan; the tag alternative keeps
+# its own (?i:) scope so the name alternative stays case-sensitive.
+_CL_CHAT_ANY_RE = re.compile("(?:" + _CL_CHAT_RE.pattern + ")|(?i:" + _CL_CHAT_TAG_RE.pattern + ")")
 _CL_JSON_KEY_RE = re.compile(r'^"[A-Za-z0-9_]+"\s*:')
 _CL_COMMENT_RE = re.compile(r"^(\/\/|#|\/\*|\*)")
 
@@ -630,6 +633,15 @@ _ACCESS_LOG_LINE_RE = re.compile(
     r'^\S+ \S+ \S+ \[\d{1,2}/[A-Z][a-z]{2}/\d{4}:\d\d:\d\d:\d\d [+-]\d{4}\] "([A-Z]+) \S+ HTTP/[\d.]+" (\d)\d\d '
 )
 _REDIS_LINE_RE = re.compile(r"^\d+:[XCSM] \d{1,2} [A-Z][a-z]{2}(?: \d{4})? \d\d:\d\d:\d\d\.\d{3} ([.*#-]) ")
+# Perf: the five log-line probes all mean "log" — one compiled alternation
+# runs them in a single pass. Boolean use only; the capture groups of
+# _REDIS_LINE_RE / _ACCESS_LOG_LINE_RE are read through their own patterns.
+_CL_LOG_ANY_RE = re.compile(
+    "(?:" + ")|(?:".join(
+        p.pattern
+        for p in (_CL_LOG_RE, _SYSLOG_PREFIX_RE, _REDIS_LINE_RE, _KLOG_LINE_RE, _ACCESS_LOG_LINE_RE)
+    ) + ")"
+)
 
 
 def classify_line(line: str) -> str:
@@ -642,15 +654,7 @@ def classify_line(line: str) -> str:
         return "fence"
     if _CL_TRACE_RE.match(t):
         return "trace"
-    if _CL_LOG_RE.match(t):
-        return "log"
-    if _SYSLOG_PREFIX_RE.match(t):
-        return "log"
-    if _REDIS_LINE_RE.match(t):
-        return "log"
-    if _KLOG_LINE_RE.match(t):
-        return "log"
-    if _ACCESS_LOG_LINE_RE.match(t):
+    if _CL_LOG_ANY_RE.match(t):
         return "log"
     if _CL_LOGFMT_RE.match(t) and _cl_logfmt_pairs(t) >= 3:
         return "log"
@@ -662,7 +666,7 @@ def classify_line(line: str) -> str:
         return "list"
     if _CL_TABLE_RE.match(t):
         return "table"
-    if _CL_CHAT_RE.match(t) or _CL_CHAT_TAG_RE.match(t):
+    if _CL_CHAT_ANY_RE.match(t):
         return "chat"
     if t[:1] in "{[" or _CL_JSON_KEY_RE.match(t):
         return "json"
@@ -1503,12 +1507,35 @@ def _protected_facts(text: str) -> tuple[tuple[int, str, str, str], ...]:
     return _fact_summary(text)[0]
 
 
-def _fact_superseded_in(line: str, kept_lines: list[str]) -> bool:
+def _fact_superseded_in(
+    line: str,
+    kept_lines: list[str],
+    orig_index: dict[str, int] | None = None,
+) -> bool:
     """``True`` when a line surviving in the output explicitly marks ``line`` stale
     (``supersession._supersedes``: an is-now/obsolete/override marker plus shared distinctive
     terms). A supersession deletion is deliberate — the floor and stage restores never put
-    the stale line back, the same way they never put back a safety deletion."""
-    return any(o != line and _supersedes(o, line) for o in kept_lines)
+    the stale line back, the same way they never put back a safety deletion.
+    Reassignment supersession is directionless on its own (``k = v1`` vs ``k = v2`` are
+    symmetric), so ``orig_index`` — each line's position in the original text — gates it:
+    only a surviving line that stands LATER in the input may veto the candidate, otherwise
+    a kept stale value would refuse to let the current one back in. Kept lines absent from
+    ``orig_index`` (render markers) count as later, matching the pre-gate behavior; a
+    candidate with no known position keeps the permissive default too."""
+    lp = orig_index.get(line) if orig_index is not None else None
+    return any(
+        o != line
+        and _supersedes(
+            o,
+            line,
+            newer_is_later=(
+                True
+                if lp is None or orig_index is None
+                else orig_index.get(o, 1 << 62) > lp
+            ),
+        )
+        for o in kept_lines
+    )
 
 
 def _missing_in_original_order(missing: list[tuple[int, int, str]]) -> list[str]:
@@ -1529,13 +1556,14 @@ def _restore_facts(protected, after: str, before: str | None = None) -> str:
     if not protected and not err and not out:
         return after
     kept = after.split("\n")
+    orig_index = {ln: i for i, ln in enumerate(before.split("\n"))} if before is not None else None
     missing = [(i, -1, ln) for i, _k, _v, ln in protected
-               if ln != after and ln not in after and not _fact_superseded_in(ln, kept)]
+               if ln != after and ln not in after and not _fact_superseded_in(ln, kept, orig_index)]
     extra = list(err) + sorted(out.difference(err))
     if extra:
-        index = {ln: i for i, ln in enumerate(before.split("\n"))} if before is not None else {}
+        index = orig_index or {}
         for pos, ln in enumerate(extra):
-            if ln != after and ln not in after and not _fact_superseded_in(ln, kept):
+            if ln != after and ln not in after and not _fact_superseded_in(ln, kept, orig_index):
                 missing.append((index.get(ln, float("inf")), pos, ln))
     return after if not missing else after + "\n" + "\n".join(_missing_in_original_order(missing))
 
@@ -1553,14 +1581,14 @@ def _restore_fact_lines(before: str, after: str) -> str:
         return after
     kept = after.split("\n")
     extra = list(err) + sorted(out.difference(err))
-    index = {ln: i for i, ln in enumerate(before.split("\n"))} if extra else {}
+    index = {ln: i for i, ln in enumerate(before.split("\n"))}
     missing = [(i, -1, ln) for i, _k, _v, ln in protected
-               if ln != before and ln not in after and not _fact_superseded_in(ln, kept)]
+               if ln != before and ln not in after and not _fact_superseded_in(ln, kept, index)]
     # E6: an error exemplar the stage saw in ``before`` and lost goes back too —
     # independent of fact density, same supersession guard, same original order.
     # E12: protected outcome lines get the same treatment.
     for pos, ln in enumerate(extra):
-        if ln in before and ln not in after and not _fact_superseded_in(ln, kept):
+        if ln in before and ln not in after and not _fact_superseded_in(ln, kept, index):
             missing.append((index.get(ln, float("inf")), pos, ln))
     return after if not missing else after + "\n" + "\n".join(_missing_in_original_order(missing))
 
@@ -1582,6 +1610,7 @@ def _apply_fact_floor(*, compressed: str, facts, query: str, budget_chars: int |
     output that never was an original line) are never eviction candidates; when nothing evictable
     remains the append stands and the cost gate decides, exactly as before."""
     kept = compressed.split("\n")
+    orig_index = {ln: i for i, ln in enumerate(original_text.split("\n"))} if original_text else None
     # A line already represented by a surviving exemplar of its template (a
     # "[×N]"/"[last]" marker carries the exemplar text) is not missing — the
     # floor's budget is for templates the extract left unrepresented, like the
@@ -1613,7 +1642,7 @@ def _apply_fact_floor(*, compressed: str, facts, query: str, budget_chars: int |
 
     missing = [
         f for f in facts
-        if f[3] not in compressed and not _fact_superseded_in(f[3], kept)
+        if f[3] not in compressed and not _fact_superseded_in(f[3], kept, orig_index)
         and (not _log_fingerprint(f[3]) or _log_fingerprint(f[3]) not in kept_fps or _ctx(f[0]))
     ]
     if not missing:
@@ -1954,6 +1983,18 @@ _OUTCOME_ANOMALY_RE = re.compile(r"\?\?\?|!\w[\w -]{1,30}!")
 # word — the failure vocabulary wants events, not framing.
 _OUTCOME_FRAME_RE = re.compile(r"^\s*[-=*_+#~]{3,}.*[-=*_+#~]{3,}\s*$")
 _OUTCOME_DOC_LINK_RE = re.compile(r"(?i)^\s*-{0,3}\s*(?:docs?|see also|ref(?:erence)?|link)\s*:")
+# Perf: the failure-vocabulary probes merge into one scan — ERR_NEAR's
+# pattern verbatim, ANOMALY's appended (its `\w`/`[\w -]` classes match
+# either case already, so ERR_NEAR's leading `(?i)` changes nothing for it).
+# Composed from the source patterns so a vocabulary edit lands in both places.
+_OUTCOME_ERR_ANY_RE = re.compile(
+    _OUTCOME_ERR_NEAR_RE.pattern + "|" + _OUTCOME_ANOMALY_RE.pattern
+)
+# FRAME and DOC_LINK both "match" guards on the same lines — one alternation.
+_OUTCOME_NOT_ERR_RE = re.compile(
+    _OUTCOME_FRAME_RE.pattern + "|" + _OUTCOME_DOC_LINK_RE.pattern.replace("(?i)", "", 1),
+    re.IGNORECASE,
+)
 # A run of 8+ box/block-drawing glyphs at line start is a download/progress
 # bar ("   ━━━━ 119.0/119.0 kB"), never failure context — _is_progress_bar
 # misses shapes that carry no % or /.
@@ -2040,13 +2081,17 @@ def _outcome_lines_scan(lines: list[str]) -> tuple[tuple[int, str, str, str], ..
     nb_i = [i for i, ln in enumerate(lines) if ln.strip()]
     if len(nb_i) < 10:
         return ()
+    # Perf: the failure-context probe runs once per line — err_near needs the
+    # whole map before the main loop, which then reuses is_err instead of
+    # re-running the same four patterns on every line.
+    is_err = [False] * len(lines)
+    for i in nb_i:
+        is_err[i] = bool(
+            _OUTCOME_ERR_ANY_RE.search(lines[i]) and not _OUTCOME_NOT_ERR_RE.match(lines[i])
+        )
     err_near = [False] * len(lines)
     for i in nb_i:
-        if (
-            (_OUTCOME_ERR_NEAR_RE.search(lines[i]) or _OUTCOME_ANOMALY_RE.search(lines[i]))
-            and not _OUTCOME_FRAME_RE.match(lines[i])
-            and not _OUTCOME_DOC_LINK_RE.match(lines[i])
-        ):
+        if is_err[i]:
             for j in range(max(0, i - 2), min(len(lines), i + 3)):
                 err_near[j] = True
     summaries: dict[str, tuple[int, str]] = {}
@@ -2061,15 +2106,9 @@ def _outcome_lines_scan(lines: list[str]) -> tuple[tuple[int, str, str, str], ..
     state_kvs: list[tuple[int, str]] = []
     datarows: list[tuple[int, str]] = []
     borders: list[tuple[int, str]] = []
-    is_err = [False] * len(lines)
     for pos, i in enumerate(nb_i):
         ln = lines[i]
-        if (
-            (_OUTCOME_ERR_NEAR_RE.search(ln) or _OUTCOME_ANOMALY_RE.search(ln))
-            and not _OUTCOME_FRAME_RE.match(ln)
-            and not _OUTCOME_DOC_LINK_RE.match(ln)
-        ):
-            is_err[i] = True
+        if is_err[i]:
             fp = _log_fingerprint(ln) or ln
             fail_lines.append((i, ln, fp))
             continue
@@ -8563,7 +8602,24 @@ def _normalise_options(
     mode_norm = (
         "adaptive" if requested_mode in {"compiler", "precision"} else requested_mode
     )
-    pin_recent = max(0, int(pin_recent or 0))
+    try:
+        pin_recent_num = float(pin_recent or 0)
+        huge_int = False
+    except OverflowError:
+        # An int too large to represent as a float is still a valid count —
+        # the pre-float conversion accepted it.
+        huge_int = True
+    except (TypeError, ValueError):
+        pin_recent_num = math.nan
+        huge_int = False
+    if huge_int:
+        pin_recent = max(0, int(pin_recent))
+    elif not math.isfinite(pin_recent_num):
+        raise ValueError(
+            f"pin_recent must be a finite non-negative integer, got {pin_recent!r}"
+        )
+    else:
+        pin_recent = max(0, int(pin_recent_num))
     if min_savings_ratio is None:
         min_savings_ratio = 0.10
     min_savings_ratio = float(min_savings_ratio)
@@ -10224,8 +10280,24 @@ def _compress_context_impl(
     caller_text = str(context or "")
     if not isinstance(query, str):
         # PAACE-style plan awareness: a sequence of upcoming-task strings is
-        # scored as a union — a term from any planned step counts.
-        query = " ".join(str(part) for part in (query or []) if part)
+        # scored as a union — a term from any planned step counts. A scalar
+        # (a lone int, a datetime, 0/False) is coerced rather than iterated:
+        # the generator form would exhaust on the second join downstream.
+        # The iter() probe separates non-iterables from a broken iterator —
+        # whose mid-iteration TypeError must reach the caller, not silently
+        # produce a compaction for the iterator's repr. Steps join with a
+        # space so a one-word step ('build') never starts a line and reads
+        # as a tool-call command downstream.
+        try:
+            _q_it = iter(query) if query is not None else iter(())
+        except TypeError:
+            query = str(query)
+        else:
+            query = " ".join(str(part) for part in _q_it if part)
+    if limits is not None and not isinstance(limits, IndustrialLimits):
+        raise TypeError(
+            f"limits must be an IndustrialLimits instance, got {type(limits).__name__}"
+        )
     if content_hint is not None and (
         not isinstance(content_hint, str) or content_hint not in _CONTENT_HINTS
     ):
@@ -10806,6 +10878,23 @@ def compress_context(
     _internal_sample: bool = False,
 ) -> CompressResult:
     full_text = str(context or "")
+    if not isinstance(query, str):
+        # A scalar query (a lone int, a datetime, 0/False) is coerced, not
+        # iterated — a broken iterator's mid-iteration TypeError propagates
+        # instead of yielding a compaction for the iterator's repr. The
+        # generator form is materialised once so the joins below and the
+        # impl's union-scoring both see the same terms. Space join keeps a
+        # one-word step off line-start (tool-call misdetection).
+        try:
+            _q_it = iter(query) if query is not None else iter(())
+        except TypeError:
+            query = str(query)
+        else:
+            query = " ".join(str(part) for part in _q_it if part)
+    if limits is not None and not isinstance(limits, IndustrialLimits):
+        raise TypeError(
+            f"limits must be an IndustrialLimits instance, got {type(limits).__name__}"
+        )
     if compile_pin_patterns(pin_patterns) is None:
         tokens = estimate_tokens(full_text)
         return _with_schema_fields(CompressResult(
