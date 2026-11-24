@@ -55,7 +55,7 @@ _ASSIGN_RE = re.compile(
 # ``cache:`` at the same indent are DIFFERENT settings — scoping by indent
 # alone dropped the earlier section's live value.
 _PARENT_RE = re.compile(
-    r"^\s*(?:\[\[?\s*(?P<ini>(?:\"[^\"]*\"|'[^']*'|[^\[\]\s][^\[\]]*?))\s*\]?\]\s*(?:[;#].*)?"
+    r"^\s*(?:\[\[?\s*(?P<ini>(?:\"[^\"]*\"|'[^']*'|[^\[\]\"']|\"(?![^\"]*\")|'(?![^']*'))+)\s*\]?\]\s*(?:[;#].*)?"
     r"|(?P<yaml>[A-Za-z_][A-Za-z0-9_./\-]*)\s*:\s*(?:#.*)?)$"
 )
 # A line past this length is never a section header or a bare mapping
@@ -156,15 +156,18 @@ def _advance(state: list, line: str) -> str | None:
         if not (tail == "" or tail[0] in "#;" or "#" in body or ";" in body):
             pm = None
     if pm and pm["ini"] is not None:
-        ini = pm["ini"]
+        ini = pm["ini"].strip()
         # A quoted TOML name with no dot is the same table as its bare
         # spelling ('["database"]' == '[database]' — TOML treats a quoted
         # key as the literal key), so it folds identically. A quoted
         # name WITH a dot ('"db.primary"') is one literal key, not the
         # nested '[db.primary]', and keeps its quotes to stay distinct;
         # '[""]' is a name too — the empty name is not the top level.
-        # Bare names fold, matching INI convention.
-        if ini[:1] in "\"'" and ini[1:-1] and "." not in ini[1:-1]:
+        # Bare names fold, matching INI convention. The strip only fires
+        # on a MATCHED pair — an unmatched leading quote ('['90s]') is a
+        # name starting with an apostrophe, not a quoted name missing a
+        # char.
+        if ini[:1] in "\"'" and ini[-1:] == ini[:1] and ini[1:-1] and "." not in ini[1:-1]:
             name = ini[1:-1].casefold()
         else:
             name = ini if ini[:1] in "\"'" else ini.casefold()
@@ -419,7 +422,77 @@ def _meaningful_overlap(newer_terms: set[str], older_terms: set[str]) -> bool:
     return len(distinctive) >= 2
 
 
-def _supersedes(newer: str, older: str, *, newer_is_later: bool = True, scopes=None) -> bool:
+def _line_scopes(
+    text: str,
+    line_headers: dict[str, str] | None = None,
+) -> dict[str, str]:
+    """Each line's containing config section (``""`` at top level): the
+    INI/TOML section name or the YAML parent path — the same walk
+    ``_assignments`` performs. Lines checked in isolation lose their
+    section, so ``[a] k = v1`` and ``[b] k = v2`` must never read as one
+    setting being reassigned.
+
+    A repeated line keeps the LAST occurrence's scope, the same
+    convention ``orig_index`` uses for positions — first and last
+    occurrences disagreeing would attribute a line to the wrong section.
+    ``line_headers`` optionally receives ``line → header line`` — the
+    exact header text that opened THIS line's INI/TOML section, so
+    case-distinct tables (``[Foo]`` vs ``[foo]``) never borrow each
+    other's name."""
+    scopes: dict[str, str] = {}
+    section = ""
+    cur_header = ""
+    parents: list[tuple[int, str]] = []
+    for line in (text or "").split("\n"):
+        if not line.strip():
+            continue
+        indent = len(line) - len(line.lstrip())
+        pm = _PARENT_RE.match(line[:_MAX_HEADER_LINE])
+        if pm and len(line) > _MAX_HEADER_LINE:
+            tail = line[_MAX_HEADER_LINE:]
+            if line[_MAX_HEADER_LINE - 1] == "]":
+                tail = tail.lstrip("]")
+            tail = tail.lstrip(" \t\r")
+            body = line[pm.end("ini" if pm["ini"] is not None else "yaml"):_MAX_HEADER_LINE]
+            if not (tail == "" or tail[0] in "#;" or "#" in body or ";" in body):
+                pm = None
+        if pm and pm["ini"] is not None:
+            ini = pm["ini"].strip()
+            if ini[:1] in "\"'" and ini[-1:] == ini[:1] and ini[1:-1] and "." not in ini[1:-1]:
+                section = ini[1:-1].casefold()
+            else:
+                section = ini if ini[:1] in "\"'" else ini.casefold()
+            parents.clear()
+            cur_header = line
+            scopes[line] = ""
+            if line_headers is not None:
+                # A header maps to itself so empty sections still count as
+                # section heads — and so a restored header re-owns its place.
+                line_headers[line] = line
+            continue
+        while parents and parents[-1][0] >= indent:
+            parents.pop()
+        if pm:
+            section = ""
+            cur_header = ""
+            parents.append((indent, pm["yaml"].casefold()))
+            scopes[line] = ""
+            continue
+        scopes[line] = section or "/".join(p for _i, p in parents)
+        if line_headers is not None and section:
+            line_headers[line] = cur_header
+    return scopes
+
+
+def _supersedes(
+    newer: str,
+    older: str,
+    *,
+    newer_is_later: bool | None = True,
+    scopes=None,
+    newer_scope: str | None = None,
+    older_scope: str | None = None,
+) -> bool:
     """True when `newer` explicitly marks `older` stale.
 
     Conservative by design: requires an explicit staleness/override marker
@@ -432,7 +505,13 @@ def _supersedes(newer: str, older: str, *, newer_is_later: bool = True, scopes=N
     # Source order gates BOTH paths: a block standing earlier in the input
     # can never mark a later one stale — otherwise a kept stale line that
     # mentions "override" would veto restoring the current one.
-    if not newer_is_later:
+    # ``newer_is_later`` is tri-state: ``False`` (known earlier) vetoes every
+    # path; ``None`` (position unknown — e.g. a line inside a JSON envelope)
+    # still permits the prose-marker path but not a bare reassignment, which
+    # is directionless without known order. ``newer_scope``/``older_scope``
+    # carry each line's config section when known: same-named keys under
+    # different sections are different settings and never reassign.
+    if newer_is_later is False:
         return False
     n_low = newer.casefold()
     if not any(m in n_low for m in _SUPERSESSION_MARKERS):
@@ -441,7 +520,15 @@ def _supersedes(newer: str, older: str, *, newer_is_later: bool = True, scopes=N
         # reassignment carries no direction of its own: ``k = v1`` and
         # ``k = v2`` are symmetric. Only a KNOWN-later block may supersede —
         # a surviving stale value must not veto restoring the current one.
-        return newer_is_later and _reassigns(newer, older, scopes=scopes)
+        if newer_is_later is not True:
+            return False
+        if (
+            newer_scope is not None
+            and older_scope is not None
+            and newer_scope != older_scope
+        ):
+            return False
+        return _reassigns(newer, older, scopes=scopes)
 
     # Content overlap: at least two *distinctive* (non-filler) terms shared.
     return _meaningful_overlap(_content_terms(newer), _content_terms(older))
@@ -475,22 +562,42 @@ def _pure_assignments(text: str) -> bool:
 def apply_supersession(scored: list[dict[str, Any]], kept: set[int]) -> set[int]:
     """Drop kept blocks that a later kept block explicitly supersedes.
 
-    Mutates and returns the caller's ``kept`` set. Only prunes; never adds.
-    Runs after selection so it cannot rescue a
+    Mutates and returns the caller's ``kept`` set. Runs after selection so
+    it cannot rescue a
     distractor — it can only remove stale facts the selector already liked
-    when a newer authoritative line survives too.
+    when a newer authoritative line survives too. A section header orphaned
+    by a pruned block is queued on the first dependent block's
+    ``emit_prefix`` — it renders beside the lines that need it rather than
+    at the dead block's old position (which would mislabel intervening
+    settings as belonging to the restored section).
 
     Performance: terms are tokenised once per block and an inverted
     term→id index proposes candidate pairs (shared vocabulary), so cost is
     near-linear in total tokens rather than O(k²) pair enumeration.
     """
     kept_ids = sorted(i for i in kept if isinstance(i, int) and 0 <= i < len(scored))
-    if len(kept_ids) < 2:
-        return kept
 
-    texts = {i: scored[i].get("text", "") for i in kept_ids}
+    # Blocks the decision cache drops BEFORE this analysis still need their
+    # orphaned headers handled — a replayed 'drop' removes the stale block
+    # before it can be seen here. They join the analysis as supersede-ees
+    # only: a dropped block may not kill a kept one, but a kept block may
+    # still mark it stale so its headers re-emit on the replay too. The
+    # pair must run even when the cache left a single kept block — a lone
+    # survivor still needs the section its frozen-dropped parent held.
+    kept_set = set(kept_ids)
+    frozen_dropped = {
+        b["id"] for b in scored
+        if isinstance(b.get("id"), int)
+        and b.get("freeze_decision") == "drop"
+        and b["id"] not in kept_set
+    }
+    if len(kept_set | frozen_dropped) < 2:
+        return kept
+    analysis_ids = sorted(kept_set | frozen_dropped)
+
+    texts = {i: scored[i].get("text", "") for i in analysis_ids}
     texts = {i: text if isinstance(text, str) else "" for i, text in texts.items()}
-    terms_by_id = {i: _content_terms(texts[i]) for i in kept_ids}
+    terms_by_id = {i: _content_terms(texts[i]) for i in analysis_ids}
     marker_ids = []
     for i in kept_ids:
         lowered = texts[i].casefold()
@@ -502,7 +609,7 @@ def apply_supersession(scored: list[dict[str, Any]], kept: set[int]) -> set[int]
     if marker_ids:
         # Inverted index over kept blocks (newer candidates included).
         postings: dict[str, list[int]] = {}
-        for i in kept_ids:
+        for i in analysis_ids:
             if len(terms_by_id[i]) > _MAX_SUPERSESSION_TOKENS:
                 continue
             for t in terms_by_id[i]:
@@ -552,8 +659,9 @@ def apply_supersession(scored: list[dict[str, Any]], kept: set[int]) -> set[int]
         enters[i] = (scope_state[0], tuple(p for _i, p in scope_state[1]))
         kv = _assignments_tracked(text if isinstance(text, str) else "", scope_state, minted)
         defines[i] = minted
-        if i in kept and len(terms_by_id.get(i, ())) <= _MAX_SUPERSESSION_TOKENS:
-            block_kv[i] = kv
+        if i in kept_set or i in frozen_dropped:
+            if len(terms_by_id.get(i, ())) <= _MAX_SUPERSESSION_TOKENS:
+                block_kv[i] = kv
     basename_index: dict[str, set[str]] = {}
     for kv in block_kv.values():
         for k in kv:
@@ -562,22 +670,23 @@ def apply_supersession(scored: list[dict[str, Any]], kept: set[int]) -> set[int]
 
     superseded_keys: dict[int, set[str]] = {}
     seen: dict[str, list[tuple[int, str, str]]] = {}
-    for i in kept_ids:
+    for i in analysis_ids:
         kv = block_kv.get(i)
         if kv is None:
             continue
         for k, v in kv.items():
-            for prev_id, prev_val, prev_key in seen.get(k, ()):
-                if prev_val != v:
-                    superseded_keys.setdefault(prev_id, set()).add(prev_key)
-            base = _key_parts(k)[1]
-            if len(scopes.get(base, ())) <= 1:
-                for other in basename_index.get(base, ()):
-                    if other == k:
-                        continue
-                    for prev_id, prev_val, prev_key in seen.get(other, ()):
-                        if prev_val != v:
-                            superseded_keys.setdefault(prev_id, set()).add(prev_key)
+            if i in kept_set:
+                for prev_id, prev_val, prev_key in seen.get(k, ()):
+                    if prev_val != v:
+                        superseded_keys.setdefault(prev_id, set()).add(prev_key)
+                base = _key_parts(k)[1]
+                if len(scopes.get(base, ())) <= 1:
+                    for other in basename_index.get(base, ()):
+                        if other == k:
+                            continue
+                        for prev_id, prev_val, prev_key in seen.get(other, ()):
+                            if prev_val != v:
+                                superseded_keys.setdefault(prev_id, set()).add(prev_key)
             seen.setdefault(k, []).append((i, v, k))
     for bid, keys in superseded_keys.items():
         if keys and set(block_kv[bid]) <= keys and _pure_assignments(texts[bid]):
@@ -609,6 +718,35 @@ def apply_supersession(scored: list[dict[str, Any]], kept: set[int]) -> set[int]
                 element[2] + "\n" + scored[first_dependent].get("text", "")
             )
             defines.setdefault(first_dependent, []).append(element)
+            # The prepend feeds downstream scoring only — ``_render`` emits
+            # ``lines[start:end+1]``. The header rides on the dependent's
+            # ``emit_prefix`` so it renders beside the lines that need it.
+            # A nested scope ('[servers.tls]' minted after '[[servers]]'
+            # in the same stale block) drags its ancestor headers too —
+            # a bare subtable header would attach to the wrong array
+            # element — while a header another surviving block already
+            # mints is skipped like the element itself.
+            prefix_lines = scored[first_dependent].setdefault("emit_prefix", [])
+            for anc in defines.get(bid, ()):
+                if anc is element:
+                    break
+                if anc[0] != element[0]:
+                    continue
+                if element[0] == "sec" and not (
+                    element[1].startswith(anc[1] + "\x1f")
+                    or element[1].startswith(anc[1] + ".")
+                ):
+                    continue
+                if element[0] == "par" and anc[1] not in enters[first_dependent][1]:
+                    continue
+                if any(j in kept_ids and j not in stale and j != bid
+                       and j < first_dependent
+                       and anc in defines.get(j, ()) for j in kept_ids):
+                    continue
+                if anc[2] not in prefix_lines:
+                    prefix_lines.append(anc[2])
+            if element[2] not in prefix_lines:
+                prefix_lines.append(element[2])
 
     if stale:
         kept -= stale
