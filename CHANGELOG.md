@@ -3,6 +3,14 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
+## [Unreleased]
+
+### Fixed
+- **Malformed seam inputs now raise `TypeError` instead of crashing with `AttributeError`.**
+  `activity.digest(non-str)`, `tool_calls_by_id`/`build_index` with a non-dict message row,
+  `build_index(call_id_to_tool=non-dict)` and `build_query(cache=non-dict)` used to crash on
+  `.encode`/`.get` — they now reject the argument at the entry, naming the expected type.
+
 ## [0.1.0] - 2026-11-24
 
 ### Changed

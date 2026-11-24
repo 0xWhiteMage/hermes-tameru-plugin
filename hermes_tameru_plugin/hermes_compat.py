@@ -383,6 +383,10 @@ def _local_tool_calls_by_id(messages: list[dict]) -> dict[str, tuple[str, Any]]:
 
 def tool_calls_by_id(messages: list[dict]) -> dict[str, tuple[str, Any]]:
     """Map ``tool_call_id -> (tool_name, raw_arguments)`` over every assistant tool call."""
+    # Hermes' own implementation reads ``msg.get`` directly; reject malformed rows before
+    # delegation so a host bug surfaces as a clean TypeError, not an AttributeError inside it.
+    if isinstance(messages, str) or not all(isinstance(m, dict) for m in messages):
+        raise TypeError("messages must be a sequence of dicts")
     calls = _prefer("agent.context_compressor", "_tool_calls_by_id", _local_tool_calls_by_id)
     return calls(messages)
 
