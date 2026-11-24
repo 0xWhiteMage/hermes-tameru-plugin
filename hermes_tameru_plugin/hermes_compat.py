@@ -512,7 +512,12 @@ def compression_threshold(model: str, provider: str, cfg: dict) -> float | None:
 
 
 def session_db_usable(db: Any) -> bool:
-    """True when ``db`` can read history and commit a compaction.
+    """True when ``db`` can read the session's history, archived originals included.
+
+    Every caller only reads: the archive lookups behind ``tameru_read_original``, the Desktop original
+    view and the activity restore. So only ``get_messages`` is required. Hermes from v0.23.3 hands a
+    plugin engine a ``session_db`` with no ``archive_and_compact``, because Hermes commits rewrites
+    itself; requiring it turned every lookup of an earlier turn's ref into "ref not found".
 
     An isolation proxy (``plugins.isolation: host`` hands the engine an ``Opaque`` placeholder)
     raises on attribute access and so fails the capability check; the class-name test catches a
@@ -521,8 +526,7 @@ def session_db_usable(db: Any) -> bool:
     if db is None or "Opaque" in type(db).__name__:
         return False
     try:
-        needed = ("get_messages", "archive_and_compact")
-        return all(callable(getattr(db, name, None)) for name in needed)
+        return callable(getattr(db, "get_messages", None))
     except Exception:
         return False
 

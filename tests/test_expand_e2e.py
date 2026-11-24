@@ -253,6 +253,40 @@ def test_an_isolated_session_db_proxy_degrades_to_the_store_only(home):
     assert "ref not found" in miss["error"]
 
 
+class ReadOnlySessionDB:
+    """The ``session_db`` Hermes v0.23.3+ hands a plugin engine: it reads history, archived originals
+    included, but has no ``archive_and_compact`` because Hermes commits rewrites itself."""
+
+    def __init__(self, rows: list[dict]) -> None:
+        self.rows = rows
+
+    def get_messages(self, session_id, include_inactive=False, include_compacted=False, include_ancestors=False):
+        return list(self.rows) if include_compacted or include_inactive else []
+
+
+def _later_turn_over_a_read_only_archive(content: str):
+    """Prune ``content``, then a new engine (a later turn: empty store) whose session_db holds the archived original."""
+    out, ref, original = pruned_session(build_agent(session_db=RecordingDB()).context_compressor, content)
+    archived = {**next(m for m in out if m["role"] == "tool"), "content": original}   # Hermes' pre-rewrite twin
+    later = build_agent(session_db=ReadOnlySessionDB([archived])).context_compressor
+    assert ref not in later._store
+    return later, ref
+
+
+def test_a_read_only_session_db_still_serves_originals_from_the_archive(home):
+    later, ref = _later_turn_over_a_read_only_archive(hp.terminal_result(long_log(), exit_code=1))
+    out = json.loads(later.handle_tool_call(READ_ORIGINAL_TOOL_NAME, {"ref": ref, "start_line": 200}))
+    assert out.get("content") == "step 200: FAILED hard (code 17)", out
+    assert later.get_status()["tameru"]["isolated"] is False
+
+
+def test_a_secret_in_a_read_only_archive_is_refused_not_reported_missing(home):
+    secret = hp.terminal_result(long_log() + "\nOPENAI_API_KEY=sk-" + "a1b2c3d4" * 6, exit_code=1)
+    later, ref = _later_turn_over_a_read_only_archive(secret)
+    out = json.loads(later.handle_tool_call(READ_ORIGINAL_TOOL_NAME, {"ref": ref}))
+    assert "held a credential" in out.get("error", ""), out
+
+
 def test_refs_of_secret_bearing_results_are_not_stored_and_expand_says_so_via_the_hint(home):
     engine = build_agent(session_db=RecordingDB()).context_compressor
     secret = hp.terminal_result(long_log() + "\nOPENAI_API_KEY=sk-" + "a1b2c3d4" * 6, exit_code=1)
