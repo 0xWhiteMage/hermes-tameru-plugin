@@ -388,7 +388,13 @@ def build_index(
     the seam; it is derived from ``messages`` when omitted. Only the tools supersession reasons
     about are indexed.
     """
+    if call_id_to_tool is not None and not isinstance(call_id_to_tool, dict):
+        raise TypeError(
+            f"call_id_to_tool must be a dict, got {type(call_id_to_tool).__name__}"
+        )
     table = tool_calls_by_id(messages) if call_id_to_tool is None else call_id_to_tool
+    if isinstance(messages, str) or not all(isinstance(m, dict) for m in messages):
+        raise TypeError("messages must be a sequence of dicts")
     index = SupersessionIndex(pending=_pending_round(messages))
     epoch = 0   # earlier terminal calls that may have changed the working directory
     for idx, msg in enumerate(messages):

@@ -920,3 +920,15 @@ def test_policy_display_matches_lines():
         assert line in out
     for line in display["budget"] + display["check"]:
         assert line in out
+
+
+def test_digest_rejects_non_str_text():
+    """digest() hashed ``text.encode`` directly — an int crashed with
+    AttributeError; wrong types now raise TypeError at the entry."""
+    from hermes_tameru_plugin import activity
+
+    with pytest.raises(TypeError, match="text must be str"):
+        activity.digest(42)
+    with pytest.raises(TypeError, match="text must be str"):
+        activity.digest(None)
+    assert len(activity.digest("x")) == 64

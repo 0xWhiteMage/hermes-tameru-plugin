@@ -81,6 +81,8 @@ def kept_keys(rendered: str) -> frozenset:
 
 
 def digest(text: str) -> str:
+    if not isinstance(text, str):
+        raise TypeError(f"text must be str, got {type(text).__name__}")
     return hashlib.sha256(text.encode("utf-8", "surrogatepass")).hexdigest()
 
 

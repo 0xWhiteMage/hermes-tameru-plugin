@@ -327,3 +327,12 @@ def test_usable_query_keeps_parts_with_nothing_distinctive_and_is_case_blind():
 
     assert usable_query(["continue", "what is the host?"], "anything") == ["continue", "what is the host?"]
     assert usable_query(["Read MyService.Config"], "see myservice.config here") == ["Read MyService.Config"]
+
+
+def test_build_query_rejects_non_dict_cache():
+    """build_query read ``cache.get`` directly — an int crashed with
+    AttributeError; a non-dict cache now raises TypeError."""
+    msgs = [{"role": "user", "content": TASK}]
+    with pytest.raises(TypeError, match="cache must be a dict"):
+        build_query(msgs, 0, cache=42)
+    assert build_query(msgs, 0, cache={}) == task_query(msgs, 0)
