@@ -3,7 +3,14 @@
 All notable changes to this project are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/); versions follow semantic versioning.
 
-## [Unreleased]
+## [0.1.0] - 2026-11-24
+
+### Changed
+- **The plugin now versions on its own line, independent of the vendored engine.** The earlier line
+  tracked the engine's (1.11.0 vendored engine 1.10.0); the plugin version is now bumped only when
+  the plugin itself changes, so this line restarts at 0.1.0. The vendored engine's version is still
+  recorded in the `plugin.yaml` description and shown by `/tameru stats`. 1.11.0 is the last
+  engine-aligned version.
 
 ### Fixed
 - **Sessions are shortened again on Hermes v0.23.3 and later.** Hermes db4d50b9e7 passes the store's

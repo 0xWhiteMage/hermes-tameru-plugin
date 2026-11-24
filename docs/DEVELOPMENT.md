@@ -140,8 +140,8 @@ python scripts/sync_to_harness.py <plugin_repo>/hermes_tameru_plugin/tameru --ma
 ```
 
 Then update `VENDORED_FROM`, run both test modes, re-record the baselines and review their diff. The sync stamps
-`version:` and `Tameru X.Y.Z` in `plugin.yaml` from upstream's `__version__`; the rest of the manifest is
-hand-written (no `kind:` key). Engine fixes go upstream first; see
+the `Tameru X.Y.Z` reference inside `description:` from upstream's `__version__`; `version:` is the
+plugin's own line and is bumped at release. The rest of the manifest is hand-written (no `kind:` key). Engine fixes go upstream first; see
 [upstream-patches/README.md](upstream-patches/README.md) for how the 1.4.0 commits are exported.
 
 ## CI (`.github/workflows/ci.yml`)
