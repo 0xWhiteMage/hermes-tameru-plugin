@@ -2,7 +2,7 @@
 
 <p align="center">
   <img src="docs/assets/hero.png" alt="Tameru (ためる): big tool outputs, kept small." width="100%"><br><br>
-  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-v1.11.0-blue.svg" alt="Version 1.11.0"></a>
+  <a href="CHANGELOG.md"><img src="https://img.shields.io/badge/version-v0.1.0-blue.svg" alt="Version 0.1.0"></a>
   <a href="https://github.com/NousResearch/hermes-agent"><img src="https://img.shields.io/badge/Hermes-v0.23.1-8A2BE2.svg" alt="Tested on Hermes v0.23.1"></a>
   <a href="https://github.com/0xWhiteMage/tameru-compaction-system"><img src="https://img.shields.io/badge/engine-tameru_1.10.0-orange.svg" alt="Tameru engine 1.10.0"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-Apache--2.0-blue.svg" alt="Apache 2.0 licence"></a>
