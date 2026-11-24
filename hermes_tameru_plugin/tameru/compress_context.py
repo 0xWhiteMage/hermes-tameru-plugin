@@ -58,7 +58,7 @@ from .gap_kind import call_gap_marker, gap_accepts_kind
 from .markers import REDACTED_MARKER, marker_name as _marker_name
 from .industrial import IndustrialLimits, IndustrialResult, industrial_preprocess
 from .structured_reports import REPORT_FORMATS, loads_for_rewrite, report_format
-from .supersession import apply_supersession, _supersedes
+from .supersession import apply_supersession, _document_scopes, _supersedes
 from .unicode_profile import (
     count_token_units,
     script_of,
@@ -1511,6 +1511,7 @@ def _fact_superseded_in(
     line: str,
     kept_lines: list[str],
     orig_index: dict[str, int] | None = None,
+    scope_of: dict | None = None,
 ) -> bool:
     """``True`` when a line surviving in the output explicitly marks ``line`` stale
     (``supersession._supersedes``: an is-now/obsolete/override marker plus shared distinctive
@@ -1533,6 +1534,7 @@ def _fact_superseded_in(
                 if lp is None or orig_index is None
                 else orig_index.get(o, 1 << 62) > lp
             ),
+            scopes=(scope_of.get(o), scope_of.get(line)) if scope_of is not None else None,
         )
         for o in kept_lines
     )
@@ -1557,13 +1559,14 @@ def _restore_facts(protected, after: str, before: str | None = None) -> str:
         return after
     kept = after.split("\n")
     orig_index = {ln: i for i, ln in enumerate(before.split("\n"))} if before is not None else None
+    scope_of = _document_scopes(before) if before is not None else None
     missing = [(i, -1, ln) for i, _k, _v, ln in protected
-               if ln != after and ln not in after and not _fact_superseded_in(ln, kept, orig_index)]
+               if ln != after and ln not in after and not _fact_superseded_in(ln, kept, orig_index, scope_of)]
     extra = list(err) + sorted(out.difference(err))
     if extra:
         index = orig_index or {}
         for pos, ln in enumerate(extra):
-            if ln != after and ln not in after and not _fact_superseded_in(ln, kept, orig_index):
+            if ln != after and ln not in after and not _fact_superseded_in(ln, kept, orig_index, scope_of):
                 missing.append((index.get(ln, float("inf")), pos, ln))
     return after if not missing else after + "\n" + "\n".join(_missing_in_original_order(missing))
 
@@ -1582,13 +1585,14 @@ def _restore_fact_lines(before: str, after: str) -> str:
     kept = after.split("\n")
     extra = list(err) + sorted(out.difference(err))
     index = {ln: i for i, ln in enumerate(before.split("\n"))}
+    scope_of = _document_scopes(before)
     missing = [(i, -1, ln) for i, _k, _v, ln in protected
-               if ln != before and ln not in after and not _fact_superseded_in(ln, kept, index)]
+               if ln != before and ln not in after and not _fact_superseded_in(ln, kept, index, scope_of)]
     # E6: an error exemplar the stage saw in ``before`` and lost goes back too —
     # independent of fact density, same supersession guard, same original order.
     # E12: protected outcome lines get the same treatment.
     for pos, ln in enumerate(extra):
-        if ln in before and ln not in after and not _fact_superseded_in(ln, kept, index):
+        if ln in before and ln not in after and not _fact_superseded_in(ln, kept, index, scope_of):
             missing.append((index.get(ln, float("inf")), pos, ln))
     return after if not missing else after + "\n" + "\n".join(_missing_in_original_order(missing))
 
@@ -1640,9 +1644,10 @@ def _apply_fact_floor(*, compressed: str, facts, query: str, budget_chars: int |
     def _ctx(i: int) -> bool:
         return i - 1 in orig_err or i + 1 in orig_err or i + 2 in orig_err
 
+    scope_of = _document_scopes(original_text) if original_text is not None else None
     missing = [
         f for f in facts
-        if f[3] not in compressed and not _fact_superseded_in(f[3], kept, orig_index)
+        if f[3] not in compressed and not _fact_superseded_in(f[3], kept, orig_index, scope_of)
         and (not _log_fingerprint(f[3]) or _log_fingerprint(f[3]) not in kept_fps or _ctx(f[0]))
     ]
     if not missing:
