@@ -1811,10 +1811,14 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             return None
         fingerprints = error_fingerprints(pl.inner, status_rows=False)
         out = self._compress(pl.inner, query, hint, None)
-        if not self._acceptable(out, fingerprints):
+        acceptable = self._acceptable(out, fingerprints)
+        if not acceptable and (out is None or not out.fail_open):
             return None
+        # A fail-open at the savings floor is a verdict on THIS compression, not on tighter
+        # ones: the forced-budget retries below compress further, so their savings and risk
+        # are re-judged on their own merits.
         rendered = self._body_row(parent_line, pl, ref, "extract", out.text)
-        if len(rendered) <= limit:
+        if acceptable and len(rendered) <= limit:
             return rendered
         room = limit - (len(rendered) - len(out.text))
         if room <= 0:
