@@ -110,6 +110,8 @@ def message_signatures(messages: list[dict]) -> tuple[str, ...] | None:
 
 def display_text(value: str) -> str:
     """Make terminal/control formatting visible; the stored original remains untouched."""
+    if not isinstance(value, str):
+        raise TypeError(f"value must be str, got {type(value).__name__}")
     return "".join(
         f"\\u{ord(ch):04x}" if (ord(ch) < 32 and ch not in "\n\t")
         or 0x7f <= ord(ch) < 0xa0 or 0x202a <= ord(ch) <= 0x202e

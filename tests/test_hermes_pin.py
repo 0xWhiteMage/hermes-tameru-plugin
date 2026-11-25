@@ -35,3 +35,16 @@ def test_message_budget_tokens_rejects_malformed_rows():
         with pytest.raises(TypeError, match="must be"):
             message_budget_tokens(bad)
     assert message_budget_tokens([{"role": "user", "content": "hi"}]) > 0
+
+
+def test_index_and_display_reject_wrong_types():
+    import pytest
+    from hermes_tameru_plugin.supersede import build_index
+    from hermes_tameru_plugin.activity import display_text
+    with pytest.raises(TypeError, match="sequence of dicts"):
+        build_index(None)
+    with pytest.raises(TypeError, match="sequence of dicts"):
+        build_index("x")
+    with pytest.raises(TypeError, match="value must be str"):
+        display_text(None)
+    assert display_text("a\x07b") == "a\\u0007b"
