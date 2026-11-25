@@ -551,8 +551,11 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             # Hermes' own moments act (its compaction, or a user-configured prune). Zeroing it
             # is window-independent, so it cannot wait inside the resolution gate below — a
             # host with lazy window resolution leaves ``_resolved_context_length`` None and the
-            # armed default survived.
-            self.proactive_prune_tokens = 0
+            # armed default survived. Only the plugin-owned value is cleared: ``_scaled_prune``
+            # is false when the user configured the trigger themselves, and a user-configured
+            # prune is one of the moments that may still act under ``plan``.
+            if getattr(self, "_scaled_prune", False):
+                self.proactive_prune_tokens = 0
             return
         if getattr(self, "_scaled_prune", False) and getattr(self, "_resolved_context_length", 0) is not None:
             try:
