@@ -63,3 +63,13 @@ def test_ledger_seam_rejects_wrong_types():
         merge_into_summary(5, "x")
     with pytest.raises(TypeError, match="ledger must be str"):
         merge_into_summary("x", 5)
+
+
+def test_build_query_max_chars_rejects_non_int():
+    import pytest
+    from hermes_tameru_plugin.query import build_query
+    m = [{"role": "user", "content": "x"}]
+    for bad in (None, "x", 1.5, True, -1):
+        with pytest.raises(TypeError, match="max_chars"):
+            build_query(m, 0, max_chars=bad)
+    assert build_query(m, 0, max_chars=0) == [] or build_query(m, 0)
