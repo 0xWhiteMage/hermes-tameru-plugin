@@ -449,6 +449,11 @@ def _local_message_budget_tokens(messages: list[dict]) -> int:
 
 def message_budget_tokens(messages: list[dict]) -> int:
     """Hermes' prompt-token estimate of ``messages`` as its prune gates measure it (message bodies only)."""
+    if not isinstance(messages, list):
+        raise TypeError(f"messages must be a list of dict, got {type(messages).__name__}")
+    for row in messages:
+        if not isinstance(row, dict):
+            raise TypeError(f"message rows must be dict, got {type(row).__name__}")
     one = _hermes("agent.context_compressor", "_estimate_msg_budget_tokens")
     if callable(one):
         return sum(int(one(m)) for m in messages)
