@@ -147,6 +147,7 @@
    "R1",
    "R3",
    "R4",
+   "R5",
    "R6"
   ],
   "reference": [
@@ -310,7 +311,7 @@
   "reference": 6339.8
  },
  "small_48k/smallrows/48000/cost/tameru_1_4_product": {
-  "plugin": 43610.1,
+  "plugin": 43613.3,
   "reference": 41852.1
  }
 }
