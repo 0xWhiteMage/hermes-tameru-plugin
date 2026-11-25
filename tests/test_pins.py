@@ -157,3 +157,13 @@ def test_the_json_reply_to_a_pin_carries_the_fresh_snapshot():
     engine = _engine()
     reply = _run(engine, "pin keep the API stable")
     assert reply["ok"] and reply["pin"]["items"] == ["keep the API stable"] and reply["capabilities"]["pins"] is True
+
+
+def test_merge_pins_rejects_wrong_types():
+    import pytest
+    from hermes_tameru_plugin.pins import merge_pins, PinState
+    with pytest.raises(TypeError, match="summary must be str"):
+        merge_pins(None, PinState())
+    with pytest.raises(TypeError, match="state must be PinState"):
+        merge_pins("s", [])
+    assert merge_pins("plain summary", PinState()) == "plain summary"

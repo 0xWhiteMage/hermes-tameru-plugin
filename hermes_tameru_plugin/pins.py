@@ -80,6 +80,10 @@ class PinState:
 
 def merge_pins(summary: str, state: PinState | None) -> str:
     """``summary`` with the pins as its one pinned section; unchanged when there are no pins."""
+    if not isinstance(summary, str):
+        raise TypeError(f"summary must be str, got {type(summary).__name__}")
+    if state is not None and not isinstance(state, PinState):
+        raise TypeError(f"state must be PinState or None, got {type(state).__name__}")
     if state is None or not state.items:
         return summary
     body = "\n".join(f"{i}. {line}" for i, line in enumerate(state.items, 1))
