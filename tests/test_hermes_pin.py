@@ -26,3 +26,12 @@ def test_ci_reads_the_pin_file_and_carries_no_hermes_hash_of_its_own():
     ci = (REPO / ".github" / "workflows" / "ci.yml").read_text(encoding="utf-8")
     assert "HERMES_PIN" in ci and "steps.pin.outputs.sha" in ci
     assert "HERMES_PINNED_SHA" not in ci
+
+
+def test_message_budget_tokens_rejects_malformed_rows():
+    import pytest
+    from hermes_tameru_plugin.hermes_compat import message_budget_tokens
+    for bad in (None, "x", [None], [{"role": "user"}, "str-row"]):
+        with pytest.raises(TypeError, match="must be"):
+            message_budget_tokens(bad)
+    assert message_budget_tokens([{"role": "user", "content": "hi"}]) > 0
