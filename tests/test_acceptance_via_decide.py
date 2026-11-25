@@ -36,9 +36,11 @@ def test_the_acceptance_goes_through_decide_with_the_hermes_policy():
     assert "from .tameru.decide import HERMES_POLICY, decide" in text
     body = text[text.index("def _acceptable("):text.index("def _body_row(")]
     assert "decide(out, dataclass_replace(HERMES_POLICY, max_risk=ceiling), fingerprints=fingerprints)" in body
-    # the extract row and its fixed-budget retries accept only through ``_acceptable``
+    # the extract row and its fixed-budget retries accept only through ``_acceptable``;
+    # ``out.fail_open`` may only gate whether the retries run, never acceptance
     row = text[text.index("def _extract_row("):text.index("def _brief_row(")]
-    assert row.count("self._acceptable(") == 2 and "fail_open" not in row
+    assert row.count("self._acceptable(") == 2
+    assert row.count("out.fail_open") == 1 and "not out.fail_open" in row
 
 
 def test_the_brief_exception_is_the_only_fingerprint_comparison():
