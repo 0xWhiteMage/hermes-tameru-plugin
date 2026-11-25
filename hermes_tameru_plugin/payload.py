@@ -82,6 +82,8 @@ def parse_payload(content: str) -> HermesPayload:
     ``patch``, a short result) stays whole in ``inner``, but its ``META_KEYS`` fields
     (``total_count``, ``success``, ``exit_code``, ...) still land in ``meta``.
     """
+    if content is not None and not isinstance(content, str):
+        raise TypeError(f"content must be str, got {type(content).__name__}")
     payload = unwrap_tool_payload(content)
     meta = payload.meta if payload.wrapped else _meta_fields(content)
     return HermesPayload(payload.inner, payload.field, dict(meta), payload.wrapped)
@@ -106,6 +108,10 @@ def meta_line(meta: dict, *, max_chars: int = 300) -> str:
     envelope. Long strings are cut (120 chars, then shorter while the line exceeds ``max_chars``);
     when that is not enough the trailing keys are dropped. "" when no key applies.
     """
+    if not isinstance(meta, dict):
+        raise TypeError(f"meta must be dict, got {type(meta).__name__}")
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool):
+        raise TypeError(f"max_chars must be int, got {type(max_chars).__name__}")
     items = {key: meta[key] for key in META_KEYS if key in meta and _is_scalar(meta[key])}
     while items:
         for limit in _STR_LIMITS:

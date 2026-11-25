@@ -63,3 +63,17 @@ def test_ledger_seam_rejects_wrong_types():
         merge_into_summary(5, "x")
     with pytest.raises(TypeError, match="ledger must be str"):
         merge_into_summary("x", 5)
+
+
+def test_payload_seam_rejects_wrong_types():
+    import pytest
+    from hermes_tameru_plugin.payload import parse_payload, meta_line
+    with pytest.raises(TypeError, match="content must be str"):
+        parse_payload(5)
+    with pytest.raises(TypeError, match="meta must be dict"):
+        meta_line(None)
+    with pytest.raises(TypeError, match="max_chars must be int"):
+        meta_line({}, max_chars="x")
+    with pytest.raises(TypeError, match="max_chars must be int"):
+        meta_line({}, max_chars=True)
+    assert meta_line({"exit_code": 1}) == '{"exit_code":1}'
