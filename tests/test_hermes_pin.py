@@ -48,3 +48,18 @@ def test_index_and_display_reject_wrong_types():
     with pytest.raises(TypeError, match="value must be str"):
         display_text(None)
     assert display_text("a\x07b") == "a\\u0007b"
+
+
+def test_ledger_seam_rejects_wrong_types():
+    import pytest
+    from hermes_tameru_plugin.ledger import build_ledger, merge_into_summary
+    with pytest.raises(TypeError, match="turns must be"):
+        build_ledger(None)
+    with pytest.raises(TypeError, match="max_chars must be int"):
+        build_ledger([], max_chars="x")
+    with pytest.raises(TypeError, match="previous must be str"):
+        build_ledger([], previous=5)
+    with pytest.raises(TypeError, match="summary must be str"):
+        merge_into_summary(5, "x")
+    with pytest.raises(TypeError, match="ledger must be str"):
+        merge_into_summary("x", 5)
