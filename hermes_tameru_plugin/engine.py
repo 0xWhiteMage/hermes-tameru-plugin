@@ -546,12 +546,14 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         # catalogue lookup over the network. Hermes sizes the engine with update_model right after building it, and
         # that call lands here again with the window known. A host without lazy window resolution (no
         # ``_resolved_context_length`` attribute) has the window already and is scaled straight away.
+        if getattr(self, "_scaled_prune", False) and self._settings.policy_mode == "plan":
+            # The plugin-supplied prune trigger is adaptive machinery: under ``plan`` only
+            # Hermes' own moments act (its compaction, or a user-configured prune). Zeroing
+            # needs no window, so it applies before the resolution gate — a host that never
+            # calls update_model must not keep the scaled trigger.
+            self.proactive_prune_tokens = 0
+            return
         if getattr(self, "_scaled_prune", False) and getattr(self, "_resolved_context_length", 0) is not None:
-            if self._settings.policy_mode == "plan":
-                # The plugin-supplied prune trigger is adaptive machinery: under ``plan`` only
-                # Hermes' own moments act (its compaction, or a user-configured prune).
-                self.proactive_prune_tokens = 0
-                return
             try:
                 self.proactive_prune_tokens = scaled_prune_tokens(
                     self._settings, self._policy_threshold_tokens(),
