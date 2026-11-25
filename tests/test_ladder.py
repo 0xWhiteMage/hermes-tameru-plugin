@@ -313,6 +313,11 @@ def test_an_oversized_extract_is_retried_until_it_fits():
     engine, msgs, idx = _one(
         "what does reserve_stock do when the ledger write fails?", "read_file",
         {"path": "src/orders/service.py"}, hp.read_file_result(source),
+        # The engine's estimator now counts lone joiners (``,``, ``.``, ``-``) in
+        # the extract's marker/gutter-dense output, so this fixture's estimated
+        # savings lands at ~8.7% — just under the default 10% bar. Lowering it
+        # keeps the test on the retry path it exists to cover.
+        settings=TameruSettings(min_savings=0.05),
     )
     changed, out = demote(engine, msgs, idx)
     row = out[idx]["content"]

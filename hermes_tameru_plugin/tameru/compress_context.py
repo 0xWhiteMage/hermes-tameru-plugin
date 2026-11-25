@@ -229,6 +229,11 @@ _ARTIFACT_NOISE_RES = (
 
 _ARTIFACT_NOISE_TOKENS = ("…", "[tameru:", "⟪")
 
+# A run of three or more backticks or tildes opens a fenced block; the same
+# run (bare, same char, own length or longer) closes it. `match` reads an
+# opener, `fullmatch` a closer — closing fences take no info string.
+_FENCE_RUN_RE = re.compile(r"(`{3,}|~{3,})")
+
 
 def _artifact_noise_lines(text: str, res: tuple = _ARTIFACT_NOISE_RES) -> list[str]:
     """Lines of ``text`` that carry an engine-artifact span. Callers gate this
@@ -244,11 +249,35 @@ def _artifact_noise_lines(text: str, res: tuple = _ARTIFACT_NOISE_RES) -> list[s
 def _strip_artifact_noise(text: str, res: tuple = _ARTIFACT_NOISE_RES) -> str:
     """Drop every line carrying an engine-artifact span. Whole-line removal —
     excising the span mid-line would emit text that is not an input prefix,
-    which the extractive contract forbids."""
-    return "\n".join(
-        ln for ln in text.split("\n")
-        if not any(rx.search(strip_ansi(ln)) for rx in res)
-    )
+    which the extractive contract forbids. Lines inside a fenced block are
+    quoted content, never structure — a marker-shaped line in a fenced
+    example is literal text (the same fence rules the render uses: the
+    closer is the opener's own marker char at its own length or longer,
+    bare)."""
+    kept: list[str] = []
+    in_fence: str | None = None
+    for ln in text.split("\n"):
+        probe = _GUTTER_RE.sub("", strip_ansi(ln), count=1).strip()
+        opener = _FENCE_RUN_RE.match(probe)
+        if in_fence is not None:
+            closer = _FENCE_RUN_RE.fullmatch(probe)
+            if (
+                closer is not None
+                and closer.group(0)[0] == in_fence[0]
+                and len(closer.group(0)) >= len(in_fence)
+            ):
+                in_fence = None
+            kept.append(ln)
+        elif opener is not None:
+            marker = opener.group(0)
+            # A backtick fence's info string cannot contain a backtick —
+            # `` ```code``` `` on one line is inline code, not an opener.
+            if marker[0] != "`" or "`" not in probe[len(marker) :]:
+                in_fence = marker
+            kept.append(ln)
+        elif not any(rx.search(strip_ansi(ln)) for rx in res):
+            kept.append(ln)
+    return "\n".join(kept)
 
 
 # Perf (v1.5.0): the pure text-level analyses below are memoized for texts of
@@ -1179,32 +1208,18 @@ def _error_protected_set(lines: list[str]) -> set[int]:
     return {i for i, ln in enumerate(lines) if ln in frozenset(prot)} if prot else set()
 
 
-# 1.10.0 (E12): the protected outcome/landmark lines of the caller's original text —
-# the same exemption contract as ``_ERR_PROTECTED`` (a destructive selector
-# pre-filter or adapter must not delete outcome evidence), populated from
-# ``_outcome_lines`` once per call and consulted through ``_outcome_protected_set``.
+# 1.10.0 (E12): the protected outcome/landmark lines of the caller's original text,
+# populated from ``_outcome_lines`` once per call. The budget-bounded restores
+# (``_restore_facts`` / ``_restore_fact_lines``) consult it to re-add whatever a
+# stage deleted — the verbatim stage exemptions were dropped (floor-only
+# calibration): a protected line inside a repeated stream or table broke the
+# fold around it and the retention cost compounded past the host's compaction
+# threshold, while the floor re-adds the same bytes without breaking folds.
 _OUTCOME_PROTECTED: "contextvars.ContextVar" = contextvars.ContextVar(
     "tameru_outcome_protected", default=frozenset()
 )
 
 
-def _outcome_protected_set(lines: list[str]) -> set[int]:
-    """Indices of ``lines`` that are protected outcome/landmark lines.
-
-    E13: only a text unique in ``lines`` gets the verbatim exemption. A
-    repeated protected text is carried by the fold's ``[×N]`` / ``[last]``
-    marker (same bytes, so substring retention holds) and a stage that
-    deletes every copy still restores it through ``_OUTCOME_PROTECTED`` —
-    exempting all 20 identical table headers was pure cost.
-    """
-    prot = _OUTCOME_PROTECTED.get()
-    if not prot:
-        return set()
-    counts: dict[str, int] = {}
-    for ln in lines:
-        if ln in prot:
-            counts[ln] = counts.get(ln, 0) + 1
-    return {i for i, ln in enumerate(lines) if ln in prot and counts[ln] == 1}
 _FRAME_HIT_SLOTS = 1
 _STRUCT_COLLAPSE_MIN = 12  # structural (query-less) pass: templates seen fewer times stay verbatim
 _FRAME_START_RE = re.compile(r"^\s*(?:at\s+\S|File\s+\"|from\s+\S+:\d+|#\d+\s+\S+\(\d+\):|#\d+\s+\{main\})")
@@ -1762,10 +1777,96 @@ def _missing_in_original_order(missing: list[tuple[int, int, str]]) -> list[str]
 
 _SECTION_HEAD_RE = re.compile(r"^\s*\[")
 
-_UNESCAPED_TRIPLE_DQ = re.compile(r'(?<!\\)"""')
-_UNESCAPED_TRIPLE_SQ = re.compile(r"(?<!\\)'''")
-_TRIPLE_QUOTED_SAME_LINE_RE = re.compile(
-    r'"""(?:[^"]|"(?!""))*"""|\'\'\'(?:[^\']|\'(?!\'\'))*\'\'\'')
+def _triple_close_positions(line: str, delim: str) -> list[int]:
+    """Positions of ``delim`` occurrences that close a TOML multiline string.
+
+    A basic string's quotes are escaped only by an ODD run of preceding
+    backslashes — an even run is escaped backslashes (literal content), so a
+    bare ``(?<!\\\\)`` lookbehind misses every closer after an escaped
+    backslash pair. A literal string has no escapes at all: every occurrence
+    closes.
+    """
+    out = []
+    i = line.find(delim)
+    while i >= 0:
+        if delim == "'''" or not _odd_backslashes(line, i):
+            out.append(i)
+            i = line.find(delim, i + 3)
+        else:
+            # Escaped: step one quote so an adjacent real closer — the
+            # ``\\"`` of ``\\"`` immediately followed by the closing run —
+            # is not skipped over.
+            i = line.find(delim, i + 1)
+    return out
+
+
+def _unescaped_triple_count(line: str, delim: str) -> int:
+    return len(_triple_close_positions(line, delim))
+
+
+def _has_unescaped_triple(line: str, delim: str) -> bool:
+    return bool(_triple_close_positions(line, delim))
+_TRIPLE_RUN_RE = re.compile(r'"""|\'\'\'')
+
+
+def _odd_backslashes(ln: str, pos: int) -> bool:
+    """``True`` when an odd run of ``\\`` precedes ``pos`` — the delimiter
+    at ``pos`` is escaped (a backslash-quoted triple opens nothing)."""
+    i = pos - 1
+    while i >= 0 and ln[i] == "\\":
+        i -= 1
+    return (pos - i) % 2 == 0
+
+
+def _blank_same_line_triples(ln: str) -> tuple[str, list[tuple[int, int]]]:
+    """``ln`` with closed same-line ``'''``/``\"\"\"`` runs blanked, plus the
+    (start, end) of each UNPAIRED delimiter left standing — the run's real
+    openers. Single pass, no regex backtracking: a delimiter escaped by an
+    odd ``\\`` run is content; otherwise consecutive same-kind delimiters
+    pair off as closed runs and the leftover is the opener.
+
+    A ``'''`` run reads TWO ways: Python treats ``\\'''`` as escaped so the
+    run stays open; a TOML literal string never escapes so it closes. The
+    literal read wins here — ``'''abc\\'''`` blanks like ``'C:\\path\\'``
+    does in ``_toml_code_part`` — because a missed same-line literal feeds
+    live-looking ``k = v`` lines to the veto where a false opener only
+    masks content."""
+    runs = [
+        (m.start(), m.group(0))
+        for m in _TRIPLE_RUN_RE.finditer(ln)
+        # Basic strings escape (\\""" is content, never a delimiter); TOML
+        # literal strings never do — a \''' still closes the run.
+        if m.group(0) == "'''" or not _odd_backslashes(ln, m.start())
+    ]
+    spans: list[tuple[int, int]] = []
+    waiting: dict[str, list[int]] = {}
+    for s, q in runs:
+        if waiting.get(q):
+            s0 = waiting[q].pop()
+            if not waiting[q]:
+                del waiting[q]
+            spans.append((s0, s + 3))
+            # An opposite-kind run inside the closed span is string
+            # content — ``'''a"""'''`` holds no real ``"""`` opener.
+            other = "'''" if q == '"""' else '"""'
+            if other in waiting:
+                waiting[other] = [p for p in waiting[other] if not s0 <= p <= s]
+                if not waiting[other]:
+                    del waiting[other]
+        else:
+            waiting.setdefault(q, []).append(s)
+    unpaired = [(s, s + 3) for qs in waiting.values() for s in qs]
+    if not spans:
+        return ln, unpaired
+    spans.sort()
+    parts: list[str] = []
+    pos = 0
+    for s, e in spans:
+        parts.append(ln[pos:s])
+        parts.append(" " * (e - s))
+        pos = e
+    parts.append(ln[pos:])
+    return "".join(parts), unpaired
 _SINGLE_QUOTED_RE = re.compile(r'"(?:\\.|[^"\\])*"|\'[^\']*\'')
 
 
@@ -1779,11 +1880,54 @@ def _toml_code_part(line: str) -> str:
     ``_restored_block``. An unclosed triple quote is never blanked: it
     legitimately opens a multiline string. Not a full TOML lex, just
     enough to keep comment quotes from desyncing."""
-    blank = lambda m: " " * len(m.group(0))
-    scrubbed = _TRIPLE_QUOTED_SAME_LINE_RE.sub(blank, line)
-    scrubbed = _SINGLE_QUOTED_RE.sub(blank, scrubbed)
+    scrubbed, _ = _blank_same_line_triples(line)
+    scrubbed = _SINGLE_QUOTED_RE.sub(
+        lambda m: " " * len(m.group(0)), scrubbed
+    )
     cut = scrubbed.find("#")
     return line if cut < 0 else line[:cut]
+
+
+def _quote_aware_code_part(ln: str) -> str:
+    """``ln`` with quoted literals blanked, cut at the first real comment
+    or unclosed quote — the same scrub the string mask uses: a ``#``/``;``
+    inside a literal is content, a literal that swallowed a ``'''``/``\"\"\"``
+    run hides it, and an unclosed ``'``/``\"`` ends the code part so a
+    ``\"\"\"`` inside it never reads as an opener."""
+    if '"""' not in ln and "'''" not in ln and "'" not in ln and '"' not in ln \
+            and "#" not in ln and ";" not in ln:
+        return ln
+    scrubbed, tri_runs = _blank_same_line_triples(ln)
+
+    def _blank_literal(m):
+        s, e = m.span()
+        # A literal that swallowed a run whole ('a """') is blanked; a bare
+        # ""/'' match only overlapping the run's own quotes IS the opener.
+        if any(s <= ts and e >= te for ts, te in tri_runs) or not any(
+            s < te and e > ts for ts, te in tri_runs
+        ):
+            return " " * (e - s)
+        return m.group(0)
+
+    scrubbed = _SINGLE_QUOTED_RE.sub(_blank_literal, scrubbed)
+    m = re.search(r"[#;]", scrubbed)
+    cut = m.start() if m is not None else len(scrubbed)
+    m2 = re.search(r"(?<!')'(?!')|(?<!\")\"(?!\")", scrubbed)
+    if m2 is not None:
+        cut = min(cut, m2.start())
+    return scrubbed[:cut]
+
+
+def _unsafe_restored_line(ln: str) -> bool:
+    """The line-level safety screens a verbatim restore must honour: the
+    credential scan, the env-dump reducer's sensitive key/value test, and
+    the trust-risk (injection-shaped) check — the same predicates the
+    fact/error protection rules apply."""
+    probe = ln if ln.isascii() else unicodedata.normalize("NFKC", ln)
+    if _secret_scan(probe) or _is_trust_risk_line(probe):
+        return True
+    em = _env_match(probe)
+    return em is not None and _env_is_sensitive(em.group(1), em.group(2))
 
 
 def _restored_block(
@@ -1791,6 +1935,7 @@ def _restored_block(
     lines: list[str],
     line_headers: dict[str, str] | None,
     orig_index: dict[str, int] | None,
+    orig_lines: list[str] | None = None,
 ) -> str:
     """``after`` with ``lines`` restored into their surviving sections.
 
@@ -1823,14 +1968,75 @@ def _restored_block(
         # quotes inside a trailing # comment are text, and \"-escaped
         # quotes inside a basic string don't end it.
         code = l if (inside_basic or inside_literal) else _toml_code_part(l)
-        if not inside_literal and len(_UNESCAPED_TRIPLE_DQ.findall(code)) % 2:
+        if not inside_literal and _unescaped_triple_count(code, '"""') % 2:
             inside_basic = not inside_basic
-        if not inside_basic and len(_UNESCAPED_TRIPLE_SQ.findall(code)) % 2:
+        if not inside_basic and _unescaped_triple_count(code, "'''") % 2:
+            inside_literal = not inside_literal
+    # A restored ``k = "\"\" ..."`` opener without the value's body leaves an
+    # unterminated string that swallows every emitted line after it — the
+    # whole extract stops parsing. The opener restores its continuation
+    # lines verbatim (they are its own content), and a continuation line on
+    # its own can never be a valid TOML statement: it joins a surviving
+    # opener's body or is skipped. Replay triple-quote state over the
+    # original line list — ``oi`` keeps only a repeated line's LAST index,
+    # so two strings that share a closing line would collapse into one span.
+    openers: dict[int, int] = {}      # opener idx -> closer idx
+    body_of: dict[int, list[str]] = {}  # opener idx -> continuation lines
+    cont_of: dict[int, int] = {}      # continuation idx -> opener idx
+    enclosing: dict[int, str] = {}    # idx -> last UNQUOTED header
+    replay = (
+        enumerate(orig_lines)
+        if orig_lines is not None
+        else ((oidx, ol) for ol, oidx in sorted(oi.items(), key=lambda kv: kv[1]))
+    )
+    inside_basic = inside_literal = False
+    pending: tuple[int, str] | None = None
+    pending_body: list[str] = []
+    close_kind: dict[int, str] = {}   # opener idx -> its delimiter
+    cur_hdr = ""
+    for oidx, ol in replay:
+        enclosing[oidx] = cur_hdr
+        if pending is not None:
+            pending_body.append(ol)
+            pend_code = ol
+            if (
+                (inside_literal and _has_unescaped_triple(pend_code, "'''"))
+                or (inside_basic and _has_unescaped_triple(pend_code, '"""'))
+            ):
+                openers[pending[0]] = oidx
+                body_of[pending[0]] = pending_body
+                for cidx in range(pending[0] + 1, oidx + 1):
+                    cont_of[cidx] = pending[0]
+                pending = None
+                pending_body = []
+                inside_basic = inside_literal = False
+            continue
+        ins = inside_basic or inside_literal
+        if ins:
+            code = ol
+        else:
+            code = _quote_aware_code_part(ol)
+        if not ins:
+            if header_of.get(ol) == ol:
+                cur_hdr = ol
+                enclosing[oidx] = cur_hdr
+            if _unescaped_triple_count(code, '"""') % 2 or _unescaped_triple_count(code, "'''") % 2:
+                pending = (oidx, ol)
+                dq = _unescaped_triple_count(code, '"""') % 2
+                sq = _unescaped_triple_count(code, "'''") % 2
+                inside_basic = bool(dq)
+                inside_literal = not inside_basic and bool(sq)
+                close_kind[oidx] = "'''" if inside_literal else '"""'
+                continue
+        if not inside_literal and _unescaped_triple_count(code, '"""') % 2:
+            inside_basic = not inside_basic
+        if not inside_basic and _unescaped_triple_count(code, "'''") % 2:
             inside_literal = not inside_literal
     insert_after: dict[int, list[str]] = {}
     insert_before: dict[int, list[str]] = {}
     appended: list[str] = []
     opened: set[str] = set()
+    claimed: set[int] = set()
 
     def _resolve(ln: str) -> str:
         """The original line a possibly window-bounded ``ln`` came from.
@@ -1867,7 +2073,78 @@ def _restored_block(
 
     for ln in lines:
         orig = _resolve(ln)
+        target0 = oi.get(orig)
+        emit = [ln]
+        if target0 in cont_of:
+            # Content of a multiline value is never a standalone statement:
+            # a surviving opener takes it straight into the string body,
+            # an opener restoring with it already emitted it verbatim, and
+            # otherwise the whole value — opener through closer — goes back
+            # in its place (restoring only the piece is not valid TOML).
+            oidx = cont_of[target0]
+            otext = next((ol for ol, i2 in oi.items() if i2 == oidx), None)
+            if otext is None:
+                # The replay maps true positions; a duplicate opener line may
+                # resolve past ``oi``'s last-occurrence index.
+                if orig_lines is None or oidx >= len(orig_lines):
+                    continue
+                otext = orig_lines[oidx]
+            oi_pos = [
+                i for i, l in enumerate(after_lines)
+                if l == otext and not in_string[i]
+            ]
+            if oi_pos:
+                insert_after.setdefault(oi_pos[-1], []).append(ln)
+                continue
+            if oidx in claimed:
+                continue
+            # Pulling body lines back verbatim bypasses the credential and
+            # injection screens a normal fact restore runs — a line dropped
+            # BY those screens stays dropped, line by line, while the rest
+            # of the value restores whole.
+            emit = [otext] + [
+                b for b in body_of[oidx] if not _unsafe_restored_line(b)
+            ]
+            # The closing line carried the delimiter: filtering it must not
+            # leave the restored string unterminated.
+            if emit[-1] != body_of[oidx][-1]:
+                emit.append(close_kind.get(oidx, '"""'))
+            claimed.add(oidx)
+            # ``_line_scopes`` is not string-aware — a fake ``[x.w]`` inside
+            # the value claims the lines after it. The real enclosing scope
+            # is the last unquoted header.
+            h = enclosing.get(oidx) or header_of.get(orig)
+            if h == otext:
+                h = None
+            cand = [i for i, l in enumerate(after_lines) if l == h] if h else []
+            if not h:
+                appended.extend(emit)
+            elif not cand:
+                if h not in opened:
+                    appended.append(h)
+                    opened.add(h)
+                appended.extend(emit)
+            else:
+                insert_after.setdefault(cand[-1], []).extend(emit)
+            continue
+        elif target0 in openers:
+            if target0 in claimed:
+                # A continuation already pulled the whole span.
+                continue
+            # Same safety screen as above — a body line a deliberate strip
+            # removed is never re-emitted; the rest of the value restores.
+            emit = [ln] + [
+                b for b in body_of[target0] if not _unsafe_restored_line(b)
+            ]
+            if emit[-1] != body_of[target0][-1]:
+                emit.append(close_kind.get(target0, '"""'))
+            claimed.add(target0)
         h = header_of.get(orig)
+        if h is not None and oi.get(h) in cont_of:
+            # ``_line_scopes`` is not string-aware: a ``[x.w]`` that only
+            # ever sat inside a multiline value still claims the lines
+            # after it. The real scope is the last unquoted header.
+            h = enclosing.get(target0) or h
         if h == orig:
             # A section head maps to itself only to mark it as a boundary;
             # it still restores bare — re-opening under itself would nest
@@ -1875,7 +2152,7 @@ def _restored_block(
             h = None
         cand = [i for i, l in enumerate(after_lines) if l == h] if h else []
         if not h:
-            appended.append(ln)
+            appended.extend(emit)
             continue
         if not cand:
             # The section itself was dropped: re-emit its header with the
@@ -1883,7 +2160,7 @@ def _restored_block(
             if h not in opened:
                 appended.append(h)
                 opened.add(h)
-            appended.append(ln)
+            appended.extend(emit)
             continue
         target = oi.get(orig)
         if h.lstrip().startswith("[["):
@@ -1901,9 +2178,9 @@ def _restored_block(
                 if h not in opened:
                     appended.append(h)
                     opened.add(h)
-                appended.append(ln)
+                appended.extend(emit)
             else:
-                insert_before.setdefault(nxt[0], []).extend((h, ln))
+                insert_before.setdefault(nxt[0], []).extend((h,) + tuple(emit))
             continue
         # A plain table: the surviving section owns the setting — insert at
         # the section's end, before the next header line.
@@ -1918,7 +2195,7 @@ def _restored_block(
             and (after_lines[j] not in header_texts or in_string[j])
         ):
             j += 1
-        insert_after.setdefault(j - 1, []).append(ln)
+        insert_after.setdefault(j - 1, []).extend(emit)
     if insert_after or insert_before:
         merged: list[str] = []
         for i, l in enumerate(after_lines):
@@ -1984,7 +2261,8 @@ def _restore_facts(protected, after: str, before: str | None = None) -> str:
                     and not (record_doc and _RECORD_BOUNDARY_RE.match(ln))):
                 missing.append((index.get(ln, float("inf")), pos, _bound_fact_line(ln)))
     return _restored_block(
-        after, _missing_in_original_order(missing), line_headers, orig_index
+        after, _missing_in_original_order(missing), line_headers, orig_index,
+        before.split("\n") if before is not None else None,
     )
 
 
@@ -2020,7 +2298,8 @@ def _restore_fact_lines(before: str, after: str) -> str:
                 and not _fact_variant_present(ln, kept)):
             missing.append((index.get(ln, float("inf")), pos, _bound_fact_line(ln)))
     return _restored_block(
-        after, _missing_in_original_order(missing), line_headers, index
+        after, _missing_in_original_order(missing), line_headers, index,
+        before.split("\n"),
     )
 
 
@@ -2249,7 +2528,10 @@ def _apply_fact_floor(*, compressed: str, facts, query: str, budget_chars: int |
         _bound_fact_line(f[3], hit_terms, raw_terms, must=(f[1], f[2]))
         for f in sorted(chosen, key=lambda f: f[0])
     ]
-    out = _restored_block(compressed, bound_lines, line_headers, orig_index)
+    out = _restored_block(
+        compressed, bound_lines, line_headers, orig_index,
+        original_text.split("\n") if original_text else None,
+    )
     if out == compressed:
         return compressed
     if scored is None or kept_ids is None or min_savings_ratio is None or original_text is None:
@@ -2302,7 +2584,10 @@ def _apply_fact_floor(*, compressed: str, facts, query: str, budget_chars: int |
         need_chr -= len(ln) + 1
     if drop:
         compressed = "\n".join(ln for i, ln in enumerate(rendered) if i not in drop)
-        out = _restored_block(compressed, bound_lines, line_headers, orig_index)
+        out = _restored_block(
+            compressed, bound_lines, line_headers, orig_index,
+            original_text.split("\n") if original_text else None,
+        )
     return out
 
 
@@ -3006,7 +3291,7 @@ def preprocess_logs(lines: list[str], query: str = "", *, structural: bool = Fal
 
     # 1.10.0 (S5): indices into `lines` of the protected fact lines — they never fold (below).
     # The memoised fingerprint() is shared so each line is still fingerprinted once.
-    fact_protected_src = _fact_protected_set(lines, fingerprint) | _outcome_protected_set(lines)
+    fact_protected_src = _fact_protected_set(lines, fingerprint)
     # First pass: drop progress bars but remember whether we saw any. A
     # protected line is exempt — a "%" column in a landmark row (nodetool's
     # Owns%, an mtr hop's loss%) reads as a bar to the shape check but is the
@@ -3075,6 +3360,13 @@ def preprocess_logs(lines: list[str], query: str = "", *, structural: bool = Fal
     exemplar_idx: dict[str, int] = {}
     protected_out_indices: set[int] = set()  # E12: verbatim out slots the count pass must not rewrite
     last_seen: dict[str, str] = {}  # v1.4.0 (E10): last instance of each template
+    # Floor-only calibration: a protected instance inside a collapsing run is
+    # not pinned outside the fold (that broke the fold open); instead it
+    # becomes the exemplar text at count-attach time — zero extra lines, and
+    # the decision-relevant instance (the account a failure hit, the rare
+    # variant) is the one the fold shows.
+    prot_texts = frozenset(_ERR_PROTECTED.get()) | _OUTCOME_PROTECTED.get()
+    protected_inst: dict[str, str] = {}
 
     short_counts: dict[str, int] = {}
     for line in kept_lines:
@@ -3120,6 +3412,8 @@ def preprocess_logs(lines: list[str], query: str = "", *, structural: bool = Fal
             if fp in exemplar_idx:
                 seen[fp] += 1
                 last_seen[fp] = line
+                if prot_texts and line in prot_texts and fp not in protected_inst:
+                    protected_inst[fp] = line
                 i += 1
                 continue
             exemplar_idx[fp] = len(out)
@@ -3143,10 +3437,14 @@ def preprocess_logs(lines: list[str], query: str = "", *, structural: bool = Fal
         fp = fingerprint(ln)
         cnt = seen.get(fp, 1) if fp else 1
         if fp and cnt > 1 and not ln.lstrip().startswith("[\u00d7"):
-            counted_out.append(f"[\u00d7{cnt}] {ln}")
-            counted_src.append(out_src[idx])
+            pin = protected_inst.get(fp)
+            # Substitute only when the protected instance would otherwise vanish:
+            # if it already survives as the first or last instance, keep those.
             last = last_seen.get(fp)
-            if cnt >= 3 and last is not None and last != ln:
+            exemplar_text = pin if pin and pin != ln and pin != last else ln
+            counted_out.append(f"[\u00d7{cnt}] {exemplar_text}")
+            counted_src.append(out_src[idx])
+            if cnt >= 3 and last is not None and last != exemplar_text:
                 counted_out.append(f"[last] {last}")
                 counted_src.append(out_src[idx])
         else:
@@ -3539,7 +3837,6 @@ def preprocess_csv(
     # 1.10.0 (S5, E6): neither is a protected error exemplar.
     fact_protected = (
         _fact_protected_set(lines) | _error_protected_set(lines)
-        | _outcome_protected_set(lines)
     )
     kept = [lines[0]]
     flags = [False] * len(lines)
@@ -3593,7 +3890,6 @@ def preprocess_flat_records(text: str, query: str) -> str:
     # 1.10.0 (S5, E6): so does a protected error exemplar.
     fact_protected = (
         _fact_protected_set(lines) | _error_protected_set(lines)
-        | _outcome_protected_set(lines)
     )
     kept = [
         line
@@ -3710,7 +4006,6 @@ def preprocess_filler_comments(text: str, query: str) -> str:
     lines = text.split("\n")
     fact_protected = (
         _fact_protected_set(lines) | _error_protected_set(lines)
-        | _outcome_protected_set(lines)
     )
     kept = [
         ln
@@ -3846,8 +4141,8 @@ _HINT_ROUTES = {
 _GUTTER_RE = _AGENT_GUTTER_RE  # `N\t` (cat -n), `N|` (Hermes read_file), `N: `
 
 
-def _marker_tuple(markers: Iterable[str] | str | None) -> tuple[str, ...]:
-    """Materialise ``recursion_markers`` once: a bare string is ONE marker (not
+def _marker_tuple(markers: Iterable[str] | str | None, name: str = "recursion_markers") -> tuple[str, ...]:
+    """Materialise a marker option once: a bare string is ONE marker (not
     a set of characters), non-strings and empty strings are dropped (an empty
     marker would match every line)."""
     if not markers:
@@ -3860,7 +4155,7 @@ def _marker_tuple(markers: Iterable[str] | str | None) -> tuple[str, ...]:
         # A scalar (``recursion_markers=42``) is not an iterable — name the
         # option in the error instead of bubbling a bare TypeError up.
         raise TypeError(
-            f"recursion_markers must be an iterable of str, got {type(markers).__name__}"
+            f"{name} must be an iterable of str, got {type(markers).__name__}"
         ) from None
 
 
@@ -3981,7 +4276,7 @@ def _fold_repeated_sentences(lines: list[str]) -> list[str]:
     sentence splitter. Lossless apart from exact whitespace between copies.
     """
     folded: list[str] = []
-    fact_protected = _fact_protected_set(lines) | _outcome_protected_set(lines)
+    fact_protected = _fact_protected_set(lines)
     for index, line in enumerate(lines):
         t = " ".join(line.split())
         if index not in fact_protected and len(t) >= _REPEAT_LINE_MIN_CHARS:
@@ -11442,7 +11737,7 @@ def _compress_context_impl(
     code_hint = content_hint in _CODE_HINTS
     no_table = content_hint in _NO_TABLE_HINTS
     recursion_markers = _marker_tuple(recursion_markers)  # a generator is read once
-    artifact_markers = _marker_tuple(artifact_markers)
+    artifact_markers = _marker_tuple(artifact_markers, "artifact_markers")
     query, query_as_given, derived_terms, anchor_lines, chosen_probe = _resolve_objective(
         ambiguity_fail_open=ambiguity_fail_open, anchor_errors=anchor_errors,
         budget_ratio=budget_ratio, caller_text=caller_text, ccr=ccr, ccr_dir=ccr_dir,
@@ -11654,9 +11949,13 @@ def _compress_context_impl(
     _ERR_PROTECTED.set(tuple(
         _protected_error_exemplars(protected_source)
     ))
-    # 1.10.0 (E12): outcome/landmark lines get the same stage exemption — the
-    # selector pre-filters, flat-records, filler-comments and log folds below
-    # consult ``_outcome_protected_set`` and keep a protected line verbatim.
+    # 1.10.0 (E12, floor-only calibration): outcome/landmark lines are carried
+    # by the budget-bounded restores (``_restore_facts`` / ``_restore_fact_lines``)
+    # only. The verbatim stage exemptions were dropped: a protected line inside
+    # a repeated stream or table breaks the fold around it, and the retention
+    # cost compounds past the host's compaction threshold (the oncall replay
+    # flipped 1 -> 2 compactions, cost +2.8% over stock); the floor re-adds the
+    # same bytes at line granularity without breaking folds.
     _OUTCOME_PROTECTED.set(frozenset(f[3] for f in outcome_lines))
     industrial, degraded, payload_industrial = _industrial_preflight(
         adapter_gap=adapter_gap, analysis_text=analysis_text,
@@ -11917,6 +12216,12 @@ def _compress_context_impl(
     # the existing rule.
     if not fail_open and (fact_lines or break_lines or outcome_lines):
         line_set = set(lines)
+        # Floor-only calibration: an outcome line a template fold carries as
+        # its exemplar text survives preprocessing (substring retention — the
+        # count attach rewrites the line, so exact membership never matches).
+        # The gate's safety purpose is unaffected: the scan never protects
+        # secret or injection shapes, and ``_is_trust_risk_line`` still vetoes.
+        joined_lines = "\n".join(lines)
         floor_facts = [
             f for f in fact_lines
             if f[3] in line_set and not _is_trust_risk_line(f[3])
@@ -11929,7 +12234,7 @@ def _compress_context_impl(
         floor_seen.update(f[3] for f in floor_pool)
         floor_pool += [
             f for f in outcome_lines
-            if f[3] in line_set and f[3] not in floor_seen
+            if (f[3] in line_set or f[3] in joined_lines) and f[3] not in floor_seen
         ]
         if floor_pool:
             budget_chars = int(budget_ratio * len(caller_text)) if budget_ratio else None
@@ -12387,12 +12692,33 @@ def main(argv: Optional[Iterable[str]] = None) -> int:
     return _run_cli(_parse_args(argv))
 
 
+def _cli_read(stream) -> str:
+    """Read a text ``stream`` to completion. Text mode keeps the
+    stream's configured encoding (``PYTHONIOENCODING`` on stdin) and
+    its newline conversion, so a CRLF file is measured the way the
+    preflight measures it. The ``max_input_chars`` limit is the
+    engine's call — it may pass oversized input through degraded — so
+    the read never truncates it first."""
+    return stream.read()
+
+
 def _run_cli(args) -> int:
+    import sys as _sys
     if args.context_file == "-":
-        import sys as _sys
-        ctx = _sys.stdin.read()
+        try:
+            ctx = _cli_read(_sys.stdin)
+        except (OSError, UnicodeError) as exc:
+            print(f"tameru-compress: error: cannot read stdin: {exc}",
+                  file=_sys.stderr)
+            return 2
     else:
-        ctx = Path(args.context_file).read_text(encoding="utf-8-sig")
+        try:
+            with open(args.context_file, "r", encoding="utf-8-sig") as fh:
+                ctx = _cli_read(fh)
+        except (OSError, UnicodeError) as exc:
+            print(f"tameru-compress: error: cannot read "
+                  f"'{args.context_file}': {exc}", file=_sys.stderr)
+            return 2
     # Resolve ccr/citations defaults (None = use library default True)
     ccr_val = True if args.ccr is None else args.ccr
     citations_val = True if args.citations is None else args.citations

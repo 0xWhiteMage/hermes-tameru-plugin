@@ -340,10 +340,10 @@
   ]
  },
  "timing": {
-  "engine_seconds": 0.127,
+  "engine_seconds": 0.062,
   "by_op": {
    "should_compress": 0.0,
-   "compress": 0.125,
+   "compress": 0.06,
    "prune": 0.002
   }
  }
