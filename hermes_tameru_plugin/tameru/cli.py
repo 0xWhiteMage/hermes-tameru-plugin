@@ -3,8 +3,53 @@
 from __future__ import annotations
 
 import argparse
+import os
 from collections.abc import Iterable
 from pathlib import Path
+
+
+def _pos_int(value: str) -> int:
+    """Positive int for argparse — out-of-range flags get an ``error:``
+    line, not a traceback from ``IndustrialLimits.__post_init__``."""
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from None
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _nonneg_int(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid int value: {value!r}") from None
+    if parsed < 0:
+        raise argparse.ArgumentTypeError("must be a non-negative integer")
+    return parsed
+
+
+def _budget_ratio(value: str) -> float:
+    """Engine domain: (0, 1]."""
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid float value: {value!r}") from None
+    if not 0 < parsed <= 1:
+        raise argparse.ArgumentTypeError("must be in (0, 1]")
+    return parsed
+
+
+def _min_savings_ratio(value: str) -> float:
+    """Engine domain: [0, 1)."""
+    try:
+        parsed = float(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(f"invalid float value: {value!r}") from None
+    if not 0 <= parsed < 1:
+        raise argparse.ArgumentTypeError("must be in [0, 1)")
+    return parsed
 
 
 def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
@@ -16,18 +61,18 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
         default="adaptive",
         choices=["adaptive", "fixed", "compiler", "precision"],
     )
-    p.add_argument("--budget-ratio", type=float, default=None)
-    p.add_argument("--max-input-chars", type=int)
-    p.add_argument("--max-lines", type=int)
-    p.add_argument("--max-records", type=int)
-    p.add_argument("--max-record-chars", type=int)
-    p.add_argument("--max-fields", type=int)
-    p.add_argument("--max-profile-chars", type=int)
-    p.add_argument("--max-bidi-controls", type=int)
-    p.add_argument("--max-bidi-overrides", type=int)
-    p.add_argument("--max-query-chars", type=int)
-    p.add_argument("--max-blocks", type=int)
-    p.add_argument("--max-receipt-ids", type=int)
+    p.add_argument("--budget-ratio", type=_budget_ratio, default=None)
+    p.add_argument("--max-input-chars", type=_pos_int)
+    p.add_argument("--max-lines", type=_pos_int)
+    p.add_argument("--max-records", type=_pos_int)
+    p.add_argument("--max-record-chars", type=_pos_int)
+    p.add_argument("--max-fields", type=_pos_int)
+    p.add_argument("--max-profile-chars", type=_pos_int)
+    p.add_argument("--max-bidi-controls", type=_pos_int)
+    p.add_argument("--max-bidi-overrides", type=_pos_int)
+    p.add_argument("--max-query-chars", type=_pos_int)
+    p.add_argument("--max-blocks", type=_pos_int)
+    p.add_argument("--max-receipt-ids", type=_pos_int)
     p.add_argument("--ccr", action="store_true", default=None,
                    help="Enable CCR reversible store (on by default)")
     p.add_argument("--no-ccr", dest="ccr", action="store_false",
@@ -41,9 +86,9 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
                    help="JSON file path for freeze-on-first-sight decision cache")
     p.add_argument("--strategy", default="extract", choices=["clear", "extract", "summarise", "auto"],
                    help="Compression strategy: clear (drop tool payloads), extract (default, query-aware), summarise (falls back to extract), auto (extract first, escalate to summarise only if extraction fails open)")
-    p.add_argument("--pin-recent", type=int, default=0,
+    p.add_argument("--pin-recent", type=_nonneg_int, default=0,
                    help="Unconditionally keep the first block and the newest N blocks")
-    p.add_argument("--min-savings-ratio", type=float, default=0.10,
+    p.add_argument("--min-savings-ratio", type=_min_savings_ratio, default=0.10,
                    help="Fail open when achieved savings fall below this ratio (0 disables)")
     p.add_argument("--degraded-view", action="store_true",
                    help="On input size-limit breach, score a bounded head+tail view per block instead of failing open")
@@ -51,8 +96,14 @@ def _parse_args(argv: Iterable[str] | None = None) -> argparse.Namespace:
                    help="On empty/generic query, infer a conservative objective from the document's recurring rare terms instead of failing open")
     p.add_argument("--stats", action="store_true")
     args = p.parse_args(list(argv) if argv is not None else None)
-    if args.context_file != "-" and not Path(args.context_file).is_file():
-        p.error(f"argument context_file: cannot read '{args.context_file}'")
+    if args.context_file != "-":
+        path = Path(args.context_file)
+        # ``is_file()`` is S_ISREG-only: it rejects the readable streams a
+        # shell hands over — process substitution (/dev/fd/N), named
+        # pipes, char devices. A directory still errors on read, so keep
+        # the explicit guard.
+        if path.is_dir() or not os.access(path, os.R_OK):
+            p.error(f"argument context_file: cannot read '{args.context_file}'")
 
     from .industrial import IndustrialLimits
 
