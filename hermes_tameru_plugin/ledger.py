@@ -491,6 +491,12 @@ def build_ledger(
     without Hermes' untrusted-data wrapper. ``extra_originals`` are texts of results outside ``turns`` whose bodies are gone (also scanned).
     Files and Commands never exceed ``max_chars``, the Errors lines ``ERRORS_CHARS``.
     """
+    if not isinstance(turns, (list, tuple)):
+        raise TypeError(f"turns must be a list of dict, got {type(turns).__name__}")
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool):
+        raise TypeError(f"max_chars must be int, got {type(max_chars).__name__}")
+    if not isinstance(previous, str):
+        raise TypeError(f"previous must be str, got {type(previous).__name__}")
     files: dict[str, _FileEntry] = {}
     commands: dict[str, _CommandEntry] = {}
     errors: dict[str, _ErrorEntry] = {}
@@ -581,6 +587,10 @@ def merge_into_summary(summary: str, ledger: str) -> str:
     An existing section (up to the next ``## `` heading) is replaced in place and any repeats are
     dropped; without one the ledger is appended. An empty ``ledger`` leaves the summary alone.
     """
+    if not isinstance(summary, str):
+        raise TypeError(f"summary must be str, got {type(summary).__name__}")
+    if not isinstance(ledger, str):
+        raise TypeError(f"ledger must be str, got {type(ledger).__name__}")
     if not ledger:
         return summary
     ledger = ledger.strip("\n")
