@@ -7,3 +7,4 @@ One line per probed-and-fixed gap. Runs append R-NNNN entries; do not re-file li
 - R-0003 | seam arg types | message_budget_tokens non-list/str rows → AttributeError deep in estimator; now TypeError | PR #23
 - R-0004 | payload seam | parse_payload non-str content, meta_line non-dict meta / non-int max_chars → misread/cryptic TypeError; now TypeError | PR #24
 - R-0005 | index/display seam | build_index validation ran after first use (cryptic crash on None); display_text iterated non-str; now entry TypeErrors | PR #25
+- R-0006 | query seam | build_query max_chars None/str/float/bool/negative → cryptic TypeError deep in budget math; now entry TypeError (0 stays valid) | PR #26
