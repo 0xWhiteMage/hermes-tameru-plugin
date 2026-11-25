@@ -398,7 +398,7 @@
   "by_op": {
    "should_compress": 0.0,
    "compress": 0.0,
-   "prune": 0.004,
+   "prune": 0.003,
    "select_context": 0.0,
    "on_turn_complete": 0.0
   }

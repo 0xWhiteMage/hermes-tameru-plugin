@@ -301,13 +301,13 @@
   "events": []
  },
  "timing": {
-  "engine_seconds": 0.004,
+  "engine_seconds": 0.015,
   "by_op": {
    "should_compress": 0.0,
    "compress": 0.0,
-   "prune": 0.004,
+   "prune": 0.005,
    "select_context": 0.0,
-   "on_turn_complete": 0.0
+   "on_turn_complete": 0.01
   }
  }
 }

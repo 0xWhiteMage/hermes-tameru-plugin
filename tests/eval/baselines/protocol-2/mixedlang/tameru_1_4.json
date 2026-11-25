@@ -294,13 +294,13 @@
   "events": []
  },
  "timing": {
-  "engine_seconds": 0.007,
+  "engine_seconds": 0.017,
   "by_op": {
    "should_compress": 0.0,
    "compress": 0.0,
    "prune": 0.006,
    "select_context": 0.0,
-   "on_turn_complete": 0.0
+   "on_turn_complete": 0.01
   }
  }
 }

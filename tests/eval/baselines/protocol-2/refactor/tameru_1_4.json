@@ -457,13 +457,13 @@
   ]
  },
  "timing": {
-  "engine_seconds": 0.229,
+  "engine_seconds": 0.418,
   "by_op": {
    "should_compress": 0.0,
    "compress": 0.0,
-   "prune": 0.22,
+   "prune": 0.391,
    "select_context": 0.006,
-   "on_turn_complete": 0.003
+   "on_turn_complete": 0.021
   }
  }
 }
