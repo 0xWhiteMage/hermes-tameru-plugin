@@ -1599,17 +1599,21 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         if not spill and is_persisted_block(content):
             return self._keep_parent(result, idx, shadow[0], tool)
 
-        pl = parse_payload(content)
-        if settings.protect_patterns and len(pl.inner) > _HUGE_CHARS:
-            # The engine's pinned-huge fail-open is a hard floor: no lower rung may
-            # approximate the row without the protected evidence. Leaving it
-            # unchanged is the fail-open behavior, as in the engine itself.
-            return False
+        pl = None
+        if settings.protect_patterns and len(content) > _HUGE_CHARS:
+            pl = parse_payload(content)
+            if len(pl.inner) > _HUGE_CHARS:
+                # The engine's pinned-huge fail-open is a hard floor: no lower rung may
+                # approximate the row without the protected evidence. Leaving it
+                # unchanged is the fail-open behavior, as in the engine itself.
+                return False
         if scope.budget < len(content):
             self._telemetry.count("budget_skip", tool=tool)
             return self._keep_parent(result, idx, shadow[0], tool)
         scope.budget -= len(content)
 
+        if pl is None:
+            pl = parse_payload(content)
         line = self._terminal_line(line, pl)
         ref = make_ref(msg, content)
         if spill:   # Hermes already bounded this row; what the agent needs later is where the rest is

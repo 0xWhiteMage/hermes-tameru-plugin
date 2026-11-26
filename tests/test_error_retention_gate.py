@@ -129,6 +129,20 @@ def test_extracts_are_memoized_per_content_and_query(monkeypatch):
     assert len(calls) == 2
 
 
+def test_an_overbudget_output_is_not_decoded_when_protection_is_disabled(monkeypatch):
+    text = "x" * 2_100_000
+    chat = Chat()
+    idx = chat.tool("terminal", {"command": "cat huge.log"}, text)
+    engine = make_engine(TameruSettings(pass_char_budget=0))
+
+    def parse_must_not_run(*args, **kwargs):
+        raise AssertionError("an overbudget unprotected row must fall back before payload decoding")
+
+    monkeypatch.setattr(engine_module, "parse_payload", parse_must_not_run)
+    changed, _out = demote(engine, chat.finish(), idx)
+    assert changed
+
+
 def test_a_huge_output_with_protect_patterns_is_left_uncompressed(monkeypatch):
     # Upstream deliberately fails pinned huge inputs open: the streaming sampler cannot
     # prove the protected block survived. The ladder must honor that verdict instead of
