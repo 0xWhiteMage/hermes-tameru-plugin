@@ -67,11 +67,21 @@ def _real_attr(real_mods, name):
 
 
 def _real_has_demoted_stub() -> bool:
-    """True on Hermes versions whose ``_is_summary_stub`` also accepts lean demotion stubs (current main)."""
+    """True on Hermes versions whose ``_is_summary_stub`` also accepts lean demotion stubs."""
     try:
         return hasattr(importlib.import_module("agent.context_compressor_tail"), "is_demoted_stub")
     except ImportError:
         return False
+
+
+def _summary_stub_copy_name(real_mods) -> str:
+    """The stub copy matching the pinned-or-current Hermes ``_is_summary_stub`` variant."""
+    if not _real_has_demoted_stub():
+        return "_is_summary_stub"
+    real = _real_attr(real_mods, "_is_summary_stub")
+    if " chars result)" in inspect.getsource(real):
+        return "_is_summary_stub_archive"
+    return "_is_summary_stub_main"
 
 
 def _reaches(func, target: str) -> bool:
@@ -287,7 +297,7 @@ def test_stub_reproduces_contract(check, stub_mods):
     "[grep output demoted at compaction — 9,000 chars preserved in session history.]",
 ])
 def test_parity_is_summary_stub(content, real_mods, stub_mods):
-    stub_fn = stub_mods.cc._is_summary_stub_main if _real_has_demoted_stub() else stub_mods.cc._is_summary_stub
+    stub_fn = getattr(stub_mods.cc, _summary_stub_copy_name(real_mods))
     assert stub_fn(content) == real_mods.cc._is_summary_stub(content)
 
 
@@ -385,7 +395,15 @@ def test_parity_method_signatures(name, real_mods, stub_mods):
     """Names, kinds and default VALUES agree, so a call that works on the stub works on Hermes."""
     real = getattr(real_mods.cc.ContextCompressor, name)
     stub = getattr(stub_mods.cc.ContextCompressor, name)
-    assert _shape(stub) == _shape(real)
+    real_shape, stub_shape = _shape(real), _shape(stub)
+    if real_shape != stub_shape:
+        # Hermes may add optional keyword-only compatibility parameters after a pinned release.
+        # The stub tracks current main; those additions do not invalidate calls valid on older Hermes.
+        assert len(stub_shape) >= len(real_shape) and stub_shape[:len(real_shape)] == real_shape
+        assert all(
+            default is not inspect.Parameter.empty or kind in (inspect.Parameter.VAR_POSITIONAL, inspect.Parameter.VAR_KEYWORD)
+            for _, kind, default in stub_shape[len(real_shape):]
+        )
 
 
 @pytest.mark.real_hermes
@@ -445,7 +463,7 @@ def test_parity_helpers_are_verbatim_copies(name, real_mods, stub_mods):
         stub_obj = getattr(stub_mods.cc.ContextCompressor, name)
         real_obj = getattr(real_mods.cc.ContextCompressor, name)
     else:
-        stub_name = "_is_summary_stub_main" if name == "_is_summary_stub" and _real_has_demoted_stub() else name
+        stub_name = _summary_stub_copy_name(real_mods) if name == "_is_summary_stub" else name
         stub_obj = getattr(stub_mods.cc, stub_name)
         real_obj = _real_attr(real_mods, name)
 

@@ -107,8 +107,13 @@ def without_skill_safety_rule(content: str) -> str:
 
 
 def _is_summary_stub_main(content: str) -> bool:
-    """``_is_summary_stub`` as on current Hermes main (also true for lean demotion stubs)."""
+    """``_is_summary_stub`` as on the pinned Hermes version (also true for lean demotion stubs)."""
     return (s := without_skill_safety_rule(content)).startswith("[") and " chars)" in s and len(s) < 400 or is_demoted_stub(s)
+
+
+def _is_summary_stub_archive(content: str) -> bool:
+    """``_is_summary_stub`` as on current Hermes main (also true for prune/archive result stubs)."""
+    return (s := without_skill_safety_rule(content)).startswith("[") and (" chars)" in s or " chars result)" in s) and len(s) < 400 or is_demoted_stub(s)
 def _tc_get(obj: Any, key: str, default: Any = "") -> Any:
     """Field of a dict- or object-shaped tool call (or its ``function`` sub-object)."""
     return obj.get(key, default) if isinstance(obj, dict) else getattr(obj, key, default)
@@ -139,7 +144,10 @@ def _json_dict(text: Any) -> dict:
 
 def _rewritten(msg: Dict[str, Any], content: Any) -> Dict[str, Any]:
     """Copy of ``msg`` carrying ``content``; drops the stale ``api_content`` sidecar."""
-    from agent.turn_context import drop_stale_api_content
+    try:
+        from session_rules.turns import drop_stale_api_content
+    except ImportError:  # Hermes before the session_rules split
+        from agent.turn_context import drop_stale_api_content
 
     new_msg = {**msg, "content": content}
     drop_stale_api_content(new_msg)
@@ -321,8 +329,9 @@ class ContextCompressor(ContextEngine):
         tokens = prompt_tokens if prompt_tokens is not None else self.last_prompt_tokens
         return self.threshold_tokens > 0 and tokens >= self.threshold_tokens
 
-    def bind_session_state(self, session_db: Any = None, session_id: str = "") -> None:
+    def bind_session_state(self, session_db: Any = None, session_id: str = "", *, persistence: Any = None) -> None:
         self._session_db, self._session_id = session_db, session_id or ""
+        self._persistence = persistence
         self._proactive_prune_rearm_tokens = 0
 
     def on_session_start(self, session_id: str, **kwargs) -> None:
@@ -511,14 +520,15 @@ class ContextCompressor(ContextEngine):
         return head + extra
 
     def prune_tool_results_only(
-        self, messages: List[Dict[str, Any]], current_tokens: int | None = None,
+        self, messages: List[Dict[str, Any]], current_tokens: int | None = None, *, cold_cache: bool = False,
+        turn_start: int | None = None,
     ) -> tuple[List[Dict[str, Any]], int]:
-        """Deterministic, no-LLM tool-result prune gated on ``proactive_prune_tokens``. A commit
-        breaks the prompt cache, so it requires ``proactive_prune_min_reclaim_tokens``; otherwise
-        returns the INPUT object as ``(messages, 0)``."""
-        if self.proactive_prune_tokens <= 0 or (
+        """Deterministic, no-LLM tool-result prune. ``cold_cache`` bypasses the warm trigger;
+        ``turn_start`` keeps the in-progress user turn whole. A warm commit breaks the prompt cache,
+        so it requires ``proactive_prune_min_reclaim_tokens``; otherwise returns the INPUT object."""
+        if not cold_cache and (self.proactive_prune_tokens <= 0 or (
             current_tokens is not None and current_tokens < self.proactive_prune_tokens
-        ):
+        )):
             return messages, 0
         if len(messages) <= self.protect_last_n + self._protect_head_size(messages) + 1:
             return messages, 0
@@ -536,6 +546,16 @@ class ContextCompressor(ContextEngine):
             messages, protect_tail_count=self.protect_last_n, protect_tail_tokens=None,
             min_prune_chars=self.proactive_prune_min_result_chars,
         )
+        if turn_start is not None:
+            if not (isinstance(turn_start, int) and 0 <= turn_start < len(messages)
+                    and isinstance(messages[turn_start], dict) and messages[turn_start].get("role") == "user"):
+                return messages, 0
+            restored = sum(
+                original is not replacement and original != replacement
+                for original, replacement in zip(messages[turn_start:], pruned_msgs[turn_start:])
+            )
+            pruned_msgs = [*pruned_msgs[:turn_start], *messages[turn_start:]]
+            pruned_count -= restored
         if not pruned_count:
             return messages, 0
         after = sum(_estimate_msg_budget_tokens(m) for m in pruned_msgs)

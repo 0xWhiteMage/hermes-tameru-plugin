@@ -283,7 +283,11 @@ def _local_drop_stale_api_content(msg: dict) -> None:
 
 def drop_stale_api_content(msg: dict) -> None:
     """Drop the ``api_content`` sidecar from a row whose content was rewritten, in place."""
-    _prefer("agent.turn_context", "drop_stale_api_content", _local_drop_stale_api_content)(msg)
+    found = _hermes("session_rules.turns", "drop_stale_api_content")
+    if not callable(found):
+        # Hermes before the session_rules split kept the helper in agent.turn_context.
+        found = _hermes("agent.turn_context", "drop_stale_api_content")
+    (found if callable(found) else _local_drop_stale_api_content)(msg)
 
 
 def _local_summarize_tool_result(tool_name: str, tool_args: Any, content: str) -> str:
