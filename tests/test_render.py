@@ -98,7 +98,7 @@ def test_parse_header_reads_only_the_first_line_of_a_full_row():
 
 
 def test_parse_header_accepts_hermes_archive_pointer_on_a_header_only_row():
-    row = build_header(PARENT, stats(), REF) + " — full result: /tmp/home/cache/pruned/s1_row.json"
+    row = build_header(PARENT, stats(), REF) + " — full result: /tmp/hermes home/cache/pruned/s1_row.json"
     assert parse_header(row) == {"rung": "extract", "ref": REF, "kept": 40, "total": 220}
 
 
