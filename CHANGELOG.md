@@ -17,6 +17,12 @@ All notable changes to this project are documented here. The format follows
   off: any ref from an earlier turn, a restart or a new agent came back "ref not found", and a
   credential-bearing original was reported missing instead of refused. The check now requires only
   `get_messages`, which is all its callers use.
+- **Lean-tail stubs work again on Hermes that archives demoted originals.** Newer Hermes appends
+  ` — full result: <path>` (a file under `cache/pruned/`) to each lean-tail stub, so `LEAN_STUB_RE`
+  stopped matching and the tail hook left every stub without a `ref`. The pattern now accepts the
+  pointer, and the header keeps it, so the file route back to the original stays and Hermes still
+  reads the row as archived.
+
 
 ## [0.1.0] - 2026-11-24
 

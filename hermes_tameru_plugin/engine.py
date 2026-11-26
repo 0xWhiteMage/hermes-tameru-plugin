@@ -58,6 +58,7 @@ from .config import (
     scaled_retained_budget,
 )
 from .hermes_compat import (
+    ARCHIVE_POINTER_RE,
     LEAN_STUB_RE,
     SKILL_PRUNED_MARKER_PREFIX,
     SeamReport,
@@ -365,6 +366,13 @@ def _spill_note(content: str) -> str:
     """``spilled to <path>`` for a Hermes ``<persisted-output>`` block: the pointer is all that is worth keeping."""
     found = _SPILL_PATH_RE.search(content) if is_persisted_block(content) else None
     return f"spilled to {found.group(1).strip()}" if found else ""
+
+
+def _archive_note(stub: str) -> str:
+    """Hermes' ``— full result: <path>`` pointer of a lean stub, kept as written: the file holds the original,
+    and Hermes (``has_archive_pointer``) still reads the header as an archived row."""
+    found = ARCHIVE_POINTER_RE.search(stub)
+    return found.group(0).strip() if found else ""
 
 
 def _line_count(text: str) -> int:
@@ -2015,6 +2023,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                     ref = make_ref(before, content)
                     new = self._header_row(
                         self._terminal_line(summarize_tool_result(tool, raw_args, content), pl), pl, ref, "header",
+                        _archive_note(stub),
                     )
                     self._working_store().put(ref, pl.inner, tool=tool, meta=pl.meta)
                     original = pl.inner
