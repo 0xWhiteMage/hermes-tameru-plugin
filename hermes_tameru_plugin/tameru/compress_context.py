@@ -6521,8 +6521,9 @@ def _source_pin_texts(
     ``text`` is the working copy whose forged markers were neutralized, while
     pins are caller-authored patterns and must match the caller-visible
     ``match_text``. Neutralization preserves line positions but can move block
-    boundaries, so pins are carried over by line span; the returned block
-    stays safe to emit without losing the pin's source spelling.
+    boundaries, so pins are carried over by line span. Rendering strips ANSI
+    control bytes, so the returned block does too: pin-loss verification must
+    compare the same emitted spelling rather than fail open on color bytes.
     """
     if not patterns and not recent:
         return []
@@ -6585,7 +6586,7 @@ def _source_pin_texts(
     if recent and blocks:
         pinned.add(blocks[0]['id'])
         pinned.update(block['id'] for block in blocks[-recent:])
-    return [block['text'] for block in blocks if block['id'] in pinned]
+    return [strip_ansi(block['text']) for block in blocks if block['id'] in pinned]
 
 
 def _segment_blocks_memo(lines: list[str]) -> list[dict[str, Any]]:
@@ -13938,7 +13939,10 @@ def _compress_context_impl(
                     requested_mode=requested_mode,
                 )
             tool_payload = cleaned_payload
-    text = _norm_newlines(tool_payload.inner)
+    # JSON-decoded control bytes are payload text too: the outer strip ran before
+    # decoding, when they were still spelled ``\u001b``. Keep the working copy in
+    # the same ANSI-free spelling plain tool output already uses.
+    text = strip_ansi(_norm_newlines(tool_payload.inner))
     if payload_industrial is not None and payload_industrial.applied:
         text = payload_industrial.text
     if artifact_contaminated:
