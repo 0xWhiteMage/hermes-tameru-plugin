@@ -2004,6 +2004,9 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             return False   # already header-only
         if new is None or new == content:
             return False
+        archive = ARCHIVE_POINTER_RE.search(content)
+        if archive is not None and archive.group(0) not in new:
+            new += archive.group(0)
         row = {**msg, "content": new}
         drop_stale_api_content(row)
         result[idx] = row

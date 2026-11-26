@@ -155,7 +155,7 @@ def redact_compaction_text(text: str) -> str:
 # Hermes' archive pointer (``tools.tool_result_storage``: ``ARCHIVE_POINTER_SEP``, ``_ARCHIVE_POINTER_RE``).
 # Newer Hermes saves each demoted original under ``cache/pruned/`` and appends `` — full result: <path>``
 # to the stub; group 1 is the path.
-_ARCHIVE_PATH = r"\S*cache/pruned/[A-Za-z0-9_.-]+"
+_ARCHIVE_PATH = r"[^\n]*cache/pruned/[A-Za-z0-9_.-]+"
 ARCHIVE_POINTER_RE = re.compile(rf" — full result: ({_ARCHIVE_PATH})")
 
 # What ``_lean_recovery_stub`` renders: ``[<tool> output demoted at compaction — N chars preserved
