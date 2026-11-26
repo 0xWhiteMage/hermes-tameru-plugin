@@ -71,6 +71,8 @@ context:
 
 The engine runs locally — no LLM call, no GPU. It fails open: if it is slow, crashes or misbehaves, nothing in your chat changes.
 
+**Why the Hermes plugin restarted at 0.1.0.** The Hermes integration now has its own release numbering, independent of the Tameru Engine. `1.11.0` was the last release on the previous numbering scheme. `0.1.0` starts the plugin’s independent version line. The engine is still bundled and retains its own version, which you can see alongside the plugin version in `/tameru stats`. See the [changelog](CHANGELOG.md) for release history.
+
 **New in 1.11.0:** `policy_mode: plan` (opt-in) lets the engine plan each Hermes rewrite at a cache-broken moment — replay-only dev numbers show cost-neutral vs stock with more facts surviving. Engine calls are now hard-bounded by a wall-clock budget, so a hung engine can never block a request. See the [changelog](CHANGELOG.md) for the full gate table.
 
 **New in 1.10.0:** the shared Tameru bar (Strength menu in place of the lean-mode dropdown, pause button, counted list/pin icons), engine 1.10.0 vendored, per-chat records in Hermes' public plugin state.
