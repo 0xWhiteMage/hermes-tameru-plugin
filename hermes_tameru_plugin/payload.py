@@ -84,6 +84,10 @@ def parse_payload(content: str) -> HermesPayload:
     """
     if content is not None and not isinstance(content, str):
         raise TypeError(f"content must be str, got {type(content).__name__}")
+    if content is None:
+        # The vendored engine validates str strictly; the None contract (an absent
+        # result is one unwrapped payload) is the plugin's own.
+        return HermesPayload(None, None, {}, False)
     payload = unwrap_tool_payload(content)
     meta = payload.meta if payload.wrapped else _meta_fields(content)
     return HermesPayload(payload.inner, payload.field, dict(meta), payload.wrapped)
