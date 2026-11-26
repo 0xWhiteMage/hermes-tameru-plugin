@@ -163,7 +163,10 @@ def test_drop_stale_api_content_pops_the_sidecar_in_place(compat):
 
 
 def test_drop_stale_api_content_equals_hermes(compat):
-    turn_context = importlib.import_module("agent.turn_context")
+    try:
+        turn_context = importlib.import_module("session_rules.turns")
+    except ImportError:  # Hermes before the session_rules split
+        turn_context = importlib.import_module("agent.turn_context")
     rows = [{"content": "x", "api_content": "y"} for _ in range(3)]
     turn_context.drop_stale_api_content(rows[0])
     compat.drop_stale_api_content(rows[1])
