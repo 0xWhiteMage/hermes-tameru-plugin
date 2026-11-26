@@ -398,6 +398,7 @@ class AdaptiveMixin:
                 return messages, 0
             count = 0
             if final_scope is not None:
+                self._retarget_activity_changes(final_scope, res[0])
                 with self._activity.lifecycle_lock:
                     if self._publish_pass_state(final_scope):
                         held.apply()
