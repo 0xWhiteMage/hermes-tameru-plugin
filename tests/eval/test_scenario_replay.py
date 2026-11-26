@@ -46,6 +46,7 @@ KNOWN_LOSSES: dict[tuple[str, str, str], str] = {
     # Why each check is lost. The measured numbers are in known_loss_numbers.json (test_known_loss_numbers.py keeps them current).
     ('smallrows', 'cost', 'tameru_1_4_product'): 'nothing is prunable (every result is under the prune floor); the cost is the Artifact Trail and the anchor lines in the compaction summaries',
     ('smallrows', 'gold:decision', 'tameru_1_4_product'): "D3, a user decision: the plugin's first compaction keeps fewer messages, so the turn carrying it falls into the first summary and the fake summarizer drops it",
+    ('oncall', 'cost', 'tameru_1_4'): 'equal gates: the corrected engine keeps one more gold fact and 14 error templates stock drops; the retained evidence costs 298 simulated input units per turn',
     ('refactor', 'cost', 'tameru_1_4'): 'equal gates: the same prune and compaction as stock, but each rewritten context is larger (briefs, error lines, the trail)',
     ('smallrows', 'cost', 'tameru_1_4'): 'nothing is prunable (every result is under the prune floor); the cost is the Artifact Trail and the anchor lines in the compaction summaries',
     ('smallrows', 'gold:decision', 'tameru_1_4'): "D3, a user decision: the plugin's first compaction keeps fewer messages, so the turn carrying it falls into the first summary and the fake summarizer drops it",
