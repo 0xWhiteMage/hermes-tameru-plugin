@@ -47,7 +47,8 @@ HEADER_RE = re.compile(
 _ROW_RE = re.compile(
     r"(?P<parent>\[[^\n]*) \[tameru:(?P<rung>fold|extract|brief|errors|header|superseded) "
     r"(?P<counts>kept (?P<kept>\d+)/(?P<total>\d+) lines \([\d,]+ of [\d,]+ chars\))"
-    r"(?P<extra>[^\n]*?) ref=(?P<ref>[0-9a-f]{16}|[0-9a-f]{8})\](?=\n|\Z)"
+    r"(?P<extra>[^\n]*?) ref=(?P<ref>[0-9a-f]{16}|[0-9a-f]{8})\]"
+    r"(?= — full result: [^\n]*cache/pruned/[A-Za-z0-9_.-]+(?:\n|\Z)|\n|\Z)"
 )
 # The 1.3.0 plugin joined kept blocks with a line that is exactly ``[…]``.
 _LEGACY_GAP = "[…]"

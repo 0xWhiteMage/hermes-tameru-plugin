@@ -21,7 +21,7 @@ from hermes_tameru_plugin.activity import (
 )
 from hermes_tameru_plugin.config import TameruSettings
 from hermes_tameru_plugin.payload import parse_payload
-from hermes_tameru_plugin.render import make_ref, parse_header
+from hermes_tameru_plugin.render import RenderStats, build_header, make_ref, parse_header
 from hermes_tameru_plugin.recovery import EXPAND_TOOL_NAME, READ_ORIGINAL_TOOL_NAME
 
 TASK = "tests/test_orders.py::test_reserve_stock_rollback failed"
@@ -68,6 +68,19 @@ def test_a_committed_prune_lands_in_the_snapshot_and_the_command_sees_it():
     view = json.loads(engine._activity_registry.command(f"--json view {item['ref']}", session_id="s1"))
     assert view["ok"] and "test_reserve_stock_rollback" in view["content"]
     assert json.dumps(res[0], sort_keys=True, ensure_ascii=False) == frozen
+
+
+def test_demoting_an_archived_render_preserves_hermes_pointer():
+    engine = make_engine()
+    pointer = " — full result: /tmp/hermes home/cache/pruned/s1_row.json"
+    stats = RenderStats(1, 4, 20, 80, (), "extract")
+    quoted = " — full result: /tmp/other home/cache/pruned/quoted.json"
+    content = (build_header("[terminal] ran `pytest`", stats, "0a0874a66c6d92a2")
+               + "\nERROR quoted copy" + quoted + "\nERROR kept" + pointer)
+    rows = [{"role": "tool", "tool_call_id": "c1", "content": content}]
+    assert engine._demote_rendered(rows, 0, content, "v1", "terminal", {"command": "pytest"})
+    assert rows[0]["content"].endswith(pointer)
+    assert parse_header(rows[0]["content"])["ref"] == "0a0874a66c6d92a2"
 
 
 def test_inspect_pages_a_long_original_by_characters():

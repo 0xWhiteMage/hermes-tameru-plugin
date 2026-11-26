@@ -51,6 +51,7 @@ from .activity import (
     context_state,
     same_occurrence,
     proposed_change,
+    kept_keys,
 )
 from .config import (
     TameruSettings, compression_kwargs, load_settings, prune_default_applies, prune_regrowth_tokens,
@@ -367,6 +368,9 @@ def _spill_note(content: str) -> str:
     """``spilled to <path>`` for a Hermes ``<persisted-output>`` block: the pointer is all that is worth keeping."""
     found = _SPILL_PATH_RE.search(content) if is_persisted_block(content) else None
     return f"spilled to {found.group(1).strip()}" if found else ""
+
+
+_ARCHIVE_POINTER_LINE_RE = re.compile(r" — full result: [^\n]*cache/pruned/[A-Za-z0-9_.-]+")
 
 
 def _archive_note(stub: str) -> str:
@@ -726,6 +730,34 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         change = proposed_change(before, after, tool, original=original, previous=previous)
         if change is not None:
             scope.changes[change.ref] = change
+
+    @staticmethod
+    def _retarget_activity_changes(scope, messages):
+        """Point staged records at Hermes' final committed rows.
+
+        Current Hermes writes a pruned original and appends its archive pointer after the plugin
+        rendered the row. The text the row had inside ``_prune_old_tool_results`` is therefore not
+        the text context_state can find afterward. Keep the record only when the final row still
+        carries its own Tameru header; an archive write failure reverts that row and it must not
+        confirm as a Tameru change.
+        """
+        tool_rows = [row for row in messages if isinstance(row, dict) and row.get("role") == "tool"]
+        for ref, change in list(scope.changes.items()):
+            matching = [row for row in tool_rows if same_occurrence(change.identity, row)]
+            if len(matching) != 1:
+                continue
+            content = matching[0].get("content")
+            if not isinstance(content, str):
+                continue
+            header = parse_header(content)
+            if header is None or header["ref"] != ref:
+                continue
+            fingerprint = activity_digest(content)
+            if fingerprint == change.current_digest:
+                continue
+            scope.changes[ref] = dataclass_replace(
+                change, after_chars=len(content), current_digest=fingerprint,
+                kept=change.kept | kept_keys(content))
 
     def _observe_activity(self, messages):
         with self._activity.lifecycle_lock:
@@ -1199,6 +1231,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                     self._telemetry.count("escalation")   # the escalate-and-decline pass did run
                 return messages, 0
             if final_scope is not None:
+                self._retarget_activity_changes(final_scope, res[0])
                 with self._activity.lifecycle_lock:
                     if self._publish_pass_state(final_scope):
                         held.apply()
@@ -1974,6 +2007,10 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             return False   # already header-only
         if new is None or new == content:
             return False
+        archive_at = content.rfind(" — full result: ")
+        archive = content[archive_at:].split("\n", 1)[0] if archive_at >= 0 else ""
+        if _ARCHIVE_POINTER_LINE_RE.fullmatch(archive) and archive not in new:
+            new += archive
         row = {**msg, "content": new}
         drop_stale_api_content(row)
         result[idx] = row

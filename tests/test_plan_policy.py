@@ -137,6 +137,7 @@ def test_warm_step_commits_inside_horizon_with_runway():
     assert rungs(out), "a warm act renders plan rungs"
     events = engine._telemetry.snapshot()["events"]
     assert events.get("plan_warm_commit", {}).get("count", 0) == 1
+    assert engine.activity_snapshot()["items"]
 
 
 def test_warm_step_outside_horizon_declines_without_items():
