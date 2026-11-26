@@ -127,3 +127,21 @@ def test_extracts_are_memoized_per_content_and_query(monkeypatch):
     idx2 = chat.tool("terminal", {"command": "tail -n 450 app.log"}, LOG)
     demote(engine, chat.finish(), idx2)
     assert len(calls) == 2
+
+
+def test_a_huge_output_with_protect_patterns_is_left_uncompressed(monkeypatch):
+    # Upstream deliberately fails pinned huge inputs open: the streaming sampler cannot
+    # prove the protected block survived. The ladder must honor that verdict instead of
+    # falling through to a structural brief that has no pin floor.
+    text = "ORD-77 must stay visible\n" + "x" * 2_100_000
+    chat = Chat()
+    idx = chat.tool("terminal", {"command": "cat huge.log"}, text)
+    engine = make_engine(TameruSettings(protect_patterns=(r"ORD-\d+",)))
+
+    def compress_must_not_run(*args, **kwargs):
+        raise AssertionError("a pinned huge input must fail open before extraction")
+
+    monkeypatch.setattr(engine_module, "compress_context", compress_must_not_run)
+    changed, out = demote(engine, chat.finish(), idx)
+    assert not changed
+    assert out[idx]["content"] == text

@@ -14422,18 +14422,269 @@ def redact_secrets_in(text: str) -> str:
     return text
 
 
-def _huge_sample(text: str) -> str:
+def _evenly_spaced(items: list[Any], target: int) -> list[Any]:
+    """Up to ``target`` items spread across the input, endpoints included."""
+    count = len(items)
+    if target >= count:
+        return list(items)
+    if target <= 0:
+        return []
+    if target == 1:
+        return [items[0]]
+    return [items[i * (count - 1) // (target - 1)] for i in range(target)]
+
+
+def _huge_sample_blocks(sample: str) -> list[dict[str, Any]]:
+    """Blocks the recursive pass will segment for ``sample`` (0/1 line-based record shapes included)."""
+    return _segment_blocks_memo(tuple(sample.split("\n")))
+
+
+def _huge_error_base_line(sample: str, head: str, errs: list[str]) -> int:
+    """Zero-based line index of the first middle error inside ``sample``."""
+    if not errs:
+        return 0
+    prefix = len(head) + len("\n[...]\n") if head else 0
+    return sample[:prefix].count("\n")
+
+
+def _thin_errors_by_block_coverage(
+    errs: list[str], blocks: list[dict[str, Any]], base_line: int, blocks_to_keep: int,
+) -> list[str]:
+    """Keep whole error-carrying blocks, spread first-to-last.
+
+    Block selection is atomic in the recursive pass. Removing single rows evenly
+    from a ten-row block can leave every block alive; removing whole blocks is
+    the least thinning that reliably reduces the measured block count."""
+    if not errs:
+        return list(errs)
+    error_end = base_line + len(errs) - 1
+    spans: list[tuple[int, int]] = []
+    for block in blocks:
+        start = max(int(block["start"]), base_line)
+        end = min(int(block["end"]), error_end)
+        if start <= end:
+            spans.append((start - base_line, end - base_line))
+    if blocks_to_keep >= len(spans):
+        return list(errs)
+    if blocks_to_keep <= 0:
+        return []
+    keep = [False] * len(errs)
+    for start, end in _evenly_spaced(spans, blocks_to_keep):
+        for index in range(start, end + 1):
+            keep[index] = True
+    return [line for index, line in enumerate(errs) if keep[index]]
+
+
+def _scaled_huge_line_removal(line_count: int, block_count: int, over_blocks: int) -> int:
+    """Estimate complete rows needed for ``over_blocks`` from the measured density."""
+    if over_blocks <= 0:
+        return 0
+    if block_count <= 0:
+        return over_blocks + 1
+    density = max(1, math.ceil(line_count / block_count))
+    return over_blocks * density + 1
+
+
+def _join_huge_sample(head: str, errs: list[str], tail: str) -> str:
+    mid = "\n".join(errs)
+    return "\n[...]\n".join(part for part in (head, mid, tail) if part)
+
+
+def _lf_lines_keepends(text: str) -> list[str]:
+    """``text`` split only at LF, with each newline retained on its line."""
+    parts = text.split("\n")
+    lines = [part + "\n" for part in parts[:-1]]
+    if parts[-1]:
+        lines.append(parts[-1])
+    return lines
+
+
+def _first_nonblank_index(lines: list[str]) -> int:
+    for index, line in enumerate(lines):
+        if line.strip():
+            return index
+    return 0
+
+
+def _last_nonblank_index(lines: list[str]) -> int:
+    for index in range(len(lines) - 1, -1, -1):
+        if lines[index].strip():
+            return index
+    return max(0, len(lines) - 1)
+
+
+def _trim_huge_edges(head: str, tail: str, lines_to_remove: int) -> tuple[str, str]:
+    """Remove complete lines roughly evenly from the inner ends of both edges.
+
+    Splitting only at LF matches the recursive pass's line model; joining the
+    keepends pieces keeps each surviving edge byte-exact, including CRLF input.
+    The head stays a prefix and the tail a suffix."""
+    head_lines = _lf_lines_keepends(head)
+    tail_lines = _lf_lines_keepends(tail)
+    remove = min(lines_to_remove, max(0, len(head_lines) + len(tail_lines) - 1))
+    if remove <= 0:
+        return head, tail
+    # Never thin either nonempty edge away entirely. If the ceiling cannot
+    # carry even one anchor row from each side, the oversized sample fails open
+    # instead of silently losing the opening or closing context.
+    head_capacity = max(0, len(head_lines) - (_first_nonblank_index(head_lines) + 1)) if head_lines else 0
+    tail_capacity = max(0, _last_nonblank_index(tail_lines)) if tail_lines else 0
+    head_remove = min(head_capacity, remove // 2)
+    tail_remove = min(tail_capacity, remove - head_remove)
+    head_remove = min(head_capacity, remove - tail_remove)
+    head_keep = len(head_lines) - head_remove
+    tail_keep = len(tail_lines) - tail_remove
+    return "".join(head_lines[:head_keep]), "".join(tail_lines[len(tail_lines) - tail_keep:])
+
+
+def _trim_huge_edges_by_counts(
+    head: str, tail: str, head_remove: int, tail_remove: int,
+) -> tuple[str, str]:
+    head_lines = _lf_lines_keepends(head)
+    tail_lines = _lf_lines_keepends(tail)
+    # Never thin either nonempty edge away entirely; an impossible ceiling
+    # fails open rather than silently losing the opening or closing context.
+    head_capacity = max(0, len(head_lines) - (_first_nonblank_index(head_lines) + 1)) if head_lines else 0
+    tail_capacity = max(0, _last_nonblank_index(tail_lines)) if tail_lines else 0
+    head_remove = min(head_capacity, max(0, head_remove))
+    tail_remove = min(tail_capacity, max(0, tail_remove))
+    head_keep = len(head_lines) - head_remove
+    tail_keep = len(tail_lines) - tail_remove
+    return "".join(head_lines[:head_keep]), "".join(tail_lines[len(tail_lines) - tail_keep:])
+
+
+def _edge_block_costs(
+    blocks: list[dict[str, Any]], start_line: int, end_line: int, *, inner_end: bool,
+    anchor_line: int | None = None,
+) -> list[int]:
+    """Cumulative row costs for removing complete blocks from one edge's inner end."""
+    costs: list[int] = []
+    ordered = reversed(blocks) if inner_end else iter(blocks)
+    for block in ordered:
+        start = int(block["start"])
+        end = int(block["end"])
+        if start < start_line or end > end_line:
+            continue
+        if anchor_line is not None and start <= anchor_line <= end:
+            continue
+        if inner_end:
+            cost = end_line - start + 1
+        else:
+            cost = end - start_line + 1
+        if cost > 0 and (not costs or cost > costs[-1]):
+            costs.append(cost)
+    return costs
+
+
+def _cost_for_blocks(costs: list[int], count: int) -> int:
+    if count <= 0 or not costs:
+        return 0
+    return costs[min(count, len(costs)) - 1]
+
+
+def _trim_huge_edges_blockaware(
+    sample: str, head: str, tail: str, blocks: list[dict[str, Any]], over_blocks: int,
+) -> tuple[str, str] | None:
+    """Trim complete inner edge blocks when their line spans are measurable.
+
+    Returns ``None`` when a seam-crossing shape makes the mapping uncertain; the
+    caller falls back to density-scaled complete-line trimming."""
+    if over_blocks <= 0 or not (head or tail):
+        return head, tail
+    total_lines = _line_count(sample)
+    if total_lines <= 0:
+        return None
+    if head:
+        head_end = head.count("\n") - (1 if head.endswith("\n") else 0)
+    else:
+        head_end = -1
+    tail_start = sample[:len(sample) - len(tail)].count("\n") if tail else 0
+    if tail_start >= total_lines:
+        return None
+    tail_end = total_lines - 1
+    head_anchor = _first_nonblank_index(_lf_lines_keepends(head)) if head else None
+    tail_anchor = (
+        tail_start + _last_nonblank_index(_lf_lines_keepends(tail)) if tail else None
+    )
+    head_costs = (
+        _edge_block_costs(blocks, 0, head_end, inner_end=True, anchor_line=head_anchor) if head else []
+    )
+    tail_costs = (
+        _edge_block_costs(blocks, tail_start, tail_end, inner_end=False, anchor_line=tail_anchor) if tail else []
+    )
+    if not head_costs and not tail_costs:
+        return None
+    head_blocks = len(head_costs)
+    tail_blocks = len(tail_costs)
+    total_blocks = head_blocks + tail_blocks
+    head_take = min(head_blocks, over_blocks * head_blocks // total_blocks)
+    tail_take = min(tail_blocks, over_blocks - head_take)
+    head_take = min(head_blocks, over_blocks - tail_take)
+    head_remove = _cost_for_blocks(head_costs, head_take)
+    tail_remove = _cost_for_blocks(tail_costs, tail_take)
+    if head_remove <= 0 and tail_remove <= 0:
+        return None
+    return _trim_huge_edges_by_counts(head, tail, head_remove, tail_remove)
+
+
+def _line_count(text: str) -> int:
+    return text.count("\n") + (1 if text else 0)
+
+
+def _thin_lines_evenly(lines: list[str], max_lines: int) -> list[str]:
+    """Keep an even first-to-last subset of lines, at most ``max_lines``."""
+    if len(lines) <= max_lines:
+        return lines
+    if max_lines <= 0:
+        return []
+    if max_lines == 1:
+        return lines[:1]
+    last = len(lines) - 1
+    slots = max_lines - 1
+    return [lines[(index * last) // slots] for index in range(max_lines)]
+
+
+def _thin_text_lines(text: str, max_lines: int, *, from_end: bool = False) -> str:
+    if not text or max_lines <= 0:
+        return ""
+    if _line_count(text) <= max_lines:
+        return text
+    lines = text.split("\n")
+    if len(lines) <= max_lines:
+        return text
+    selectable = lines
+    if from_end:
+        selectable = list(lines)
+        while selectable and not selectable[-1]:
+            selectable.pop()
+    kept = selectable[-max_lines:] if from_end else selectable[:max_lines]
+    return "\n".join(kept)
+
+
+def _huge_sample(text: str, max_blocks: int | None = None, max_lines: int | None = None) -> str:
     """Streaming head/tail + error-line sample for inputs over ``_HUGE_CHARS`` (S7).
 
     One deterministic pass: fixed-size edges, every middle line matching a cheap
-    marker check, thinned evenly to ``_HUGE_ERR_CHARS`` when over budget."""
+    marker check, thinned evenly to ``_HUGE_ERR_CHARS`` when over budget. Exact
+    duplicate errors carry no extra bytes into the recursive pass. The recursive
+    pass still has a block ceiling, so record-shaped samples are thinned to that
+    ceiling as well; bytes alone are not enough when every short line is its own
+    block. And the whole sample stays under the caller's line cap, so sampling
+    cannot move a large input past one hard limit only to hit another."""
     edge = _HUGE_EDGE_CHARS
     head, tail = text[:edge], text[-edge:]
+    resolved_max_lines = max_lines if max_lines is not None else IndustrialLimits().max_lines
     errs: list[str] = []
+    seen_errs: set[str] = set()
     total = 0
     for line in text[edge:len(text) - edge].splitlines():
         low = line.lower()
-        if len(line) <= _HUGE_ERR_LINE_CHARS and any(mark in low for mark in _HUGE_ERR_MARKERS):
+        if (
+            len(line) <= _HUGE_ERR_LINE_CHARS
+            and any(mark in low for mark in _HUGE_ERR_MARKERS)
+            and line not in seen_errs
+        ):
+            seen_errs.add(line)
             errs.append(line)
             total += len(line) + 1
     if total > _HUGE_ERR_CHARS and errs:
@@ -14465,6 +14716,40 @@ def _huge_sample(text: str) -> str:
                         packed.append(line)
                         local -= cost
             errs = packed
+    # The recursive pass enforces the same hard line cap as any other input.
+    # Errors are optional sample detail, so spend leftover lines on them after
+    # the edge anchors; only when the edges themselves are too tall are they
+    # thinned evenly as well. Eight reserved rows cover the seam markers with
+    # slack for the surrounding empty rows.
+    seam_reserve = 8
+    err_line_reserve = (
+        min(len(errs), max(1, resolved_max_lines // 4))
+        if errs and resolved_max_lines >= 4 else 0
+    )
+    edge_budget = max(0, resolved_max_lines - seam_reserve - err_line_reserve)
+    if _line_count(head) + _line_count(tail) > edge_budget:
+        if head and tail and edge_budget < 2:
+            # Too few rows remain to retain one opening and one closing anchor.
+            # Leave the edges oversized so the recursive pass fails open instead
+            # of silently discarding one end of the caller's log.
+            pass
+        else:
+            if head and tail:
+                head_lines = _line_count(head)
+                tail_lines = _line_count(tail)
+                head_budget = min(head_lines, edge_budget // 2)
+                tail_budget = min(tail_lines, edge_budget - head_budget)
+                head_budget = min(head_lines, edge_budget - tail_budget)
+            elif head:
+                head_budget, tail_budget = edge_budget, 0
+            else:
+                head_budget, tail_budget = 0, edge_budget
+            head = _thin_text_lines(head, head_budget)
+            tail = _thin_text_lines(tail, tail_budget, from_end=True)
+    error_line_budget = max(
+        0, resolved_max_lines - seam_reserve - _line_count(head) - _line_count(tail)
+    )
+    errs = _thin_lines_evenly(errs, error_line_budget)
     mid = "\n".join(errs)
     # Join with "[...]" (three ASCII dots), never "[…]": the unicode-ellipsis shape
     # is what the forged-marker defense rewrites, so joining with it either emitted
@@ -14473,7 +14758,86 @@ def _huge_sample(text: str) -> str:
     # byte-exact recovery and the recursion guard, all of which compare original
     # spelling. "[...]" matches nothing in the defense, so the sample reaches the
     # inner pass byte-exact and the joins survive it untouched.
-    return "\n[...]\n".join(part for part in (head, mid, tail) if part)
+    sample = _join_huge_sample(head, errs, tail)
+    if max_blocks is None:
+        max_blocks = IndustrialLimits().max_blocks
+    # Blocks never outnumber lines, so the common long-line case skips the extra
+    # segmentation pass. Over that count, reserve the same quarter of the block
+    # budget for middle errors that the byte sampler gives them. Without the
+    # reservation, dense edge records can consume the whole ceiling and erase
+    # every error the middle sample was meant to carry.
+    if len(sample.split("\n")) <= max_blocks:
+        return sample
+    err_reserve = min(len(errs), max(1, max_blocks // 4)) if errs and max_blocks >= 4 else 0
+    # ``base_sample`` already carries the edge-joining separator. Reintroducing a
+    # nonempty middle adds a second one, which is its own block in record-shaped
+    # samples; reserve that row too instead of spending it from the error budget.
+    middle_seam_reserve = 1 if errs else 0
+    edge_budget = max(1, max_blocks - err_reserve - middle_seam_reserve)
+    base_sample = _join_huge_sample(head, [], tail)
+    base_segmented = _huge_sample_blocks(base_sample)
+    base_blocks = len(base_segmented)
+    for _ in range(8):
+        if base_blocks <= edge_budget or (not head and not tail):
+            break
+        over = base_blocks - edge_budget
+        trimmed = _trim_huge_edges_blockaware(base_sample, head, tail, base_segmented, over)
+        if trimmed is None:
+            head, tail = _trim_huge_edges(
+                head, tail,
+                _scaled_huge_line_removal(_line_count(base_sample), base_blocks, over),
+            )
+        else:
+            head, tail = trimmed
+        base_sample = _join_huge_sample(head, [], tail)
+        base_segmented = _huge_sample_blocks(base_sample)
+        base_blocks = len(base_segmented)
+
+    # Measure the full sample before spending any error rows. In prose-like logs
+    # several errors can share one block, so a one-block-per-row allowance would
+    # thin rows that already fit; the reconciliation below removes only measured
+    # overflow while preserving endpoint coverage.
+    sample = _join_huge_sample(head, errs, tail)
+    segmented = _huge_sample_blocks(sample)
+    blocks = len(segmented)
+    for _ in range(8):
+        over = blocks - max_blocks
+        if over <= 0:
+            return sample
+        if not errs:
+            break
+        base_line = _huge_error_base_line(sample, head, errs)
+        error_blocks = sum(
+            1 for block in segmented
+            if min(int(block["end"]), base_line + len(errs) - 1) >= max(int(block["start"]), base_line)
+        )
+        keep_blocks = max(1, error_blocks - over) if error_blocks else 0
+        thinned = _thin_errors_by_block_coverage(errs, segmented, base_line, keep_blocks)
+        if thinned == errs:
+            break
+        errs = thinned
+        sample = _join_huge_sample(head, errs, tail)
+        segmented = _huge_sample_blocks(sample)
+        blocks = len(segmented)
+    # Dense one-line records in either edge can exceed the ceiling even with no
+    # middle errors. Shrink both edge slices toward the middle join while keeping
+    # them byte-exact prefixes/suffixes of the caller's text.
+    for _ in range(8):
+        if blocks <= max_blocks or (not head and not tail):
+            break
+        over = blocks - max_blocks
+        trimmed = _trim_huge_edges_blockaware(sample, head, tail, segmented, over)
+        if trimmed is None:
+            head, tail = _trim_huge_edges(
+                head, tail,
+                _scaled_huge_line_removal(_line_count(sample), blocks, over),
+            )
+        else:
+            head, tail = trimmed
+        sample = _join_huge_sample(head, errs, tail)
+        segmented = _huge_sample_blocks(sample)
+        blocks = len(segmented)
+    return sample
 
 
 def compress_context(
@@ -14613,7 +14977,34 @@ def compress_context(
                 keep_ratio=1.0, fail_open=True, reasons=["too_large"],
                 confidence=0.0, confidence_basis="none", query_specific=q_specific,
             )
-        sample = _huge_sample(full_text)
+        if pin_patterns or pin_recent:
+            # The streaming sample does not know the original's block boundaries,
+            # so it cannot prove that a caller-pinned block reached the recursive
+            # pass intact. Pins are a hard caller floor: preserve the original
+            # rather than let the sampled pin-loss check approve a sample in
+            # which the pinned block never appeared.
+            est = _estimate_tokens(full_text)
+            return CompressResult(
+                compressed_text=full_text, original_tokens=est, kept_tokens=est,
+                tokens_saved_pct=0.0, policy_name="huge-pinned", mode=mode,
+                keep_ratio=1.0, fail_open=True, reasons=["huge_pinned_input"],
+                confidence=0.0, confidence_basis="none", query_specific=q_specific,
+            )
+        sample = _huge_sample(
+            full_text, max_blocks=(limits or IndustrialLimits()).max_blocks,
+            max_lines=(limits or IndustrialLimits()).max_lines)
+        if not any(
+            row.strip() and row.strip() != "[...]"
+            for row in strip_ansi(sample).splitlines()
+        ):
+            est = _estimate_tokens(full_text)
+            return CompressResult(
+                compressed_text=full_text, original_tokens=est, kept_tokens=est,
+                tokens_saved_pct=0.0, policy_name="huge-sample-empty", mode=mode,
+                keep_ratio=1.0, fail_open=True,
+                reasons=["huge_sample_empty", "huge_sampled"],
+                confidence=0.0, confidence_basis="none", query_specific=q_specific,
+            )
         res = compress_context(
             sample, query, mode=mode, budget_ratio=budget_ratio, ccr=ccr,
             cache_prefix=cache_prefix, citations=citations, ccr_dir=ccr_dir,
