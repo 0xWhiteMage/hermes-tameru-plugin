@@ -10,4 +10,4 @@ imports that do not resolve inside a nested package.
 from .compress_context import compress_context  # noqa: F401
 
 # Upstream commit this directory was synced from (scripts/sync_to_harness.py).
-VENDORED_FROM = "135e6388b6c5db9593210a0fd51a4842702ad262"  # Tameru 1.10.0 source
+VENDORED_FROM = "783c070ad15ee8b7c82856857519a079a0263551"  # Tameru 1.10.0 source
