@@ -470,9 +470,9 @@ class _ExplodingDb:
 
 def test_session_db_usable_with_fakes(compat):
     assert compat.session_db_usable(_FullDb()) is True
-    assert compat.session_db_usable(_ReadOnlyDb()) is False
+    assert compat.session_db_usable(_ReadOnlyDb()) is True        # Hermes v0.23.3+ hands engines a reader
     assert compat.session_db_usable(SimpleNamespace(get_messages=None, archive_and_compact="x")) is False
-    assert compat.session_db_usable(SimpleNamespace(get_messages=print)) is False
+    assert compat.session_db_usable(SimpleNamespace(get_messages="x", archive_and_compact=print)) is False
     assert compat.session_db_usable(_OpaqueLookalike()) is False
     assert compat.session_db_usable(_ExplodingDb()) is False
     assert compat.session_db_usable(None) is False

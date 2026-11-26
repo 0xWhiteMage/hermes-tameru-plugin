@@ -10,6 +10,13 @@ All notable changes to this project are documented here. The format follows
   `activity.digest(non-str)`, `tool_calls_by_id`/`build_index` with a non-dict message row,
   `build_index(call_id_to_tool=non-dict)` and `build_query(cache=non-dict)` used to crash on
   `.encode`/`.get` — they now reject the argument at the entry, naming the expected type.
+- **`tameru_read_original` finds an earlier turn's originals again on Hermes v0.23.3 and later.** Hermes
+  now hands a plugin engine a `session_db` that reads history (archived originals included) but has no
+  `archive_and_compact`, because Hermes commits rewrites itself. `session_db_usable` required both
+  methods, so the archive lookup, the Desktop original view and the activity restore were all switched
+  off: any ref from an earlier turn, a restart or a new agent came back "ref not found", and a
+  credential-bearing original was reported missing instead of refused. The check now requires only
+  `get_messages`, which is all its callers use.
 
 ## [0.1.0] - 2026-11-24
 
