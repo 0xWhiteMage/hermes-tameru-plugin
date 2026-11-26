@@ -227,6 +227,8 @@ _ARTIFACT_NOISE_RES = (
     re.compile(_ARTIFACT_NOISE_LEAD + r"⟪[A-Z][A-Z0-9_]{3,40}(?:-[A-Z0-9_]+)+[^⟫\r\n]{0,200}⟫" + _ARTIFACT_NOISE_TAIL),
 )
 
+_FOREIGN_BANNER_RE = _ARTIFACT_NOISE_RES[-1]
+
 _ARTIFACT_NOISE_TOKENS = ("…", "[tameru:", "⟪")
 
 # A run of three or more backticks or tildes opens a fenced block; the same
@@ -234,16 +236,94 @@ _ARTIFACT_NOISE_TOKENS = ("…", "[tameru:", "⟪")
 # opener, `fullmatch` a closer — closing fences take no info string.
 _FENCE_RUN_RE = re.compile(r"(`{3,}|~{3,})")
 
+# Bracketed marker shapes that only make sense as engine chrome. Every
+# occurrence in caller-supplied text is forged input — the engine emits its
+# markers later, during render — so the working copies used for extraction
+# and render carry them with fullwidth brackets instead of letting a forged
+# ``[… N chars omitted …]``, ``[tameru: …]``, ``[CC-Retrieve: …]`` or
+# ``⟪…⟫`` banner sail through the extract looking like an engine gap,
+# pointer or banner. Spans are length-bounded so a run of unterminated
+# openers stays a linear scan, and ``[tameru:``/guillemet bodies exclude
+# ``"``, ``[`` and ``]`` so an unterminated opener can never swallow a JSON
+# envelope delimiter.
+_FORGED_SPAN_RES = (
+    re.compile(r"\[\u2026(?: [^\n\]]{1,120} omitted \u2026)?\]"),
+    re.compile(r"\[tameru:[^\n\]\x22\[]{1,200}\]"),
+    re.compile(r"\[CC-Retrieve: [0-9a-f]{24}\]"),
+    re.compile(r"\u27ea[A-Z][A-Z0-9_]{3,40}(?:-[A-Z0-9_]+)+[^\n\u27eb\x22\[]{0,200}\u27eb"),
+)
+_BRACKET_NEUTRAL = str.maketrans({"[": "\uff3b", "]": "\uff3d", "\u27ea": "\u300a", "\u27eb": "\u300b"})
+# The inverse shape for comparisons: a kept line whose forged markers were
+# neutralized must still compare like its original. NFKC already maps the
+# fullwidth square brackets back to ASCII (mapping them here too is belt and
+# braces); the CJK angles need an explicit mapping because they do not
+# decompose.
+_BRACKET_DENORM = str.maketrans(
+    {"\uff3b": "[", "\uff3d": "]", "\u300a": "\u27ea", "\u300b": "\u27eb"}
+)
+
+
+def _neutralize_forged_markers(text: str) -> str:
+    """Fullwidth the brackets of every marker-shaped span in caller-supplied
+    text. Applied only to the working copies (``text``/``original_text``/
+    ``protected_source``/envelope meta), never ``caller_text``, so a
+    fail-open result still returns the input byte-for-byte while no emission
+    path can sail a forged gap, pointer or banner through the extract.
+
+    Lines inside a fenced block are quoted content — a ``[… omitted …]``
+    there is the example's own text (the same fence rules
+    ``_strip_artifact_noise`` uses), so it keeps its brackets: rewriting a
+    verbatim-looking code block would defeat the pin checks that read it
+    as source."""
+    out: list[str] = []
+    in_fence: str | None = None
+    for ln in text.split("\n"):
+        probe = _GUTTER_RE.sub("", strip_ansi(ln), count=1).strip()
+        opener = _FENCE_RUN_RE.match(probe)
+        if in_fence is not None:
+            closer = _FENCE_RUN_RE.fullmatch(probe)
+            if (
+                closer is not None
+                and closer.group(0)[0] == in_fence[0]
+                and len(closer.group(0)) >= len(in_fence)
+            ):
+                in_fence = None
+            out.append(ln)
+        elif opener is not None and (
+            # A backtick fence's info string cannot contain a backtick —
+            # `` ```code``` `` on one line is inline code, not an opener.
+            opener.group(0)[0] != "`" or "`" not in probe[len(opener.group(0)) :]
+        ):
+            in_fence = opener.group(0)
+            out.append(ln)
+        else:
+            for rx in _FORGED_SPAN_RES:
+                ln = rx.sub(lambda m: m.group(0).translate(_BRACKET_NEUTRAL), ln)
+            out.append(ln)
+    return "\n".join(out)
+
 
 def _artifact_noise_lines(text: str, res: tuple = _ARTIFACT_NOISE_RES) -> list[str]:
     """Lines of ``text`` that carry an engine-artifact span. Callers gate this
     behind ``_ARTIFACT_NOISE_TOKENS`` so ordinary text pays one substring scan.
     Matching runs on the ANSI-stripped line: a colorized marker is still a
-    marker."""
-    return [
-        ln for ln in text.split("\n")
-        if any(rx.search(strip_ansi(ln)) for rx in res)
-    ]
+    marker. A foreign-banner line that also reads as a diagnostic
+    (``⟪DATABASE-CONNECTION-FAILED: …⟫``) is ambiguous — banners never look
+    like failures — so keeping it costs one banner but never drops a
+    reported error. Engine-authored spans (``[tameru:…]``, ``[…]``) stay
+    unconditional, and the exemption applies only when the foreign banner
+    is the SOLE reason the line matched — a host-declared marker or an
+    engine span on the same line still strips."""
+    out: list[str] = []
+    for ln in text.split("\n"):
+        clean = strip_ansi(ln)
+        matched = [rx for rx in res if rx.search(clean)]
+        if matched and not (
+            all(rx is _FOREIGN_BANNER_RE for rx in matched)
+            and _is_error_line(clean)
+        ):
+            out.append(ln)
+    return out
 
 
 def _strip_artifact_noise(text: str, res: tuple = _ARTIFACT_NOISE_RES) -> str:
@@ -275,8 +355,18 @@ def _strip_artifact_noise(text: str, res: tuple = _ARTIFACT_NOISE_RES) -> str:
             if marker[0] != "`" or "`" not in probe[len(marker) :]:
                 in_fence = marker
             kept.append(ln)
-        elif not any(rx.search(strip_ansi(ln)) for rx in res):
-            kept.append(ln)
+        else:
+            clean = strip_ansi(ln)
+            matched = [rx for rx in res if rx.search(clean)]
+            # Same exemption _artifact_noise_lines applies: a foreign-banner
+            # line that also reads as a diagnostic is ambiguous — banners
+            # never report failures — so it is kept unless an engine span or
+            # a host-declared marker also matched.
+            if not matched or (
+                all(rx is _FOREIGN_BANNER_RE for rx in matched)
+                and _is_error_line(clean)
+            ):
+                kept.append(ln)
     return "\n".join(kept)
 
 
@@ -1091,7 +1181,7 @@ def _error_fp(line: str) -> str:
     whitespace collapsed, capped at 160 chars.
     """
     s = _COUNT_PREFIX_RE.sub("", _nfkc(line[:_RX_LINE_CAP]), count=1).lower()
-    return mask_template(s)[:_FINGERPRINT_CAP]
+    return mask_template(s.translate(_BRACKET_DENORM))[:_FINGERPRINT_CAP]
 
 
 def error_fingerprints(text: str, *, status_rows: bool = True) -> dict[str, str]:
@@ -1941,28 +2031,79 @@ def _blank_same_line_triples(ln: str) -> tuple[str, list[tuple[int, int]]]:
     unpaired = [(s, s + 3) for qs in waiting.values() for s in qs]
     if not spans:
         return ln, unpaired
-    spans.sort()
+    # An opposite-kind pair inside an open string nests INSIDE its span —
+    # walking raw spans rewinds past the outer end and re-emits the tail,
+    # exposing the real closer. Merge overlapping spans first.
+    merged: list[list[int]] = []
+    for s, e in sorted(spans):
+        if merged and s < merged[-1][1]:
+            merged[-1][1] = max(merged[-1][1], e)
+        else:
+            merged.append([s, e])
     parts: list[str] = []
     pos = 0
-    for s, e in spans:
+    for s, e in merged:
         parts.append(ln[pos:s])
         parts.append(" " * (e - s))
         pos = e
     parts.append(ln[pos:])
     return "".join(parts), unpaired
-_SINGLE_QUOTED_RE = re.compile(r'"(?:\\.|[^"\\])*"|\'[^\']*\'')
-# A run of 3-5 same quotes *ends* a multiline string — its first quotes are
-# content (TOML allows up to two: ``x""""`` is ``x"`` + closer) — so the
-# string's tail begins after the whole run, not after the first three. Six or
-# more can only be close+open (content is capped at two), so the run is left
-# for the later opener cut instead.
+_SINGLE_QUOTED_RE = re.compile(
+    r'"(?:\\.|[^"\\])*"|\'(?:\\.|[^\'\\])*\'|\'[^\']*\''
+)
+_QUOTE_OPENERS = " \t=:[,{(\"'"
+
+
+def _quote_opens(line: str, i: int) -> bool:
+    """True when a ``'``/``"`` at ``i`` can start a quoted value — a lone
+    quote mid-word (``ba'a``, ``it's``) is prose, not an unclosed literal.
+    A Python-style prefix (``r".."``, ``rb'..'``) counts when the letter
+    itself sits at a value position."""
+    if i == 0:
+        return True
+    p = line[i - 1]
+    if p in _QUOTE_OPENERS:
+        return True
+    if p in "rbufRBUF":
+        j = i - 2
+        if j < 0:
+            return True
+        return (line[j] in _QUOTE_OPENERS
+                or (line[j] in "rbufRBUF"
+                    and (j - 1 < 0 or line[j - 1] in _QUOTE_OPENERS)))
+    return False
+
+
+def _unclosed_quote_pos(
+    scrubbed: str, tri_runs: list[tuple[int, int]] = ()
+) -> int | None:
+    """Offset of a lone ``'``/``"`` that opens a literal and never closes,
+    or ``None`` — a lone quote only swallows the line where it can start a
+    value, quotes a matched literal covers (``'t'`` in ``'t''''``) are
+    paired, not unclosed, and a quote inside a ``\'\'\'``/``\"\"\"`` run
+    belongs to the run, never to a literal."""
+    covered: list[tuple[int, int]] = [
+        m.span() for m in _SINGLE_QUOTED_RE.finditer(scrubbed)
+    ]
+    for m2 in re.finditer(r"(?<!')'(?!')|(?<!\")\"(?!\")", scrubbed):
+        s = m2.start()
+        if any(a <= s < b for a, b in covered):
+            continue
+        if any(a <= s < b for a, b in tri_runs):
+            continue
+        if _quote_opens(scrubbed, s):
+            return s
+    return None
+
+
+
 _TRIPLE_RUN_DQ = re.compile(r'(?<![\\"])"{3,5}(?!")')
+
 _TRIPLE_RUN_SQ = re.compile(r"(?<![\\'])'{3,5}(?!')")
+
 _TRIPLE_QUOTED_SAME_LINE_RE = re.compile(
     r'"""(?:[^"]|"(?!""))*"""|\'\'\'(?:[^\']|\'(?!\'\'))*\'\'\'')
-# A quote that is part of a ``'''``/``\"\"\"`` run never opens a single-line
-# span — without the lookarounds the pairs in ``v = '''a ' b`` would blank
-# the real multiline opener.
+
 _SINGLE_QUOTED_STRICT_RE = re.compile(
     r'(?<!")"(?!"")(?:\\.|[^"\\])*"(?!")'
     r"|(?<!')'(?!'')[^']*'(?!')"
@@ -2002,6 +2143,15 @@ def _quote_aware_code_part(ln: str) -> str:
         s, e = m.span()
         # A literal that swallowed a run whole ('a """') is blanked; a bare
         # ""/'' match only overlapping the run's own quotes IS the opener.
+        # A "literal" starting INSIDE a run (``"""ba'''"`` matches ``"ba'''"``)
+        # is part of the run, not a literal — keep only the run's own quote
+        # chars; its content stays blanked so a ``"""`` inside it never reads
+        # as a live delimiter (``x = '''x"""'`` keeps ``'''``, hides ``"""``).
+        if any(ts < s < te for ts, te in tri_runs):
+            return "".join(
+                c if any(ts <= s + i < te for ts, te in tri_runs) else " "
+                for i, c in enumerate(m.group(0))
+            )
         if any(s <= ts and e >= te for ts, te in tri_runs) or not any(
             s < te and e > ts for ts, te in tri_runs
         ):
@@ -2011,9 +2161,9 @@ def _quote_aware_code_part(ln: str) -> str:
     scrubbed = _SINGLE_QUOTED_RE.sub(_blank_literal, scrubbed)
     m = re.search(r"[#;]", scrubbed)
     cut = m.start() if m is not None else len(scrubbed)
-    m2 = re.search(r"(?<!')'(?!')|(?<!\")\"(?!\")", scrubbed)
-    if m2 is not None:
-        cut = min(cut, m2.start())
+    uq = _unclosed_quote_pos(scrubbed, tri_runs)
+    if uq is not None:
+        cut = min(cut, uq)
     return scrubbed[:cut]
 
 
@@ -2396,6 +2546,50 @@ def _toml_string_repair(parts: list[str], header_texts: set[str]) -> list[str]:
     return out
 
 
+
+def _scan_positions_from(line: str, delim: str, pos: int) -> list[int]:
+    return [p for p in _triple_close_positions(line, delim) if p >= pos]
+
+
+def _advance_replay_state(ln: str, inside_basic: bool, inside_literal: bool):
+    """Triple-quote state after one line, scanned in position order: the
+    FIRST delimiter run opens, and a run of the other kind inside it is
+    content — ``note = '''it\\\"\"\"`` opens a literal, not a basic
+    string. Same-line pairs are pre-blanked: self-contained in every
+    lexing state."""
+    ln, _ = _blank_same_line_triples(ln)
+    view_out = _quote_aware_code_part(ln)
+    pos = 0
+    n = len(ln)
+    while pos < n:
+        if inside_basic:
+            ps = _scan_positions_from(ln, '"""', pos)
+            if not ps:
+                break
+            inside_basic = False
+            pos = ps[0] + 3
+        elif inside_literal:
+            ps = _scan_positions_from(ln, "'''", pos)
+            if not ps:
+                break
+            inside_literal = False
+            pos = ps[0] + 3
+        else:
+            dq = _scan_positions_from(view_out, '"""', pos)
+            sq = _scan_positions_from(view_out, "'''", pos)
+            first_dq = dq[0] if dq else n + 1
+            first_sq = sq[0] if sq else n + 1
+            if first_dq == n + 1 and first_sq == n + 1:
+                break
+            if first_sq < first_dq:
+                inside_literal = True
+                pos = first_sq + 3
+            else:
+                inside_basic = True
+                pos = first_dq + 3
+    return inside_basic, inside_literal
+
+
 def _restored_block(
     after: str,
     lines: list[str],
@@ -2435,17 +2629,45 @@ def _restored_block(
     for i, l in enumerate(after_lines):
         in_string[i] = inside_basic or inside_literal
         after_hdr[i] = cur_after_hdr
-        # Only the code part of the line opens or closes a TOML string —
-        # quotes inside a trailing # comment are text, and \"-escaped
-        # quotes inside a basic string don't end it.
-        code = _delim_view(l, inside_basic or inside_literal)
         if not in_string[i] and _SECTION_LIKE_RE.match(l):
             cur_after_hdr = l
             after_hdr[i] = l
-        if not inside_literal and _unescaped_triple_count(code, '"""') % 2:
-            inside_basic = not inside_basic
-        if not inside_basic and _unescaped_triple_count(code, "'''") % 2:
-            inside_literal = not inside_literal
+        # Only the code part of the line opens or closes a TOML string —
+        # quotes inside a trailing # comment are text, and \"-escaped
+        # quotes inside a basic string don't end it.
+        code = l if (inside_basic or inside_literal) else _toml_code_part(l)
+
+        # Delimiters toggle in position order: ``x = ''' """`` opens a
+        # LITERAL string (the ``"""`` is its content), so checking the
+        # basic kind first would mis-track the open kind and run the mask
+        # past the real closer.
+        # Once a string closes mid-line the rest of the line is code again —
+        # a ``#``/``;`` comment in that tail (``''' # note """``) is text, so
+        # delimiters it mentions never open a new string. The comment cut is
+        # computed once, after the first close on the line.
+        cut: int | None = None
+        pos = 0
+        while (m := re.search(r'"""|\'\'\'', code[pos:])) is not None:
+            m_start = pos + m.start()
+            m_end = pos + m.end()
+            if cut is not None and m_start >= cut:
+                break
+            if m.group(0) == '"""' and _odd_backslashes(code, m_start):
+                # ``\""""`` is an escaped quote then a REAL closer — skip the
+                # escaped quote only, so the ``"""`` after it can still match.
+                pos = m_start + 1
+                continue
+            if m.group(0) == '"""' and not inside_literal:
+                inside_basic = not inside_basic
+                if not inside_basic and cut is None:
+                    cut = m_end + len(_toml_code_part(code[m_end:]))
+            elif m.group(0) == "'''" and not inside_basic:
+                inside_literal = not inside_literal
+
+                if not inside_literal and cut is None:
+
+                    cut = m_end + len(_toml_code_part(code[m_end:]))
+            pos = m_end
     # A restored ``k = "\"\" ..."`` opener without the value's body leaves an
     # unterminated string that swallows every emitted line after it — the
     # whole extract stops parsing. The opener restores its continuation
@@ -2494,12 +2716,10 @@ def _restored_block(
             if header_of.get(ol) == ol:
                 cur_hdr = ol
                 enclosing[oidx] = cur_hdr
-            if _unescaped_triple_count(code, '"""') % 2 or _unescaped_triple_count(code, "'''") % 2:
+            nb, nl = _advance_replay_state(ol, False, False)
+            if nb or nl:
                 pending = (oidx, ol)
-                dq = _unescaped_triple_count(code, '"""') % 2
-                sq = _unescaped_triple_count(code, "'''") % 2
-                inside_basic = bool(dq)
-                inside_literal = not inside_basic and bool(sq)
+                inside_basic, inside_literal = nb, nl
                 close_kind[oidx] = "'''" if inside_literal else '"""'
                 continue
         if not inside_literal and _unescaped_triple_count(code, '"""') % 2:
@@ -3587,17 +3807,147 @@ def _triple_quoted_lines(text: str) -> set[str]:
     for ln in (text or "").split("\n"):
         if inside is not None:
             masked.add(ln)
-            if inside in ln:
+            # A ``"""`` basic-string run closes on a delimiter an odd
+            # backslash run does not escape; TOML literal strings never
+            # escape — any ``'''`` ends the run.
+            if inside == "'''":
+                if inside in ln:
+                    inside = None
+            elif _has_unescaped_triple(ln, '"""'):
                 inside = None
+            continue
+        if '"""' not in ln and "'''" not in ln:
             continue
         # A ``"""`` inside a comment (``# use """ for multiline``) is prose,
         # not a delimiter — count quotes only in the code part of the line.
-        code = re.split(r"[#;]", ln, maxsplit=1)[0]
-        for q in ('"""', "'''"):
-            if code.count(q) % 2 == 1:
-                masked.add(ln)
-                inside = q
-                break
+        # And a ``#``/``;`` inside a quoted literal is content, not a comment
+        # start: a naive ``re.split`` at either char would cut before a real
+        # ``"""`` that follows it in the value (``x = 'has # a """'``) and
+        # leave the string opener uncounted.
+        blank = lambda m: " " * len(m.group(0))
+        scrubbed, _ = _blank_same_line_triples(ln)
+        tri_runs = [
+            (m3.start(), m3.end()) for m3 in re.finditer(r'"""|\'\'\'', scrubbed)
+        ]
+
+        lit_spans: list[tuple[int, int]] = []
+
+        def _blank_literal(m):
+            s, e = m.span()
+            # A literal that swallowed a ``'''``/``"""`` run whole (e.g.
+            # ``'a """'``) is blanked; a bare ``""``/``''`` match that only
+            # overlaps the run's own quotes (``x = 'a' """``) is the opener
+            # and must survive. A "literal" starting INSIDE a run (its first
+            # quote is the run's last) is part of the run — keep only the
+            # run's own quote chars; blanking the rest hides stray
+            # delimiters its content may hold (``x = '''x"""'``).
+            if any(ts < s < te for ts, te in tri_runs):
+                return "".join(
+                    c if any(ts <= s + i < te for ts, te in tri_runs) else " "
+                    for i, c in enumerate(m.group(0))
+                )
+            if any(s <= ts and e >= te for ts, te in tri_runs) or not any(
+                s < te and e > ts for ts, te in tri_runs
+            ):
+                return " " * (e - s)
+            # A bare ``""``/``''`` whose chars are all run chars is a
+            # pseudo-literal — it overlaps a real ``'''``/``"""`` match, not
+            # a literal — so it is not a literal span for the cuts below.
+            if not all(
+                any(ts <= s + i < te for ts, te in tri_runs)
+                for i in range(e - s)
+            ):
+                lit_spans.append((s, e))
+            return m.group(0)
+
+        scrubbed = _SINGLE_QUOTED_RE.sub(_blank_literal, scrubbed)
+        m = next(
+            (
+                mm
+                for mm in re.finditer(r"[#;]", scrubbed)
+                if not any(a <= mm.start() < b for a, b in lit_spans)
+            ),
+            None,
+        )
+        cut = m.start() if m is not None else len(scrubbed)
+        # A ``'``/``"`` left unblanked never closed: a ``"""`` after it is
+        # inside that literal, not an opener (``x = 'a # b """`` unclosed), so cut
+        # there too — but only where the quote can start a value (``x = ba'a"""``
+        # is a lone apostrophe, not an unclosed literal — its ``"""`` opens).
+        uq = _unclosed_quote_pos(scrubbed, tri_runs)
+        if uq is not None:
+            cut = min(cut, uq)
+        code = scrubbed[:cut]
+        # Delimiters toggle in position order: ``x = ''' """`` opens a
+        # LITERAL string (the ``"""`` is its content) — checking ``"""``
+        # first would mis-track the open kind and mask past the real
+        # closer. A ``\'\'\'`` run always toggles (TOML literals do not
+        # escape); a ``\"\"\"`` run toggles only when unescaped.
+        pos = 0
+        while (m := re.search(r'"""|\'\'\'', code[pos:])) is not None:
+            m_start = pos + m.start()
+            kind = m.group(0)
+            if inside is None and (
+                any(a <= m_start < b for a, b in lit_spans)
+                or (kind == '"""' and _odd_backslashes(code, m_start))
+            ):
+                # The match's first quote is a kept literal's char or an
+                # escaped quote — ``'a b'''`` is ``'a b'`` then ``''`` and
+                # ``x = "a\"""""`` is ``"a\""`` then ``"""`` — so the real
+                # run can start one or two chars later. Check the raw line:
+                # the run's chars may sit in a blanked pseudo-literal or
+                # past the unclosed-quote cut. Inside an open string a
+                # match is only a closer or content — this literal
+                # bookkeeping does not apply.
+                for p in (m_start + 1, m_start + 2):
+                    if (
+                        ln[p : p + 3] == kind
+                        and not any(a <= p < b for a, b in lit_spans)
+                        and not (kind == '"""' and _odd_backslashes(code, p))
+                    ):
+                        inside = kind
+                        pos = p + 3
+                        break
+                else:
+                    pos = m_start + 1
+                continue
+            if inside is not None and kind == '"""' and _odd_backslashes(code, m_start):
+                # an escaped quote may be followed by the real closer — retry
+                # one char in, so ``\""""`` still closes.
+                pos = m_start + 1
+                continue
+            if inside is None:
+                inside = kind
+            elif kind == inside:
+                inside = None
+            pos = pos + m.end()
+        if inside is not None and uq is not None and uq < (m.start() if m else len(scrubbed)):
+            # A lone quote that can open a value cut the code part — but a
+            # string that opened BEFORE it holds it as content, and the
+            # region the cut hid may carry the real closer
+            # (``x = "a\"""""x 'y"""`` closes). Rescan the tail for it; a
+            # lone ``'``/``"`` can never straddle the boundary, so starting
+            # past ``uq`` cannot split a delimiter.
+            pos = uq + 1
+            tail = scrubbed[: m.start() if m else len(scrubbed)]
+            while (m2 := re.search(r'"""|\'\'\'', tail[pos:])) is not None:
+                m_start = pos + m2.start()
+                kind = m2.group(0)
+                if kind == '"""' and _odd_backslashes(tail, m_start):
+                    pos = m_start + 1
+                    continue
+                if inside is None:
+                    if any(a <= m_start < b for a, b in lit_spans):
+                        # a ``"""``/``'''`` a kept literal covers is content,
+                        # not an opener — same guard as the main scan
+                        pos = m_start + 1
+                        continue
+                    inside = kind
+                elif kind == inside:
+                    inside = None
+                pos = pos + m2.end()
+        if inside is not None:
+            masked.add(ln)
     return masked
 
 
@@ -8059,7 +8409,10 @@ def _critical_kept(critical: list[str], compressed: str) -> int:
     # the per-line loop was O(lines x output) — 30 s of a 35 s run on a 650 KB
     # log (and ~10x worse again when the output holds a non-ASCII "[…]").
     compressed_lower = compressed.lower()
-    # Collapse prefixes do not change a line's facts.
+    # Collapse prefixes do not change a line's facts. Neither does forged-marker
+    # neutralization: a kept line whose span was bracket-translated still counts
+    # as kept — but only through its own neutralized form, so a genuinely
+    # fullwidth lookalike cannot stand in for a different dropped line.
     out_lines: set[str] = set()
     for out_line in compressed_lower.split("\n"):
         out_line = out_line.strip()
@@ -8068,8 +8421,11 @@ def _critical_kept(critical: list[str], compressed: str) -> int:
         if bare is not out_line:
             out_lines.add(bare)
     for line in critical:
-        core = line.strip().lower()
-        if core in out_lines:
+        core = line.strip()
+        # Neutralize BEFORE lowering: the marker patterns are case-sensitive
+        # (e.g. CC-Retrieve), and Unicode lowering can push a marker body past
+        # its length bound — either way a retained line would read as dropped.
+        if core.lower() in out_lines or _neutralize_forged_markers(core).lower() in out_lines:
             kept += 1
     return kept
 
@@ -12808,14 +13164,26 @@ def _industrial_preflight(
     query,
 ):
     """Run the industrial preflight (size and safety limits, format adapters), degrading to a bounded scoring view when allowed, and preflight any wrapped tool payload. Returns ``(industrial, degraded, payload_industrial)``. ``analysis_text`` is the noise-free copy used for format detection when sparse artifact markers were stripped; hard limits still judge ``caller_text``."""
+    # Neutralize the adapter INPUT, not its output: kept records are caller
+    # content whose forged spans must not sail through, while the
+    # ``[tameru:report …]`` banners and gap markers the adapter emits are
+    # engine-produced — neutralizing the output would fullwidth them and a
+    # re-compression would no longer recognize its own extract.
+    # ANSI escapes can split a marker's literal span (a colored ``[…]``);
+    # the later cleanup would reveal it inside rows that then skip the
+    # final pass — match on the ANSI-stripped copy instead.
+    vetted_source = analysis_text if analysis_text is not None else caller_text
+    vetted = strip_ansi(vetted_source)
     industrial = industrial_preprocess(
-        analysis_text if analysis_text is not None else caller_text,
+        _neutralize_forged_markers(vetted),
         industrial_query, limits, gap_marker=adapter_gap,
         allow_reports=not no_table,
     )
     if (
-        analysis_text is not None
-        and analysis_text is not caller_text
+        (
+            (analysis_text is not None and analysis_text is not caller_text)
+            or vetted != vetted_source
+        )
         and not industrial.hard_fail_open
     ):
         # Hard limits judge the TRUE input: stripping marker lines can never
@@ -12882,7 +13250,8 @@ def _industrial_preflight(
         )
         if candidate_payload.wrapped:
             payload_industrial = industrial_preprocess(
-                candidate_payload.inner, industrial_query, industrial.limits,
+                _neutralize_forged_markers(candidate_payload.inner),
+                industrial_query, industrial.limits,
                 gap_marker=adapter_gap, allow_reports=not no_table, reports_only=True,
             )
             if payload_industrial.hard_fail_open:
@@ -13359,13 +13728,17 @@ def _compress_context_impl(
                 gap_marker, omitted, len(caller_text), kind))
         )
     )
-    original_text = _norm_newlines(caller_text)
+    original_text = _neutralize_forged_markers(_norm_newlines(caller_text))
     # 1.10.0 (S5, E5): the protected fact lines and the density flag are computed on the caller's
     # original text — the unwrapped payload when the caller wrapped it — BEFORE the industrial and
     # format adapters below may delete a line, so protection knows every fact before any stage can
     # drop one. Density (sparsity rule B) is decided once here; ``_FACT_OFF`` keeps the machinery
     # off through every later stage on a dense original.
-    protected_payload = unwrap_tool_payload(original_text)
+    # Decode the RAW envelope, not the neutralized one: the neutralizer cannot
+    # see fences still escaped inside the JSON string, so it would rewrite a
+    # marker that the decode later reveals as fenced — and the floors would
+    # then restore a fullwidth copy beside the working text's verbatim one.
+    protected_payload = unwrap_tool_payload(_norm_newlines(caller_text))
     if (
         not protected_payload.wrapped
         and artifact_contaminated
@@ -13381,6 +13754,10 @@ def _compress_context_impl(
         # facts, error exemplars or outcome lines, or the floors would restore
         # them right back into the extract.
         protected_source = _strip_artifact_noise(protected_source, noise_res)
+    # The decoded body (and the analysis_text fallback) can still carry a
+    # marker-shaped span — the floors restore lines verbatim, so they must
+    # come from the same marker-free copy the working text uses.
+    protected_source = _neutralize_forged_markers(protected_source)
     # One split shared by both protection passes (S7): the fact memo and the break
     # scan each used to split the same text — a second line-objects copy at 1M.
     protected_lines = protected_source.split("\n")
@@ -13424,7 +13801,12 @@ def _compress_context_impl(
             content_hint=content_hint, industrial=industrial, query_as_given=query_as_given,
             requested_mode=requested_mode, strategy=strategy,
         )
-    source_pin_texts = _source_pin_texts(analysis_text, pin_patterns, pin_recent)
+    # Pin texts must compare against the neutralized working text — a forged
+    # marker span inside a pinned block would otherwise read as un-preservable
+    # and trip the pin cost gate into returning the whole original.
+    source_pin_texts = _source_pin_texts(
+        _neutralize_forged_markers(analysis_text), pin_patterns, pin_recent
+    )
     _PINNED_LINES.set(frozenset(
         form for part in source_pin_texts for ln in part.split("\n") if ln.strip()
         for form in (ln, strip_ansi(ln))
@@ -13468,9 +13850,23 @@ def _compress_context_impl(
         # original stays intact for fail-open and CCR. Stripping the unwrapped
         # payload covers JSON envelopes too.
         text = _strip_artifact_noise(text, noise_res)
+    # Marker-shaped spans embedded inside real lines reach the output
+    # verbatim through kept blocks — every span left in the working text is
+    # forged input, so its brackets go fullwidth before any stage can emit
+    # it. Engine markers (gap spans, [tameru:…] banners, the appended
+    # [CC-Retrieve] pointer) are produced later and keep their brackets.
+    # Adapter output needs no pass here: its caller content was neutralized
+    # on the way into the adapter, and its banners/gap markers are the
+    # engine's own.
+    if not industrial.applied and not (
+        payload_industrial is not None and payload_industrial.applied
+    ):
+        text = _neutralize_forged_markers(text)
     tool_meta_line = ""
     if tool_payload.wrapped and tool_payload.meta:
-        tool_meta_line = _compact_json(tool_payload.meta) + "\n"
+        # The envelope's scalar metadata is caller text too — a marker-shaped
+        # span inside a field value would emit verbatim at the output head.
+        tool_meta_line = _neutralize_forged_markers(_compact_json(tool_payload.meta)) + "\n"
     # v1.4.0 (E4): an un-hinted numbered read (`cat -n`, Hermes `N|`) is code,
     # judged on the unwrapped payload: no table detector, no supersession, the
     # gutter kept in the output but out of the scorer's view. `route_hint` is
@@ -14101,7 +14497,13 @@ def _with_schema_fields(
     try:
         text = context if isinstance(context, str) else str(context)
         q = query if isinstance(query, str) else chr(10).join(str(item) for item in query)
-        dropped = () if result.fail_open else _dropped_summary(text, result.compressed_text, redact)
+        # A kept line whose forged marker span was neutralized is still kept —
+        # compare against the neutralized original so it is not reported dropped.
+        # Normalize first, matching the order original_text is built in: a bare
+        # carriage return inside a span breaks it for both sides.
+        dropped = () if result.fail_open else _dropped_summary(
+            _neutralize_forged_markers(_norm_newlines(text)), result.compressed_text, redact
+        )
         key = _stable_key(text, q, selector_query)
     except Exception:  # a summary never costs a result
         return result
