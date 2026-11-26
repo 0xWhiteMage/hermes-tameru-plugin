@@ -17,6 +17,7 @@ permissions:
 jobs:
   # Stub-mode unit tests: tests/hermes_stub stands in for Hermes' ``agent`` package.
   unit:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -36,6 +37,7 @@ jobs:
 
   # Real Hermes at the pinned SHA (required). Hermes' dependencies only resolve on Python 3.14.
   real-hermes:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -96,6 +98,7 @@ jobs:
 
   # The vendored engine must be the engine repository's source at the commit hermes_tameru_plugin/tameru/__init__.py records.
   vendored:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -115,6 +118,7 @@ jobs:
   # The Desktop panel (plain JavaScript run in jsdom with React) has its own tests. The runner's Node runs them; the three
   # packages they load are installed next to the job, at the versions the tests were written against.
   desktop-panel:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -125,6 +129,7 @@ jobs:
           TAMERU_UI_TEST_DEPS: ${{ runner.temp }}/uideps/node_modules
 
   lint:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -137,6 +142,7 @@ jobs:
 
   # The wheel must contain every plugin module, plugin.yaml and the Hermes entry point.
   build:
+    if: github.event_name != 'schedule'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
