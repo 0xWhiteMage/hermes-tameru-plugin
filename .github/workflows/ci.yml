@@ -59,6 +59,7 @@ jobs:
           pip install uv
           echo "pillow==13.0.0" > "$RUNNER_TEMP/overrides.txt"
           uv pip install --system --override "$RUNNER_TEMP/overrides.txt" -e ./hermes-agent -e '.[dev]'
+      - run: ./hermes-agent/hermes plugins validate hermes_tameru_plugin
       - run: python -m pytest -m "not perf"
         env:
           HERMES_REPO_ROOT: ${{ github.workspace }}/hermes-agent
@@ -88,6 +89,7 @@ jobs:
           pip install uv
           echo "pillow==13.0.0" > "$RUNNER_TEMP/overrides.txt"
           uv pip install --system --override "$RUNNER_TEMP/overrides.txt" -e ./hermes-agent -e '.[dev]'
+      - run: ./hermes-agent/hermes plugins validate hermes_tameru_plugin
       - run: python -m pytest -m "not perf"
         env:
           HERMES_REPO_ROOT: ${{ github.workspace }}/hermes-agent

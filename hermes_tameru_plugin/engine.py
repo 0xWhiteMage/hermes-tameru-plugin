@@ -1149,6 +1149,16 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         """
         parent = super().prune_tool_results_only
         self._observe_activity(messages)
+        if kwargs.get("cold_cache"):
+            # A cold-cache prune is Hermes' cache-expiry path, not the plugin's warm regrowth gate:
+            # it has no prompt-cache prefix left to protect and must not be suppressed by
+            # proactive_prune_tokens or rewritten by the adaptive/plan warm-prune policies.
+            params = inspect.signature(parent).parameters.values()
+            if "cold_cache" not in inspect.signature(parent).parameters and not any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params
+            ):
+                kwargs = {k: v for k, v in kwargs.items() if k != "cold_cache"}
+            return parent(messages, current_tokens, *args, **kwargs)
         if not (self._settings.enabled and self._seams.demote):
             return parent(messages, current_tokens, *args, **kwargs)
         if self._settings.policy_mode == "plan":
