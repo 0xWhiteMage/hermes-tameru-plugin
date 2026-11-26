@@ -9,7 +9,7 @@ from engine_support import Chat, demote, make_engine, pytest_failure, server_log
 from fixtures import hermes_payloads as hp
 
 from hermes_tameru_plugin.config import TameruSettings
-from hermes_tameru_plugin.hermes_compat import LEAN_STUB_RE
+from hermes_tameru_plugin.hermes_compat import ARCHIVE_POINTER_RE, LEAN_STUB_RE
 from hermes_tameru_plugin.recovery import expand
 from hermes_tameru_plugin.render import classify_render, parse_header
 
@@ -51,6 +51,39 @@ def test_a_raw_row_becomes_a_header_with_a_ref_that_expands():
     assert messages[first]["content"] != row                  # the input list is untouched
     body = json.loads(expand(engine._store, {"ref": header["ref"]}))
     assert "test_reserve_stock_rollback" in body["content"]
+
+
+def test_the_header_keeps_hermes_archive_pointer(monkeypatch):
+    """Newer Hermes names the saved original after its stub: the header keeps that pointer beside its ref."""
+    from agent.context_compressor import ContextCompressor
+
+    stock, pointers = ContextCompressor._demote_stale_tail_tools, {}
+
+    def with_pointer(self, messages, tail_start):   # Hermes at the pin adds none: add one the way newer Hermes does
+        out = stock(self, messages, tail_start)
+        for i, row in enumerate(out):
+            stub = row.get("content")
+            if row is not messages[i] and isinstance(stub, str) and LEAN_STUB_RE.match(stub):
+                if not ARCHIVE_POINTER_RE.search(stub):
+                    out[i] = row = {**row, "content": f"{stub} — full result: ~/.hermes/cache/pruned/s1-call_{i}.txt"}
+                pointers[i] = ARCHIVE_POINTER_RE.search(row["content"])[1]
+        return out
+
+    monkeypatch.setattr(ContextCompressor, "_demote_stale_tail_tools", with_pointer)
+    engine = _lean(make_engine())
+    messages, first = _tail()
+    row = engine._demote_stale_tail_tools(messages, 2)[first]["content"]
+    header = parse_header(row)
+    assert header and header["rung"] == "header" and "\n" not in row
+    assert len(row) <= 380 and _is_summary_stub(row) and not LEAN_STUB_RE.match(row)
+    assert ARCHIVE_POINTER_RE.search(row)[1] == pointers[first]
+    body = json.loads(expand(engine._store, {"ref": header["ref"]}))
+    assert "test_reserve_stock_rollback" in body["content"]
+    try:
+        from tools.tool_result_storage import has_archive_pointer
+    except ImportError:   # the stub and Hermes at the pin have no pointer reader
+        return
+    assert has_archive_pointer(row)   # Hermes still treats the row as archived: no re-archive, no re-summary
 
 
 def test_a_rendered_row_keeps_its_ref():

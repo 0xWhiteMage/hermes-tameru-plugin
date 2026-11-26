@@ -402,6 +402,35 @@ def test_lean_stub_re_rejects_other_suffixes(compat):
     assert not compat.LEAN_STUB_RE.fullmatch(base + " [SKILL_PRUNED: x]\nmore")
 
 
+_POINTER = " — full result: ~/.hermes/cache/pruned/20260101_120000_abcd-terminal-call_1.txt"
+_MARKER = " [SKILL_PRUNED: content lost in compression; reload with skill_view(name='deploy')]"
+
+
+def test_lean_stub_re_accepts_the_archive_pointer(compat):
+    """Newer Hermes appends the pointer after any ``SKILL_PRUNED`` marker; nothing else may follow it."""
+    base = "[terminal output demoted at compaction — 7,114 chars preserved in session history.]"
+    assert compat.LEAN_STUB_RE.fullmatch(base + _POINTER)
+    assert compat.LEAN_STUB_RE.fullmatch(base + _MARKER + _POINTER)
+    assert compat.ARCHIVE_POINTER_RE.search(base + _POINTER)[1] == _POINTER.removeprefix(" — full result: ")
+    assert not compat.LEAN_STUB_RE.fullmatch(base + _POINTER + _MARKER)
+    assert not compat.LEAN_STUB_RE.fullmatch(base + " — full result: /tmp/elsewhere.txt")
+    assert not compat.LEAN_STUB_RE.fullmatch(base + _POINTER + " trailing words")
+
+
+@pytest.mark.real_hermes
+@pytest.mark.parametrize("marker", ["", _MARKER])
+def test_lean_stub_re_matches_hermes_pointer_stubs(compat, cc, marker):
+    """Hermes' own pointer writer: its stub still matches, and both sides read the same pointer."""
+    storage = importlib.import_module("tools.tool_result_storage")
+    if not hasattr(storage, "_with_pointer"):
+        pytest.skip("this Hermes adds no archive pointer")
+    stub_fn = getattr(cc, "_lean_recovery_stub", None) or importlib.import_module("agent.context_compressor_tail")._lean_recovery_stub
+    path = _POINTER.removeprefix(" — full result: ")
+    stub = storage._with_pointer(stub_fn("terminal", 7_114, "20260101_120000_abcd") + marker, path)
+    assert compat.LEAN_STUB_RE.fullmatch(stub), stub
+    assert compat.ARCHIVE_POINTER_RE.search(stub)[1] == path and storage.has_archive_pointer(stub)
+
+
 @pytest.mark.parametrize("content", [
     "plain output",
     "[terminal] ran `ls` -> exit 0, 3 lines output (5,000 chars)",

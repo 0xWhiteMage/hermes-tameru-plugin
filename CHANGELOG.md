@@ -10,6 +10,11 @@ All notable changes to this project are documented here. The format follows
   `activity.digest(non-str)`, `tool_calls_by_id`/`build_index` with a non-dict message row,
   `build_index(call_id_to_tool=non-dict)` and `build_query(cache=non-dict)` used to crash on
   `.encode`/`.get` — they now reject the argument at the entry, naming the expected type.
+- **Lean-tail stubs work again on Hermes that archives demoted originals.** Newer Hermes appends
+  ` — full result: <path>` (a file under `cache/pruned/`) to each lean-tail stub, so `LEAN_STUB_RE`
+  stopped matching and the tail hook left every stub without a `ref`. The pattern now accepts the
+  pointer, and the header keeps it, so the file route back to the original stays and Hermes still
+  reads the row as archived.
 
 ## [0.1.0] - 2026-11-24
 

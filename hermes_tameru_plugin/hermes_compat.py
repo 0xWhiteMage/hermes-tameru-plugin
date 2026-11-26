@@ -152,13 +152,21 @@ def redact_compaction_text(text: str) -> str:
     return _local_redact(text)
 
 
+# Hermes' archive pointer (``tools.tool_result_storage``: ``ARCHIVE_POINTER_SEP``, ``_ARCHIVE_POINTER_RE``).
+# Newer Hermes saves each demoted original under ``cache/pruned/`` and appends `` — full result: <path>``
+# to the stub; group 1 is the path.
+_ARCHIVE_PATH = r"\S*cache/pruned/[A-Za-z0-9_.-]+"
+ARCHIVE_POINTER_RE = re.compile(rf" — full result: ({_ARCHIVE_PATH})")
+
 # What ``_lean_recovery_stub`` renders: ``[<tool> output demoted at compaction — N chars preserved
 # in session history.[ Recover with session_search(query=..., session_id='<id>')]]``.
-# optionally followed by Hermes' ``[SKILL_PRUNED: ...]`` reload marker (current Hermes main).
+# optionally followed by Hermes' ``[SKILL_PRUNED: ...]`` reload marker (current Hermes main),
+# then by the archive pointer above (Hermes after 3b42157).
 LEAN_STUB_RE = re.compile(
     r"^\[[^\n]*? output demoted at compaction — \d[\d,]* chars preserved in session history\."
     r"(?: Recover with session_search\(query=\.\.\., session_id='[^\n]*?'\))?\]"
-    r"(?: \[SKILL_PRUNED:[^\n\]]*\])?$"
+    r"(?: \[SKILL_PRUNED:[^\n\]]*\])?"
+    rf"(?: — full result: {_ARCHIVE_PATH})?$"
 )
 
 _PRUNE_MIN_CHARS = 200
