@@ -425,6 +425,7 @@ def warm_prune(engine, parent, messages, current_tokens, *args, **kwargs):
             return messages, 0
         count = 0
         if final_scope is not None:
+            engine._retarget_activity_changes(final_scope, res[0])
             with engine._activity.lifecycle_lock:
                 if engine._publish_pass_state(final_scope):
                     held.apply()
@@ -508,6 +509,7 @@ def replace_compaction(engine, prune_parent, messages, current_tokens, *args, **
             return None
         count = 0
         if final_scope is not None:
+            engine._retarget_activity_changes(final_scope, res[0])
             with engine._activity.lifecycle_lock:
                 if engine._publish_pass_state(final_scope):
                     held.apply()
