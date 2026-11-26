@@ -147,3 +147,31 @@ def test_escalation_commits_when_header_only_rows_pass_the_gate():
     assert pruned is not messages and count >= 3
     assert engine._telemetry.snapshot()["events"]["escalation"]["count"] == 1
     assert tokens(messages) - tokens(pruned) >= engine.proactive_prune_min_reclaim_tokens
+
+
+def test_cold_cache_prune_bypasses_the_warm_regrowth_gate(monkeypatch):
+    """Hermes main's cold-cache prune is cache-expiry recovery: it must reach the host even when
+    current_tokens is below the plugin's warm proactive-prune trigger."""
+    import agent.context_compressor as context_compressor
+
+    engine = make_engine(proactive_prune_tokens=10**9)
+    messages = _messages()
+    seen = {}
+
+    def cold_parent(self, messages, current_tokens=None, *args, **kwargs):
+        from hermes_tameru_plugin.engine import _SCOPE
+
+        seen["messages"] = messages
+        seen["current_tokens"] = current_tokens
+        seen["cold_cache"] = kwargs.get("cold_cache")
+        seen["scope_active"] = _SCOPE.get() is not None
+        seen["token_tail"] = self._token_tail_scope() is not None
+        return list(messages), 1
+
+    monkeypatch.setattr(context_compressor.ContextCompressor, "prune_tool_results_only", cold_parent)
+    out, count = engine.prune_tool_results_only(messages, 1, cold_cache=True)
+    assert (out, count) == (list(messages), 1)
+    assert seen == {
+        "messages": messages, "current_tokens": 1, "cold_cache": True,
+        "scope_active": True, "token_tail": False,
+    }

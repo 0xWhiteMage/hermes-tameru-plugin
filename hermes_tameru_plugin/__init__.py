@@ -109,7 +109,9 @@ def register(ctx: Any) -> None:
             register_hook('post_compaction', engine._activity_registry.observe_compaction)
             register_hook('pre_llm_call', engine._activity_registry.pre_llm_call)
             register_middleware = getattr(ctx, 'register_middleware', None)
-            if settings.lazy_tool and settings.expand_tool and callable(register_middleware):
+            if settings.expand_tool and callable(register_middleware):
+                # Registration matches the manifest's declared middleware in the default configuration;
+                # the middleware itself no-ops until lazy_tool is enabled and a shortened row exists.
                 register_middleware('llm_request', engine._activity_registry.llm_request_middleware)
     except Exception as exc:
         logger.warning('tameru: could not register request observer: %r', exc)

@@ -355,7 +355,7 @@ class SessionRegistry:
         return matches[0] if len(matches) == 1 else None
 
     def llm_request_middleware(self, *, request=None, session_id='', api_mode='', **_ignored):
-        """Hermes ``llm_request`` middleware (registered only with ``lazy_tool: on``): take the recovery tool out of the
+        """Hermes ``llm_request`` middleware: while ``lazy_tool`` is on, take the recovery tool out of the
         outgoing request until this chat has a shortened result. Returns None to send the request unchanged."""
         from .lazy_tool import SUPPORTED_API_MODES, _name as _tool_name, reveal_needed, strip_tool
         engine = None

@@ -264,6 +264,7 @@ class _Pass:
     degrade: bool = False                         # escalation re-run: header-only rungs only
     pressure: bool = False                        # inside Hermes' pass 4
     full: bool = False                            # inside compress(): a full compaction, not the proactive prune
+    cold: bool = False                            # Hermes' cold-cache prune: host-owned gate and count tail
     renders: int = 0                              # rows rewritten into a Tameru row
     parent_lines: int = 0                         # rows shortened by Hermes' own one-liner (no original kept)
     messages: list[dict] | None = None            # the list Hermes was handed (indices match ``result``)
@@ -1149,9 +1150,21 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         """
         parent = super().prune_tool_results_only
         self._observe_activity(messages)
+        cold_cache = bool(kwargs.get("cold_cache"))
+        if cold_cache:
+            # A cold-cache prune is Hermes' cache-expiry path, not the plugin's warm regrowth gate:
+            # it has no prompt-cache prefix left to protect and must not be suppressed by
+            # proactive_prune_tokens or rewritten by the adaptive/plan warm-prune policies. It still
+            # needs the normal render scope below: shortened rows keep recoverable refs and appear in
+            # the activity panel. Older pinned Hermes versions do not accept the keyword.
+            params = inspect.signature(parent).parameters
+            if "cold_cache" not in params and not any(
+                p.kind is inspect.Parameter.VAR_KEYWORD for p in params.values()
+            ):
+                kwargs = {k: v for k, v in kwargs.items() if k != "cold_cache"}
         if not (self._settings.enabled and self._seams.demote):
             return parent(messages, current_tokens, *args, **kwargs)
-        if self._settings.policy_mode == "plan":
+        if not cold_cache and self._settings.policy_mode == "plan":
             if not self._settings.plan_native_warm_prunes:
                 # HP5: the per-request warm prune spends a cache break the plan policy does not
                 # authorize — decline so Hermes' flow reaches should_compress / compaction.
@@ -1163,18 +1176,19 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             # The forecast exception: at Hermes' proactive-prune checkpoint a warm-step ``plan()``
             # decides whether this call commits; a declined plan never reaches the native pass.
             return plan_pass.warm_prune(self, parent, messages, current_tokens, *args, **kwargs)
-        if self._policy.controls.mode not in ("legacy", "plan"):
+        if not cold_cache and self._policy.controls.mode not in ("legacy", "plan"):
             return self._adaptive_prune(messages, current_tokens, *args, **kwargs)
-        scope = self._new_scope(messages)
+        scope = self._new_scope(messages, cold=cold_cache)
         token = _SCOPE.set(scope)
         started = time.perf_counter()
         try:
-            initial = self._regrowth_trigger(self._raw_native("proactive_prune_tokens"))
-            if initial <= 0 or (current_tokens is not None and current_tokens < initial):
-                return messages, 0
-            scope.native_options["proactive_prune_tokens"] = initial
-            scope.native_options["proactive_prune_min_reclaim_tokens"] = self._reprune_min_reclaim(
-                messages, self._raw_native("proactive_prune_min_reclaim_tokens"))
+            if not cold_cache:
+                initial = self._regrowth_trigger(self._raw_native("proactive_prune_tokens"))
+                if initial <= 0 or (current_tokens is not None and current_tokens < initial):
+                    return messages, 0
+                scope.native_options["proactive_prune_tokens"] = initial
+                scope.native_options["proactive_prune_min_reclaim_tokens"] = self._reprune_min_reclaim(
+                    messages, self._raw_native("proactive_prune_min_reclaim_tokens"))
             # Counters of a pass Hermes declines to commit (it returns the input object) are dropped:
             # nothing was rewritten, so no row was rendered and no character saved.
             with self._telemetry.hold() as held:
@@ -1195,7 +1209,8 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
                     else:
                         count = 0
                 self._activity_registry.notify(self, count)
-            self._arm_regrowth(res[0])
+            if not cold_cache:
+                self._arm_regrowth(res[0])
             return res
         finally:
             self._close_pass(scope)
@@ -1354,7 +1369,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         """The scope of a proactive prune whose tail is token-sized (``prune_tail``), else None."""
         scope = _SCOPE.get()
         if (
-            scope is None or scope.full or not self._token_tail
+            scope is None or scope.full or scope.cold or not self._token_tail
             or not (self._settings.enabled and self._seams.demote and self._settings.prune_tail == "tokens")
             or (scope.settings or self._settings).policy_mode == "plan"
         ):
@@ -1409,7 +1424,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             if not self._pass_is_current(scope):
                 return messages, 0
             gain = message_budget_tokens(messages) - message_budget_tokens(candidate_msgs)
-            choose_first = (not scope.renders or scope.degrade or n == 0
+            choose_first = (scope.cold or not scope.renders or scope.degrade or n == 0
                             or gain >= self.proactive_prune_min_reclaim_tokens)
             held.keep = choose_first
         if choose_first:

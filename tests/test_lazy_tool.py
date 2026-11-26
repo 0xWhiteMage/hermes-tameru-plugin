@@ -164,10 +164,10 @@ def test_the_middleware_and_no_standing_note_when_lazy_tool_is_on():
     assert ctx.middleware == ["llm_request"] and ctx.sections == {}
 
 
-def test_no_middleware_and_the_standing_note_when_lazy_tool_is_off():
+def test_the_inert_middleware_and_standing_note_when_lazy_tool_is_off():
     ctx = Ctx()
     register(ctx)
-    assert ctx.middleware == [] and "tameru.recovery" in ctx.sections
+    assert ctx.middleware == ["llm_request"] and "tameru.recovery" in ctx.sections
 
 
 def test_a_host_without_middleware_still_registers_everything_else():
