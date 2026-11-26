@@ -74,7 +74,9 @@ def test_demoting_an_archived_render_preserves_hermes_pointer():
     engine = make_engine()
     pointer = " — full result: /tmp/hermes home/cache/pruned/s1_row.json"
     stats = RenderStats(1, 4, 20, 80, (), "extract")
-    content = build_header("[terminal] ran `pytest`", stats, "0a0874a66c6d92a2") + "\nERROR kept" + pointer
+    quoted = " — full result: /tmp/other home/cache/pruned/quoted.json"
+    content = (build_header("[terminal] ran `pytest`", stats, "0a0874a66c6d92a2")
+               + "\nERROR quoted copy" + quoted + "\nERROR kept" + pointer)
     rows = [{"role": "tool", "tool_call_id": "c1", "content": content}]
     assert engine._demote_rendered(rows, 0, content, "v1", "terminal", {"command": "pytest"})
     assert rows[0]["content"].endswith(pointer)

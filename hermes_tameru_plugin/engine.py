@@ -370,6 +370,9 @@ def _spill_note(content: str) -> str:
     return f"spilled to {found.group(1).strip()}" if found else ""
 
 
+_ARCHIVE_POINTER_LINE_RE = re.compile(r" — full result: [^\n]*cache/pruned/[A-Za-z0-9_.-]+")
+
+
 def _archive_note(stub: str) -> str:
     """Hermes' ``— full result: <path>`` pointer of a lean stub, kept as written: the file holds the original,
     and Hermes (``has_archive_pointer``) still reads the header as an archived row."""
@@ -2004,9 +2007,10 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             return False   # already header-only
         if new is None or new == content:
             return False
-        archive = ARCHIVE_POINTER_RE.search(content)
-        if archive is not None and archive.group(0) not in new:
-            new += archive.group(0)
+        archive_at = content.rfind(" — full result: ")
+        archive = content[archive_at:].split("\n", 1)[0] if archive_at >= 0 else ""
+        if _ARCHIVE_POINTER_LINE_RE.fullmatch(archive) and archive not in new:
+            new += archive
         row = {**msg, "content": new}
         drop_stale_api_content(row)
         result[idx] = row
