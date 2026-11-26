@@ -264,6 +264,7 @@ class _Pass:
     degrade: bool = False                         # escalation re-run: header-only rungs only
     pressure: bool = False                        # inside Hermes' pass 4
     full: bool = False                            # inside compress(): a full compaction, not the proactive prune
+    cold: bool = False                            # Hermes' cold-cache prune: host-owned gate and count tail
     renders: int = 0                              # rows rewritten into a Tameru row
     parent_lines: int = 0                         # rows shortened by Hermes' own one-liner (no original kept)
     messages: list[dict] | None = None            # the list Hermes was handed (indices match ``result``)
@@ -1177,7 +1178,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             return plan_pass.warm_prune(self, parent, messages, current_tokens, *args, **kwargs)
         if not cold_cache and self._policy.controls.mode not in ("legacy", "plan"):
             return self._adaptive_prune(messages, current_tokens, *args, **kwargs)
-        scope = self._new_scope(messages)
+        scope = self._new_scope(messages, cold=cold_cache)
         token = _SCOPE.set(scope)
         started = time.perf_counter()
         try:
@@ -1368,7 +1369,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
         """The scope of a proactive prune whose tail is token-sized (``prune_tail``), else None."""
         scope = _SCOPE.get()
         if (
-            scope is None or scope.full or not self._token_tail
+            scope is None or scope.full or scope.cold or not self._token_tail
             or not (self._settings.enabled and self._seams.demote and self._settings.prune_tail == "tokens")
             or (scope.settings or self._settings).policy_mode == "plan"
         ):
@@ -1423,7 +1424,7 @@ class TameruContextEngine(AdaptiveMixin, EditsMixin, UsageMixin, _base()):  # ty
             if not self._pass_is_current(scope):
                 return messages, 0
             gain = message_budget_tokens(messages) - message_budget_tokens(candidate_msgs)
-            choose_first = (not scope.renders or scope.degrade or n == 0
+            choose_first = (scope.cold or not scope.renders or scope.degrade or n == 0
                             or gain >= self.proactive_prune_min_reclaim_tokens)
             held.keep = choose_first
         if choose_first:

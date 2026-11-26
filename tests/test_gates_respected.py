@@ -165,9 +165,13 @@ def test_cold_cache_prune_bypasses_the_warm_regrowth_gate(monkeypatch):
         seen["current_tokens"] = current_tokens
         seen["cold_cache"] = kwargs.get("cold_cache")
         seen["scope_active"] = _SCOPE.get() is not None
+        seen["token_tail"] = self._token_tail_scope() is not None
         return list(messages), 1
 
     monkeypatch.setattr(context_compressor.ContextCompressor, "prune_tool_results_only", cold_parent)
     out, count = engine.prune_tool_results_only(messages, 1, cold_cache=True)
     assert (out, count) == (list(messages), 1)
-    assert seen == {"messages": messages, "current_tokens": 1, "cold_cache": True, "scope_active": True}
+    assert seen == {
+        "messages": messages, "current_tokens": 1, "cold_cache": True,
+        "scope_active": True, "token_tail": False,
+    }
