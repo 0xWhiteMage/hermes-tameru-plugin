@@ -95,6 +95,8 @@ def build_query(
     ``cache`` is a dict the caller keeps for one pass of one message list and hands to every call
     of it; without it every call computes everything.
     """
+    if not isinstance(max_chars, int) or isinstance(max_chars, bool) or max_chars < 0:
+        raise TypeError(f"max_chars must be a positive int, got {max_chars!r}")
     if cache is not None and not isinstance(cache, dict):
         raise TypeError(f"cache must be a dict, got {type(cache).__name__}")
     if cache is None or not 0 <= idx < len(messages):

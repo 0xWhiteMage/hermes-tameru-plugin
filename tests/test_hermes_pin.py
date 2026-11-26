@@ -77,3 +77,13 @@ def test_payload_seam_rejects_wrong_types():
     with pytest.raises(TypeError, match="max_chars must be int"):
         meta_line({}, max_chars=True)
     assert meta_line({"exit_code": 1}) == '{"exit_code":1}'
+
+
+def test_build_query_max_chars_rejects_non_int():
+    import pytest
+    from hermes_tameru_plugin.query import build_query
+    m = [{"role": "user", "content": "x"}]
+    for bad in (None, "x", 1.5, True, -1):
+        with pytest.raises(TypeError, match="max_chars"):
+            build_query(m, 0, max_chars=bad)
+    assert build_query(m, 0, max_chars=0) == [] or build_query(m, 0)
