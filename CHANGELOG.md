@@ -5,7 +5,13 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Changed
+- **The vendored engine tracks the current 1.10.0-line source at `6ea331c`.** Since the `v0.1.0` tag (`d37fd43`, the engine release commit) the copy has picked up the post-release pin/ANSI alignment fixes, huge-input sampling hardening and dense-log performance work. The plugin version is unchanged because this line has not been released; `/tameru stats` continues to report engine `1.10.0` plus the vendored commit.
+
 ### Fixed
+- **Current Hermes archive and prune seams are tracked.** Cold prune rows stay recoverable, archive links survive demotion (including spaced home paths and trailing archive pointers), plan-mode prune activity rows are retargeted, and Hermes-owned cold-prune gates stay host-owned.
+- **Large outputs fail safely.** Over-budget tool output is not decoded into memory a second time, pinned huge inputs honour the engine's fail-open floor, and fixed-budget extraction can retry after a savings-driven fail-open.
+- **Plan mode does not act inside the wrong window.** The prune trigger is zeroed before the window gate so a plan pass cannot fire outside the moment Hermes asked for.
 - **Malformed seam inputs now raise `TypeError` instead of crashing with `AttributeError`.**
   `activity.digest(non-str)`, `tool_calls_by_id`/`build_index` with a non-dict message row,
   `build_index(call_id_to_tool=non-dict)` and `build_query(cache=non-dict)` used to crash on

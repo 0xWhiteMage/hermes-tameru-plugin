@@ -99,7 +99,7 @@ set this plugin's `enabled: false`.
 Settings live under `plugins.entries.tameru.settings` in `config.yaml`.
 The original store defaults to 32 million characters per agent; gateways serving
 many sessions can lower `store_max_chars`. See the
-[full configuration reference](https://github.com/0xWhiteMage/hermes-tameru-plugin#configuration).
+[full settings reference](https://github.com/0xWhiteMage/hermes-tameru-plugin#settings).
 
 - Tameru enables window-scaled proactive pruning only when the user has not set
   `compression.proactive_prune_tokens`; explicit host settings retain priority.
@@ -113,9 +113,9 @@ many sessions can lower `store_max_chars`. See the
 - Use the default `plugins.isolation: in_process`. Under `host` isolation,
   archive-backed recovery after restart is limited.
 
-## What was measured (version 1.9.1)
+## Historical measurements (1.9.1; not rerun for 0.1.0)
 
-The numbers were recorded on 1.9.0; 1.9.1 changes where per-chat records are stored and the panel's tooltip, not what is pruned, and the replay baselines are unchanged.
+The numbers were recorded on engine 1.9.0. Plugin 1.9.1 changed where per-chat records are stored and the panel's tooltip, not what is pruned, but the 1.10.0 engine and the independent 0.1.0 plugin line have **not** been rerun through this replay. Treat the figures as historical evidence about the old engine, not as a current cost claim.
 
 A replay of scripted agent sessions against real Hermes v0.23.1 (11 session shapes, six varied sessions per cell, Hermes' measured tool block, a deliberately
 lossy fake summarizer, prefix-cache pricing; a fact an arm dropped is priced as a re-run of the tool) gives these costs against Hermes as shipped:

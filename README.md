@@ -18,7 +18,7 @@ Long Hermes sessions fill up with bulky tool output, and every summary risks los
 - **Shorten the bulk, keep the evidence** — adaptive compaction trims old tool output as context fills, keeps every distinct error, and the original is one call away
 - **Stay in control** — **Keep** or **Restore** any output in full, read what was removed in the **Left Out** viewer, and `enabled: false` gives you stock Hermes back
 
-![Hermes Desktop with the Tameru panel: sixteen large command outputs run one after another, the panel fills, shortens ten outputs and frees about 65K tokens](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/11-shorten.gif)
+![Hermes Desktop with the Tameru panel: sixteen large command outputs run one after another, the panel fills, shortens ten outputs and frees about 65K tokens](docs/assets/features/shorten.gif)
 
 *A real run in Hermes Desktop: sixteen commands of ~25K characters each; ten outputs shortened, ~65K tokens freed, answers correct.*
 
@@ -26,7 +26,7 @@ Long Hermes sessions fill up with bulky tool output, and every summary risks los
 
 ## Install
 
-Requires **Hermes 0.23.x** (tested on 0.23.1) and Python 3.10+.
+Requires **Hermes 0.23.x** (tested on 0.23.1) and Python 3.11+.
 
 From the Hermes plugin catalogue:
 
@@ -73,9 +73,7 @@ The engine runs locally — no LLM call, no GPU. It fails open: if it is slow, c
 
 **Why the Hermes plugin restarted at 0.1.0.** The Hermes integration now has its own release numbering, independent of the Tameru Engine. `1.11.0` was the last release on the previous numbering scheme. `0.1.0` starts the plugin’s independent version line. The engine is still bundled and retains its own version, which you can see alongside the plugin version in `/tameru stats`. See the [changelog](CHANGELOG.md) for release history.
 
-**New in 1.11.0:** `policy_mode: plan` (opt-in) lets the engine plan each Hermes rewrite at a cache-broken moment — replay-only dev numbers show cost-neutral vs stock with more facts surviving. Engine calls are now hard-bounded by a wall-clock budget, so a hung engine can never block a request. See the [changelog](CHANGELOG.md) for the full gate table.
-
-**New in 1.10.0:** the shared Tameru bar (Strength menu in place of the lean-mode dropdown, pause button, counted list/pin icons), engine 1.10.0 vendored, per-chat records in Hermes' public plugin state.
+**What 0.1.0 carries forward.** From the final engine-aligned release: `policy_mode: plan` (opt-in, replay-only evidence), hard wall-clock bounds around engine calls, the shared Tameru bar, engine 1.10.0 and per-chat records in Hermes' public plugin state. The `v0.1.0` tag vendors the engine release commit `d37fd43`; `main` currently vendors later 1.10.0-line fixes at `6ea331c` (see [Unreleased](CHANGELOG.md#unreleased)).
 
 ## How it works
 
@@ -114,21 +112,21 @@ Measured behaviour and the full knob list: [CHANGELOG.md](CHANGELOG.md) · [docs
 
 **Pin.** Type a rule or use the panel's pin list — it survives every summary, verbatim.
 
-![Pins in Hermes Desktop](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/07-pinned-instructions.gif)
+![Pins in Hermes Desktop](docs/assets/features/pinned-instructions.gif)
 
 **Restore.** The undo arrow puts the full original in front of the model on your next message.
 
-![Restore in Hermes Desktop](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/05-restore.gif)
+![Restore in Hermes Desktop](docs/assets/features/restore.gif)
 
 **Keep.** The lock holds the full output until you release it.
 
-![Keep in Hermes Desktop](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/06-keep-and-unkeep.gif)
+![Keep in Hermes Desktop](docs/assets/features/keep-and-unkeep.gif)
 
 ## Documentation
 
 | I want to… | Go to |
 |---|---|
-| Every setting and its default | [docs/SETTINGS.md](docs/SETTINGS.md) |
+| Every setting and its default | [the settings table](#settings) |
 | Version history + replay numbers | [CHANGELOG.md](CHANGELOG.md) |
 | What the shared plugin bar looks like | [engine PLUGIN-UI spec](https://github.com/0xWhiteMage/tameru-compaction-system/blob/v1.10.0/docs/PLUGIN-UI.md) |
 | The engine itself | [tameru-compaction-system](https://github.com/0xWhiteMage/tameru-compaction-system) |
