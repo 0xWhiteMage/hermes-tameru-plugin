@@ -18,7 +18,7 @@ Long Hermes sessions fill up with bulky tool output, and every summary risks los
 - **Shorten the bulk, keep the evidence** — adaptive compaction trims old tool output as context fills, keeps every distinct error, and the original is one call away
 - **Stay in control** — **Keep** or **Restore** any output in full, read what was removed in the **Left Out** viewer, and `enabled: false` gives you stock Hermes back
 
-![Hermes Desktop with the Tameru panel: sixteen large command outputs run one after another, the panel fills, shortens ten outputs and frees about 65K tokens](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/11-shorten.gif)
+![Hermes Desktop with the Tameru panel: sixteen large command outputs run one after another, the panel fills, shortens ten outputs and frees about 65K tokens](docs/assets/features/shorten.gif)
 
 *A real run in Hermes Desktop: sixteen commands of ~25K characters each; ten outputs shortened, ~65K tokens freed, answers correct.*
 
@@ -112,15 +112,15 @@ Measured behaviour and the full knob list: [CHANGELOG.md](CHANGELOG.md) · [docs
 
 **Pin.** Type a rule or use the panel's pin list — it survives every summary, verbatim.
 
-![Pins in Hermes Desktop](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/07-pinned-instructions.gif)
+![Pins in Hermes Desktop](docs/assets/features/pinned-instructions.gif)
 
 **Restore.** The undo arrow puts the full original in front of the model on your next message.
 
-![Restore in Hermes Desktop](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/05-restore.gif)
+![Restore in Hermes Desktop](docs/assets/features/restore.gif)
 
 **Keep.** The lock holds the full output until you release it.
 
-![Keep in Hermes Desktop](https://raw.githubusercontent.com/0xWhiteMage/tameru-compaction-system/v1.10.0/assets/features/06-keep-and-unkeep.gif)
+![Keep in Hermes Desktop](docs/assets/features/keep-and-unkeep.gif)
 
 ## Documentation
 
