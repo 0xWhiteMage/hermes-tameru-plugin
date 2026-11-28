@@ -39,7 +39,7 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     r"(\s*[:=]\s*)([\"']?)[^\s\"']{6,}\3"
 )
 _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
-_AUTHORIZATION = re.compile(r"(?i)\b(authorization\s*:\s*)(?:bearer\s+)?\S+")
+_AUTHORIZATION = re.compile(r"(?i)\b(authorization\s*:\s*)[^\r\n]+")
 
 
 @dataclass(frozen=True)

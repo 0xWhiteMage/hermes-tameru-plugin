@@ -35,7 +35,7 @@ def make_db(path: Path, session_id: str = "old-session") -> Path:
         (session_id, "Checkout rescue", "test-model", 100.0, None, None, 5, 600_000, 20_000, "/repo/checkout"),
     )
     long_user = "Fix the checkout regression without losing the stock reservation behavior.\n" + "detail\n" * 500
-    secret = "API_KEY=sk-testabcdef1234567890"
+    secret = "API_KEY=sk-testabcdef1234567890\nAuthorization: Basic dXNlcjpwYXNzd29yZA=="
     rows = [
         (session_id, "user", long_user + secret, None, None, None, 101.0, 0, 1, 0),
         (session_id, "assistant", "thinking " + "x" * 4_000, None, json.dumps([{
@@ -69,7 +69,8 @@ def test_export_writes_a_layered_read_only_handoff(tmp_path):
     assert "detail\n" * 100 in digest          # user messages are not truncated
     assert "thinking " + "x" * 3_000 not in digest
     assert "[truncated" in digest              # assistant/tool rows are bounded
-    assert "API_KEY=***" in handoff and "sk-testabcdef1234567890" not in handoff + digest
+    assert "API_KEY=***" in handoff and "Authorization: ***" in handoff
+    assert "sk-testabcdef1234567890" not in handoff + digest and "dXNlcjpwYXNzd29yZA==" not in handoff + digest
     assert "## Compaction Summaries" in handoff and "reference-only" in handoff
     assert "## Artifact Trail" in handoff and "pytest -q" in handoff
     assert "no tool result" not in handoff
