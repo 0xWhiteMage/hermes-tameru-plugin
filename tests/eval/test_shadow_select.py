@@ -70,3 +70,23 @@ def test_a_shadow_posture_completes_one_real_end_to_end_replay():
 
     row = protocol3.measure("adaptive_save", "oncall", 64_000, 0, structural=True)
     assert row["requests"] > 0 and row["failed_turns"] == 0
+
+
+def test_none_error_evidence_is_rejected_not_a_type_error():
+    rows = [row(errors_kept=None), row("adaptive_save", cost=50.0, errors_kept=None)]
+    cell = shadow_select.select(rows)["cells"][0]
+    assert cell["action"] == "hold_baseline"
+    assert "unavailable error evidence" in cell["candidates"]["adaptive_save"]["rejected"][0]
+
+
+def test_the_cheapest_qualifying_posture_wins_not_the_first_improvement():
+    rows = [row(), row("adaptive_save", cost=90.0), row("adaptive_detail", cost=89.5)]
+    cell = shadow_select.select(rows)["cells"][0]
+    assert cell["recommended_arm"] == "adaptive_detail"
+
+
+def test_missing_baseline_seeds_reject_an_incomplete_candidate():
+    rows = [row(seed=0), row(seed=1), row("adaptive_save", seed=0, cost=50.0)]
+    cell = shadow_select.select(rows)["cells"][0]
+    assert cell["action"] == "hold_baseline"
+    assert "missing baseline seed 1" in cell["candidates"]["adaptive_save"]["rejected"]

@@ -49,7 +49,10 @@ def _held(row: dict[str, Any]) -> float:
 def _paired_safety(base_rows: list[dict[str, Any]], arm_rows: list[dict[str, Any]]) -> tuple[bool, list[str]]:
     """Conservative cell gates, paired by seed. No statistics: a shadow recommendation must not regress evidence."""
     base_by_seed = {row["seed"]: row for row in base_rows}
-    reasons: list[str] = []
+    arm_seeds = {row["seed"] for row in arm_rows}
+    missing = sorted(set(base_by_seed) - arm_seeds)
+    reasons: list[str] = [f"missing baseline seed {seed}" for seed in missing]
+    base_rows = [row for row in base_rows if row["seed"] in arm_seeds]
     for row in arm_rows:
         base = base_by_seed.get(row["seed"])
         if base is None:
@@ -60,7 +63,9 @@ def _paired_safety(base_rows: list[dict[str, Any]], arm_rows: list[dict[str, Any
         for field in ("lost_unrecoverable", "failed_turns", "lost"):
             if float(row.get(field, 0)) > float(base.get(field, 0)):
                 reasons.append(f"seed {row['seed']} raises {field}")
-        if float(row.get("errors_kept", 0)) < float(base.get("errors_kept", 0)):
+        if row.get("errors_kept") is None or base.get("errors_kept") is None:
+            reasons.append(f"seed {row['seed']} has unavailable error evidence")
+        elif float(row.get("errors_kept", 0)) < float(base.get("errors_kept", 0)):
             reasons.append(f"seed {row['seed']} keeps fewer error exemplars")
     if _mean(base_rows, "kept") + _mean(base_rows, "recoverable") - _mean(arm_rows, "kept") - _mean(arm_rows, "recoverable") > FACTS_MEAN_MARGIN:
         reasons.append(f"mean held facts fall by more than {FACTS_MEAN_MARGIN:g}")
@@ -97,11 +102,13 @@ def select(rows: list[dict[str, Any]], *, baseline: str = BASELINE, candidates: 
                 details[arm] = {"runs": 0, "safe": False, "rejected": ["missing rows"]}
                 continue
             safe, rejected = _paired_safety(base_rows, arm_rows)
-            cost = _mean(arm_rows, cost_field)
+            paired_seeds = {row["seed"] for row in arm_rows} & {row["seed"] for row in base_rows}
+            paired_arm_rows = [row for row in arm_rows if row["seed"] in paired_seeds]
+            cost = _mean(paired_arm_rows, cost_field)
             improvement = 1.0 - cost / base_cost if base_cost else 0.0
             details[arm] = {"runs": len(arm_rows), "cost": round(cost, 3), "improvement": round(improvement, 6),
                             "safe": safe, "rejected": rejected}
-            if safe and cost < winner_cost * (1.0 - min_improvement):
+            if safe and cost < base_cost * (1.0 - min_improvement) and cost < winner_cost:
                 winner, winner_cost = arm, cost
         improved = winner != baseline
         out.append({
