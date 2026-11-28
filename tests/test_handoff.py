@@ -12,7 +12,7 @@ from engine_support import pytest_failure_with_passes
 from test_info_commands import _cmd, _live
 
 from hermes_tameru_plugin.activity import SURFACE_REFUSAL
-from hermes_tameru_plugin.handoff import HandoffOptions, choose_tail, export_handoff, pairing_open_ends
+from hermes_tameru_plugin.handoff import HandoffOptions, choose_tail, export_handoff, is_compaction_summary, pairing_open_ends
 
 SCHEMA = """
 CREATE TABLE sessions (
@@ -107,6 +107,12 @@ def test_tail_selection_preserves_the_final_mandate_and_tool_call_boundary():
     oversized += [{"i": i, "role": "assistant", "content": "x" * 100} for i in range(1, 40)]
     tail, start = choose_tail(oversized, HandoffOptions(tail_rows=35, tail_chars=1_000))
     assert sum(len(row["content"]) for row in tail) <= 1_100 and start > 5
+
+
+def test_a_user_mentioning_a_summary_is_not_mislabeled_as_one():
+    assert not is_compaction_summary({"role": "user", "content": "Please compare this Conversation Summary with the diff"})
+    assert is_compaction_summary({"role": "user", "content": "[CONTEXT COMPACTION — REFERENCE ONLY] handoff"})
+    assert is_compaction_summary({"role": "user", "content": "", "compressed_summary": True})
 
 
 def test_pairing_reports_interrupted_tool_work():

@@ -176,8 +176,8 @@ def read_session(db_path: Path, session_id: str) -> tuple[dict[str, Any], list[d
 
 
 def is_compaction_summary(row: dict[str, Any]) -> bool:
-    content = row.get("content") or ""
-    return bool(row.get("compressed_summary")) or any(marker in content[:300] for marker in COMPACTION_MARKERS)
+    content = (row.get("content") or "").lstrip()
+    return bool(row.get("compressed_summary")) or any(content.startswith(marker) for marker in COMPACTION_MARKERS)
 
 
 def _call_id(call: Any) -> str:
