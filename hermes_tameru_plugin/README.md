@@ -50,7 +50,9 @@ recovery. Web, browser and MCP output can never be restored or kept.
 self-tuning back to neutral (it lists what it clears and asks first);
 `/tameru pin TEXT` keeps a line of your own word for word through every summary;
 `/tameru pause|resume` and `/tameru bias save|balanced|detail` are the two
-choices that persist with a chat.
+choices that persist with a chat. `/tameru handoff [SESSION_ID]` exports a
+read-only disaster handoff (`handoff.md`, `digest.txt`, `manifest.json`) from
+the session database without putting the ledger into chat.
 
 ## The tool: `tameru_read_original`
 

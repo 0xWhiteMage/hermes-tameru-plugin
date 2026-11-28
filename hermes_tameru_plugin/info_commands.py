@@ -24,6 +24,7 @@ HELP_LINES = (
     ("/tameru pause | resume", "stop or restart changes to this chat"),
     ("/tameru policy [key=value ...]", "show or set the compaction policy; `policy reset` for the defaults"),
     ("/tameru stats", "numbers for this chat: context freed, outputs shortened, cache use"),
+    ("/tameru handoff [SESSION_ID]", "export a read-only session handoff and digest to local files"),
     ("/tameru reset [confirm]", "put this chat's self-tuning back to neutral (lists what it clears first)"),
     ("/tameru reset stats [confirm]", "delete the daily stats ledger (only exists with stats_ledger: on)"),
 )

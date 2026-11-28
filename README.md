@@ -67,7 +67,8 @@ context:
 | **Desktop panel** | A gauge, a table of every cleanup, and the Left Out viewer showing exactly what was dropped |
 | **Adaptive compaction** | The prune trigger follows the model's window and tunes itself from live signals, within bounds — on by default |
 | **Artifact Trail** | Every summary names files touched, commands and their last exit code, and one line per distinct error |
-| **Commands** | `/tameru help`, `stats`, `reset`, `view N`, `keep N`, `restore N`, `pin`, `purge` |
+| **Session handoff export** | `/tameru handoff [SESSION_ID]` reads `state.db` read-only and writes a compact handoff plus bounded digest for disaster recovery |
+| **Commands** | `/tameru help`, `stats`, `reset`, `view N`, `keep N`, `restore N`, `pin`, `handoff`, `purge` |
 
 The engine runs locally — no LLM call, no GPU. It fails open: if it is slow, crashes or misbehaves, nothing in your chat changes.
 
@@ -81,6 +82,16 @@ The engine runs locally — no LLM call, no GPU. It fails open: if it is slow, c
 2. **The engine extracts** — a query-aware extract against your task, keeping every distinct error; ambiguous or thin savings return the original
 3. **You can always get it back** — Keep, Restore, `tameru_read_original`, and the Left Out viewer; originals live in the session log
 4. **It verifies itself** — `get_status()["tameru"]` reports which Hermes seams were found; a pass with no engine, a bad extract or a wall-clock timeout changes nothing
+
+## Disaster handoff
+
+When a session already grew past the model window or died before compression, `/tameru handoff [SESSION_ID]` exports it without loading the ledger into chat. The source database is opened read-only; the exporter writes a fresh directory containing:
+
+- `handoff.md` — session metadata, open ends, full user mandate history, compaction summaries, artifact trail and a bounded recent tail
+- `digest.txt` — every row in order; user messages and compaction summaries stay whole, other bodies are truncated
+- `manifest.json` — machine-readable counts, file names and tool-call pairing gaps
+
+Credential-shaped material is redacted in both text outputs. The same exporter is available outside chat as `python -m hermes_tameru_plugin.handoff STATE_DB SESSION_ID --out DIR`.
 
 ## Settings
 
