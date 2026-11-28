@@ -39,7 +39,7 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     r"(\s*[:=]\s*)([\"']?)[^\s\"']{6,}\3"
 )
 _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
-_AUTHORIZATION = re.compile(r"(?i)\b(authorization\s*:\s*)(?:[^\s\"']+\s+)?[^\s\"']+")
+_AUTHORIZATION = re.compile(r"(?i)\b(authorization\s*:\s*)(digest\s+.*?(?=[\"'](?=\s|$)|\r?\n|$)|(?:basic|bearer)\s+[^\s\"']+|[^\s\"'\r\n]+)")
 
 
 @dataclass(frozen=True)
@@ -96,10 +96,13 @@ def _json(value: Any) -> Any:
 
 
 def _redact(text: str) -> str:
+    # Mask authorization values before the host redactor sees them: Hermes' assignment redactor is
+    # intentionally broad and may otherwise continue into the next line after a one-token value.
+    redacted = _AUTHORIZATION.sub(lambda match: match.group(1) + "***", text)
     try:
-        redacted = redact_compaction_text(text)
+        redacted = redact_compaction_text(redacted)
     except Exception:
-        redacted = text
+        pass
     redacted = _CREDENTIAL_ASSIGNMENT.sub(lambda match: match.group(1) + match.group(2) + "***", redacted)
     redacted = _BEARER.sub(lambda match: match.group(1) + "***", redacted)
     return _AUTHORIZATION.sub(lambda match: match.group(1) + "***", redacted)

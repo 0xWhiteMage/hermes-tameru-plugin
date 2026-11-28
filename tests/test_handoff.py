@@ -161,6 +161,16 @@ def test_authorization_redaction_preserves_the_rest_of_a_curl_command(tmp_path):
     assert "Authorization: ***' https://api.example.test/v1" in text and "abc123XYZ" not in text
 
 
+def test_digest_proofs_are_redacted_and_the_next_instruction_survives():
+    from hermes_tameru_plugin.handoff import _redact
+
+    digest = "curl -H 'Authorization: Digest username=\"u\", response=\"deadbeef\", nonce=\"n\"' https://api.example.test"
+    redacted = _redact(digest)
+    assert "deadbeef" not in redacted and "https://api.example.test" in redacted
+    plain = _redact("Authorization: token123\nNever delete the backups")
+    assert "token123" not in plain and "Never delete the backups" in plain
+
+
 def test_handoff_command_exports_paths_without_putting_the_ledger_in_chat(tmp_path):
     db = make_db(tmp_path / "state.db")
     engine = _live()
