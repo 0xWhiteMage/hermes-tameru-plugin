@@ -153,6 +153,47 @@ def tameru_autotune_off() -> Any:
     return TameruContextEngine(settings=TameruSettings(autotune=False), quiet_mode=True)
 
 
+def _preference_arm(preference: str, autotune: bool) -> Any:
+    """One adaptive-policy posture candidate; ``autotune=False`` is the fixed row for that preference."""
+    from hermes_tameru_plugin.config import TameruSettings
+    from hermes_tameru_plugin.engine import TameruContextEngine
+
+    return TameruContextEngine(
+        settings=TameruSettings(policy_mode="adaptive", preference=preference, autotune=autotune),
+        quiet_mode=True,
+    )
+
+
+@register("adaptive_balanced")
+def adaptive_balanced() -> Any:
+    return _preference_arm("balanced", True)
+
+
+@register("adaptive_save")
+def adaptive_save() -> Any:
+    return _preference_arm("save_space", True)
+
+
+@register("adaptive_detail")
+def adaptive_detail() -> Any:
+    return _preference_arm("preserve_detail", True)
+
+
+@register("fixed_balanced")
+def fixed_balanced() -> Any:
+    return _preference_arm("balanced", False)
+
+
+@register("fixed_save")
+def fixed_save() -> Any:
+    return _preference_arm("save_space", False)
+
+
+@register("fixed_detail")
+def fixed_detail() -> Any:
+    return _preference_arm("preserve_detail", False)
+
+
 @register("HP1")
 def hp1() -> Any:
     """The plugin under ``policy_mode: plan`` — the engine's ``plan()`` in compact mode at Hermes' own

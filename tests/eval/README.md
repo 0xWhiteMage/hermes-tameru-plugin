@@ -398,6 +398,11 @@ stale on purpose (they pin the engine's output): re-record them and read the dif
   prints the comparison with intervals and needs no Hermes.
 - `stats.py` holds the statistics: paired relative differences, a bootstrap and a cluster bootstrap over shapes (read the cluster interval; the
   naive one treats every cell-seed as independent), and an A/A check that must give exactly zero.
+- `shadow_select.py` evaluates adaptive/fixed posture candidates as shadow branches of the same end-to-end replay and writes a per-cell
+  recommendation report. It never mutates the live policy: a candidate wins only when it is at least 1% cheaper on `effective_real` without
+  losing held facts, error exemplars or completion reliability. `python tests/eval/shadow_select.py run --rows rows.json --report shadow.json`
+  runs the candidate matrix (real Hermes); `select` reuses existing matrix rows and `show` prints the report. `apply_automatically` is always
+  false in this stage.
 - `results/headline-matrix.json` is the 11-shape matrix behind the README's cost table (`test_headline_rows.py` regenerates the table from it and
   fails on drift). `results/dev-matrix.json` is the six-shape development matrix with four arms.
 - Holdouts: five original ones plus the four `blind_*` shapes, written by a separate agent that never saw the product or any result
