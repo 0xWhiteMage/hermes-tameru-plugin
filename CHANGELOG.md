@@ -5,6 +5,9 @@ All notable changes to this project are documented here. The format follows
 
 ## [Unreleased]
 
+### Added
+- **Read-only disaster handoff export.** `/tameru handoff [SESSION_ID]` opens the session database read-only and writes a fresh local export (`handoff.md`, `digest.txt`, `manifest.json`) for sessions that died or grew past the model window. The handoff carries full user messages in posted order, compaction summaries, the artifact trail, tool-call pairing gaps and an adaptively bounded recent tail; the digest covers every row without loading it into chat. Credential-shaped material is redacted. The same exporter is available as `python -m hermes_tameru_plugin.handoff STATE_DB SESSION_ID --out DIR`.
+
 ### Changed
 - **The vendored engine tracks the current 1.10.0-line source at `6ea331c`.** Since the `v0.1.0` tag (`d37fd43`, the engine release commit) the copy has picked up the post-release pin/ANSI alignment fixes, huge-input sampling hardening and dense-log performance work. The plugin version is unchanged because this line has not been released; `/tameru stats` continues to report engine `1.10.0` plus the vendored commit.
 

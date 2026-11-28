@@ -9,6 +9,7 @@ import threading
 import uuid
 import weakref
 from collections import OrderedDict
+from .handoff_commands import handoff_command
 from .info_commands import help_command, reset_command, stats_command
 from .policy_commands import HELP, PolicyError, policy_command, policy_lines
 from .edit_commands import edit_command
@@ -44,7 +45,7 @@ MESSAGING_PLATFORMS = frozenset({
     "imessage", "irc", "twitter", "weixin", "qq", "rocketchat", "zulip", "twilio", "googlechat",
 })
 GATED_VERBS = frozenset({"view", "show", "policy", "bias", "pause", "resume", "keep", "unkeep", "restore", "cancel",
-                         "pin", "unpin", "pins", "reset"})
+                         "pin", "unpin", "pins", "reset", "handoff"})
 SURFACE_REFUSAL = "This command works in the Desktop app, CLI or TUI, not in a shared chat."
 
 
@@ -522,6 +523,7 @@ class SessionRegistry:
                         "keep": _edit("keep"), "unkeep": _edit("unkeep"), "restore": _edit("restore"),
                         "cancel": _edit("cancel"),
                         "pin": _pin("pin"), "unpin": _pin("unpin"), "pins": _pin("pins"),
+                        "handoff": handoff_command,
                         "help": help_command, "stats": stats_command, "reset": reset_command}
             verb = parts[0] if parts and parts[0] in handlers else ""
             if verb in GATED_VERBS and not is_interactive_surface(context.get("platform"), context.get("source")):
@@ -551,7 +553,7 @@ class SessionRegistry:
             return (f"Original output · {trust}\nViewing does not change the agent's context.\n"
                     f"Characters {result['offset'] + 1 if result['total_chars'] else 0}–{result['end_offset']} of {result['total_chars']}\n\n"
                     + text + next_note)
-        if result["kind"] in ("help", "stats", "reset"):
+        if result["kind"] in ("help", "stats", "reset", "handoff"):
             return result["text"]
         if result["kind"] == "ask":
             return (f"{result['text']}\n\nCopy this into your next message so the agent re-reads it. Nothing was sent.")
