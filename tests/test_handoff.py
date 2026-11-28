@@ -113,6 +113,8 @@ def test_a_user_mentioning_a_summary_is_not_mislabeled_as_one():
     assert not is_compaction_summary({"role": "user", "content": "Please compare this Conversation Summary with the diff"})
     assert is_compaction_summary({"role": "user", "content": "[CONTEXT COMPACTION — REFERENCE ONLY] handoff"})
     assert is_compaction_summary({"role": "user", "content": "", "compressed_summary": True})
+    merged = "keep this user text\n[END OF PRIOR CONTEXT — COMPACTION SUMMARY BELOW]\n[CONTEXT COMPACTION — REFERENCE ONLY] host handoff"
+    assert is_compaction_summary({"role": "user", "content": merged})
 
 
 def test_rewound_user_rows_are_not_current_mandates_but_compacted_history_is():
@@ -141,6 +143,22 @@ def test_pairing_reports_interrupted_tool_work():
         {"role": "tool", "tool_call_id": "orphan"},
     ]
     assert pairing_open_ends(rows) == (["c2"], ["orphan"])
+
+
+def test_malformed_command_in_a_fresh_chat_returns_a_command_error():
+    out = SessionRegistry().command("handoff 'unterminated", session_id="new", platform="desktop", source=None)
+    assert "Use /tameru handoff" in out or "No live Tameru context" in out
+
+
+def test_authorization_redaction_preserves_the_rest_of_a_curl_command(tmp_path):
+    db = make_db(tmp_path / "state.db")
+    conn = sqlite3.connect(db)
+    conn.execute("UPDATE messages SET content=? WHERE id=1", ("run curl -H 'Authorization: Basic abc123XYZ' https://api.example.test/v1",))
+    conn.commit()
+    conn.close()
+    result = export_handoff(db, "old-session", tmp_path / "auth-export")
+    text = result.handoff_path.read_text()
+    assert "Authorization: ***' https://api.example.test/v1" in text and "abc123XYZ" not in text
 
 
 def test_handoff_command_exports_paths_without_putting_the_ledger_in_chat(tmp_path):

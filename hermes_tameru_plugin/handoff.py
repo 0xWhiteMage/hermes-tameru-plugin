@@ -16,7 +16,7 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Iterable
 
-from .hermes_compat import redact_compaction_text
+from .hermes_compat import is_compaction_summary as hermes_compaction_summary, redact_compaction_text
 from .ledger import build_ledger
 
 SCHEMA = "tameru-handoff/1"
@@ -39,7 +39,7 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     r"(\s*[:=]\s*)([\"']?)[^\s\"']{6,}\3"
 )
 _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
-_AUTHORIZATION = re.compile(r"(?i)\b(authorization\s*:\s*)[^\r\n]+")
+_AUTHORIZATION = re.compile(r"(?i)\b(authorization\s*:\s*)(?:[^\s\"']+\s+)?[^\s\"']+")
 
 
 @dataclass(frozen=True)
@@ -177,7 +177,7 @@ def read_session(db_path: Path, session_id: str) -> tuple[dict[str, Any], list[d
 
 def is_compaction_summary(row: dict[str, Any]) -> bool:
     content = (row.get("content") or "").lstrip()
-    return bool(row.get("compressed_summary")) or any(content.startswith(marker) for marker in COMPACTION_MARKERS)
+    return bool(row.get("compressed_summary")) or hermes_compaction_summary(content)
 
 
 def _call_id(call: Any) -> str:

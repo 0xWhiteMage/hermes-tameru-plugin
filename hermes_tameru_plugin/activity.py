@@ -492,6 +492,7 @@ class SessionRegistry:
     def command(self, raw_args: str, *, session_id: str = "", session_key: str = "", **context) -> str:
         json_mode = isinstance(raw_args, str) and raw_args.lstrip().startswith("--json")
         sid = session_id or session_key or self._env_session_id()
+        parts: list[str] = []
         try:
             if not isinstance(raw_args, str) or len(raw_args) > 2048:
                 raise ValueError("Invalid command arguments.")
