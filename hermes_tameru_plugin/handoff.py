@@ -39,7 +39,34 @@ _CREDENTIAL_ASSIGNMENT = re.compile(
     r"(\s*[:=]\s*)([\"']?)[^\s\"']{6,}\3"
 )
 _BEARER = re.compile(r"(?i)\b(bearer\s+)[A-Za-z0-9._~+/=-]{8,}")
-_AUTHORIZATION = re.compile(r"(?i)\b(authorization\s*:\s*)(digest\s+.*?(?=[\"'](?=\s|$)|\r?\n|$)|(?:basic|bearer)\s+[^\s\"']+|[^\s\"'\r\n]+)")
+_AUTHORIZATION_START = re.compile(r"(?i)(authorization[\"']?\s*:\s*[\"']?)")
+
+
+def _redact_authorization_headers(text: str) -> str:
+    """Mask one header value without crossing its closing quote, backtick, or line ending."""
+    out: list[str] = []
+    pos = 0
+    for match in _AUTHORIZATION_START.finditer(text):
+        start = match.end()
+        opener = match.group(0)[-1] if match.group(0)[-1] in "\"'`" else ""
+        if not opener and match.start() > 0 and text[match.start() - 1] in "\"'`":
+            opener = text[match.start() - 1]
+        end = start
+        while end < len(text):
+            char = text[end]
+            if char in "\r\n":
+                break
+            escaped = end > 0 and text[end - 1] == "\\"
+            if opener and char == opener and not escaped:
+                break
+            if not opener and (char == "`" or (char in "\"'" and not escaped and
+                               (end + 1 == len(text) or text[end + 1].isspace() or text[end + 1] in ",}])"))):
+                break
+            end += 1
+        out += [text[pos:start], "***"]
+        pos = end
+    out.append(text[pos:])
+    return "".join(out)
 
 
 @dataclass(frozen=True)
@@ -98,14 +125,14 @@ def _json(value: Any) -> Any:
 def _redact(text: str) -> str:
     # Mask authorization values before the host redactor sees them: Hermes' assignment redactor is
     # intentionally broad and may otherwise continue into the next line after a one-token value.
-    redacted = _AUTHORIZATION.sub(lambda match: match.group(1) + "***", text)
+    redacted = _redact_authorization_headers(text)
     try:
         redacted = redact_compaction_text(redacted)
     except Exception:
         pass
     redacted = _CREDENTIAL_ASSIGNMENT.sub(lambda match: match.group(1) + match.group(2) + "***", redacted)
     redacted = _BEARER.sub(lambda match: match.group(1) + "***", redacted)
-    return _AUTHORIZATION.sub(lambda match: match.group(1) + "***", redacted)
+    return redacted
 
 
 def _table_columns(conn: sqlite3.Connection, table: str) -> set[str]:

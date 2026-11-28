@@ -169,6 +169,12 @@ def test_digest_proofs_are_redacted_and_the_next_instruction_survives():
     assert "deadbeef" not in redacted and "https://api.example.test" in redacted
     plain = _redact("Authorization: token123\nNever delete the backups")
     assert "token123" not in plain and "Never delete the backups" in plain
+    custom = _redact("Authorization: Custom opaquecredential123\nNever delete the backups")
+    assert "opaquecredential123" not in custom and "Never delete the backups" in custom
+    inline = _redact('`Authorization: Digest username="u", response="deadbeef"` then Never delete the backups')
+    assert "deadbeef" not in inline and "then Never delete the backups" in inline
+    serialized = _redact('{"headers":{"Authorization":"Digest username=\\"u\\", response=\\"deadbeef\\""},"method":"GET"}')
+    assert "deadbeef" not in serialized and '"method":"GET"' in serialized
 
 
 def test_handoff_command_exports_paths_without_putting_the_ledger_in_chat(tmp_path):
