@@ -12,7 +12,7 @@ from engine_support import pytest_failure_with_passes
 from test_info_commands import _cmd, _live
 
 from hermes_tameru_plugin.activity import SURFACE_REFUSAL
-from hermes_tameru_plugin.handoff import HandoffOptions, choose_tail, export_handoff, is_compaction_summary, pairing_open_ends
+from hermes_tameru_plugin.handoff import HandoffOptions, choose_tail, export_handoff, is_compaction_summary, pairing_open_ends, render_handoff
 
 SCHEMA = """
 CREATE TABLE sessions (
@@ -113,6 +113,18 @@ def test_a_user_mentioning_a_summary_is_not_mislabeled_as_one():
     assert not is_compaction_summary({"role": "user", "content": "Please compare this Conversation Summary with the diff"})
     assert is_compaction_summary({"role": "user", "content": "[CONTEXT COMPACTION — REFERENCE ONLY] handoff"})
     assert is_compaction_summary({"role": "user", "content": "", "compressed_summary": True})
+
+
+def test_rewound_user_rows_are_not_current_mandates_but_compacted_history_is():
+    rows = [
+        {"i": 0, "id": 1, "role": "user", "content": "withdrawn request", "active": False, "compacted": False},
+        {"i": 1, "id": 2, "role": "user", "content": "archived mandate", "active": False, "compacted": True},
+        {"i": 2, "id": 3, "role": "assistant", "content": "done", "active": True, "compacted": False},
+    ]
+    text = render_handoff({"id": "s"}, rows, rows, 0, HandoffOptions(), "digest.txt")
+    mandates = text.split("## User Mandate History", 1)[1].split("## Compaction Summaries", 1)[0]
+    assert "archived mandate" in mandates and "withdrawn request" not in mandates
+    assert "rewound or withdrawn" in text
 
 
 def test_pairing_reports_interrupted_tool_work():

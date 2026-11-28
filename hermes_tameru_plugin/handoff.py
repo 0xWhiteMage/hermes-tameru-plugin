@@ -306,7 +306,12 @@ def _conversation(rows: Iterable[dict[str, Any]]) -> list[dict[str, Any]]:
 def render_handoff(session: dict[str, Any], rows: list[dict[str, Any]], tail: list[dict[str, Any]],
                    tail_start: int, options: HandoffOptions, digest_name: str) -> str:
     unanswered, orphans = pairing_open_ends(rows)
-    users = [row for row in rows if row.get("role") == "user" and not is_compaction_summary(row)]
+    users = [row for row in rows
+             if row.get("role") == "user" and not is_compaction_summary(row)
+             and (row.get("active", True) or row.get("compacted"))]
+    withdrawn_users = [row for row in rows
+                       if row.get("role") == "user" and not is_compaction_summary(row)
+                       and not row.get("active", True) and not row.get("compacted")]
     summaries = [row for row in rows if is_compaction_summary(row)]
     ledger = build_ledger(_conversation(rows), max_chars=4_000)
     if ledger.startswith("## "):
@@ -340,6 +345,8 @@ def render_handoff(session: dict[str, Any], rows: list[dict[str, Any]], tail: li
     if orphans:
         open_ends.append(f"{len(orphans)} tool result(s) have no visible matching call: "
                          + ", ".join(f"`{cid}`" for cid in orphans[-8:]))
+    if withdrawn_users:
+        open_ends.append(f"{len(withdrawn_users)} inactive user row(s) look rewound or withdrawn; they are in the digest but not the mandate history.")
     if rows:
         open_ends.append(f"The final stored row is [{rows[-1]['i']}] role={rows[-1].get('role')} "
                          f"at {_fmt_ts(rows[-1].get('timestamp'))}.")
