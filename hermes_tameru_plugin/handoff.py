@@ -229,7 +229,11 @@ def choose_tail(rows: list[dict[str, Any]], options: HandoffOptions) -> tuple[li
         start -= 1
 
     def size() -> int:
-        return sum(len(row.get("content") or "") for row in rows[start:])
+        # Selection pays for what the orientation file will actually render, not the raw database
+        # row. Otherwise one huge recent tool result pushes smaller neighbouring evidence out even
+        # though that result's bounded excerpt would fit.
+        return sum(min(len(row.get("content") or ""), max(1, int(options.tail_excerpt_chars))) + 80
+                   for row in rows[start:])
 
     # User mandates are always exported verbatim in their own section, so under char pressure the
     # contiguous tail may move past an old user row instead of violating the hard cap.

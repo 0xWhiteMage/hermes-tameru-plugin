@@ -106,7 +106,7 @@ def test_tail_selection_preserves_the_final_mandate_and_tool_call_boundary():
     oversized = [{"i": 0, "role": "user", "content": "old mandate"}]
     oversized += [{"i": i, "role": "assistant", "content": "x" * 100} for i in range(1, 40)]
     tail, start = choose_tail(oversized, HandoffOptions(tail_rows=35, tail_chars=1_000))
-    assert sum(len(row["content"]) for row in tail) <= 1_100 and start > 5
+    assert sum(min(len(row["content"]), 1_500) + 80 for row in tail) <= 1_000 and start > 5
 
 
 def test_a_user_mentioning_a_summary_is_not_mislabeled_as_one():
@@ -125,6 +125,13 @@ def test_rewound_user_rows_are_not_current_mandates_but_compacted_history_is():
     mandates = text.split("## User Mandate History", 1)[1].split("## Compaction Summaries", 1)[0]
     assert "archived mandate" in mandates and "withdrawn request" not in mandates
     assert "rewound or withdrawn" in text
+
+
+def test_tail_budget_counts_rendered_excerpts_not_raw_tool_results():
+    rows = [{"i": i, "role": "tool", "content": "x" * 10_000} for i in range(3)]
+    rows.append({"i": 3, "role": "user", "content": "finish the migration"})
+    tail, start = choose_tail(rows, HandoffOptions(tail_rows=10, tail_chars=6_500, tail_excerpt_chars=1_500))
+    assert start == 0 and len(tail) == 4
 
 
 def test_pairing_reports_interrupted_tool_work():
