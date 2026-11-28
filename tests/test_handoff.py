@@ -11,7 +11,7 @@ import pytest
 from engine_support import pytest_failure_with_passes
 from test_info_commands import _cmd, _live
 
-from hermes_tameru_plugin.activity import SURFACE_REFUSAL
+from hermes_tameru_plugin.activity import SURFACE_REFUSAL, SessionRegistry
 from hermes_tameru_plugin.handoff import HandoffOptions, choose_tail, export_handoff, is_compaction_summary, pairing_open_ends, render_handoff
 
 SCHEMA = """
@@ -153,6 +153,15 @@ def test_handoff_command_exports_paths_without_putting_the_ledger_in_chat(tmp_pa
 
     payload = json.loads(_cmd(engine, f"--json handoff old-session --out {tmp_path / 'json-exports'}"))
     assert payload["ok"] and payload["rows"] == 5 and Path(payload["handoff_path"]).is_file()
+
+
+def test_handoff_with_explicit_database_does_not_require_a_live_chat(tmp_path):
+    db = make_db(tmp_path / "state.db")
+    out = SessionRegistry().command(
+        f"handoff old-session --db {db} --out {tmp_path / 'restart-exports'}",
+        session_id="new-session", platform="desktop", source=None,
+    )
+    assert "Tameru handoff exported" in out
 
 
 def test_handoff_command_is_local_only_and_validates_usage(tmp_path):

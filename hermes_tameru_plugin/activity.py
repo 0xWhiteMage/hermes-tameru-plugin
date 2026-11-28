@@ -503,6 +503,15 @@ class SessionRegistry:
                 env_sid = self._env_session_id()
                 if env_sid and env_sid != sid:
                     sid, engine = env_sid, self.resolve(env_sid)
+            if engine is None and parts and parts[0] == "handoff" and "--db" in parts:
+                if not is_interactive_surface(context.get("platform"), context.get("source")):
+                    self.refused_verbs = getattr(self, "refused_verbs", 0) + 1
+                    raise PolicyError(SURFACE_REFUSAL)
+                result = handoff_command(None, parts[1:], session_id=sid, lifecycle_id="", json_mode=json_mode)
+                result["lifecycle_id"] = ""
+                if json_mode:
+                    return json.dumps(result, sort_keys=True)
+                return result.get("text") if result.get("ok") else "Error: " + result.get("error", "unknown error")
             if engine is None:
                 raise ValueError("No live Tameru context is available for this chat. Start a turn with Tameru enabled.")
             lifecycle_id = engine._activity.lifecycle_id
@@ -540,7 +549,7 @@ class SessionRegistry:
             result = {"ok": False, "error": str(exc), "session_id": sid}
         except (ValueError, TypeError):
             result = {"ok": False, "error": HELP, "session_id": sid}
-            if self.resolve(sid) is None:
+            if self.resolve(sid) is None and not (parts and parts[0] == "handoff"):
                 result["error"] = "No live Tameru context is available for this chat. Start a turn with Tameru enabled."
         if json_mode:
             return json.dumps(result, ensure_ascii=True)
